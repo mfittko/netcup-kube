@@ -11,10 +11,10 @@ system_pkg_install() {
     ca-certificates curl iproute2 iptables kmod util-linux procps gnupg lsb-release sed tar coreutils jq nftables
 }
 
-system_ensure_ntp() { command -v timedatectl >/dev/null 2>&1 && run timedatectl set-ntp true || true; }
+system_ensure_ntp() { command -v timedatectl > /dev/null 2>&1 && run timedatectl set-ntp true || true; }
 
 system_disable_swap() {
-  command -v swapon >/dev/null 2>&1 && run swapoff -a || true
+  command -v swapon > /dev/null 2>&1 && run swapoff -a || true
   [[ -f /etc/fstab ]] && run sed -i.bak -r '/^\s*[^#].*\sswap\s/s/^/#/' /etc/fstab || true
 }
 
@@ -27,8 +27,8 @@ system_kernel_prep() {
 }
 
 system_ensure_nftables_backend() {
-  run update-alternatives --set iptables /usr/sbin/iptables-nft 2>/dev/null || true
-  run update-alternatives --set ip6tables /usr/sbin/ip6tables-nft 2>/dev/null || true
-  run update-alternatives --set arptables /usr/sbin/arptables-nft 2>/dev/null || true
-  run update-alternatives --set ebtables /usr/sbin/ebtables-nft 2>/dev/null || true
+  run update-alternatives --set iptables /usr/sbin/iptables-nft 2> /dev/null || true
+  run update-alternatives --set ip6tables /usr/sbin/ip6tables-nft 2> /dev/null || true
+  run update-alternatives --set arptables /usr/sbin/arptables-nft 2> /dev/null || true
+  run update-alternatives --set ebtables /usr/sbin/ebtables-nft 2> /dev/null || true
 }

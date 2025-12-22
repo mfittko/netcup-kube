@@ -4,7 +4,7 @@ set -euo pipefail
 # Requires: common.sh sourced
 
 helm_install_cli() {
-  command -v helm >/dev/null 2>&1 && return 0
+  command -v helm > /dev/null 2>&1 && return 0
   log "Installing Helm CLI"
   run apt-get update -y
   run apt-get install -y --no-install-recommends tar ca-certificates curl
@@ -22,10 +22,11 @@ dashboard_install() {
 
   helm_install_cli
 
-  export KUBECONFIG="$(kcfg)"
+  KUBECONFIG="$(kcfg)"
+  export KUBECONFIG
 
   log "Installing/Upgrading Kubernetes Dashboard via Helm (ingress disabled; we create our own Traefik ingress)"
-  run helm repo add kubernetes-dashboard https://kubernetes-dashboard.github.io/kubernetes-dashboard/ 2>/dev/null || true
+  run helm repo add kubernetes-dashboard https://kubernetes-dashboard.github.io/kubernetes-dashboard/ 2> /dev/null || true
   run helm repo update
 
   run helm upgrade --install kubernetes-dashboard kubernetes-dashboard/kubernetes-dashboard \
@@ -41,7 +42,7 @@ dashboard_install() {
   fi
 
   log "Ensuring Traefik ServersTransport for dashboard (skip upstream TLS verification)"
-  kctl apply -f - <<EOF
+  kctl apply -f - << EOF
 apiVersion: traefik.io/v1alpha1
 kind: ServersTransport
 metadata:
@@ -52,7 +53,7 @@ spec:
 EOF
 
   log "Creating/Updating dashboard Ingress (Traefik entrypoint: web)"
-  kctl apply -f - <<EOF
+  kctl apply -f - << EOF
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:

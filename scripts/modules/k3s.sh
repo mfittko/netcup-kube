@@ -6,15 +6,18 @@ set -euo pipefail
 k3s_build_tls_sans_yaml() {
   local node_ip="$1"
   local hn fqdn
-  hn="$(hostname -s 2>/dev/null || hostname)"
-  fqdn="$(hostname -f 2>/dev/null || echo "${hn}")"
+  hn="$(hostname -s 2> /dev/null || hostname)"
+  fqdn="$(hostname -f 2> /dev/null || echo "${hn}")"
   {
     echo "${fqdn}"
     echo "${node_ip}"
     [[ -n "${NODE_EXTERNAL_IP:-}" ]] && echo "${NODE_EXTERNAL_IP}"
     if [[ -n "${TLS_SANS_EXTRA:-}" ]]; then
-      IFS=',' read -r -a extra <<<"${TLS_SANS_EXTRA}"
-      for s in "${extra[@]}"; do s="$(echo "$s" | xargs)"; [[ -n "$s" ]] && echo "$s"; done
+      IFS=',' read -r -a extra <<< "${TLS_SANS_EXTRA}"
+      for s in "${extra[@]}"; do
+        s="$(echo "$s" | xargs)"
+        [[ -n "$s" ]] && echo "$s"
+      done
     fi
   } | awk '{print "- "$0}'
 }
@@ -23,9 +26,12 @@ k3s_write_config() {
   local node_ip="$1"
   local flannel_iface_line=""
   [[ -n "${PRIVATE_IFACE:-}" ]] && flannel_iface_line=$'flannel-iface: '"${PRIVATE_IFACE}"
-  local tls_sans; tls_sans="$(k3s_build_tls_sans_yaml "${node_ip}")"
+  local tls_sans
+  tls_sans="$(k3s_build_tls_sans_yaml "${node_ip}")"
 
-  local cfg="$(cat <<EOF
+  local cfg
+  cfg="$(
+    cat << EOF
 write-kubeconfig-mode: "${KUBECONFIG_MODE}"
 node-ip: "${node_ip}"
 ${flannel_iface_line}
@@ -38,7 +44,7 @@ etcd-snapshot-retention: 12
 tls-san:
 ${tls_sans}
 EOF
-)"
+  )"
   [[ -n "${NODE_EXTERNAL_IP:-}" ]] && cfg+=$'\n'"node-external-ip: \"${NODE_EXTERNAL_IP}\""$'\n'
 
   case "${MODE}" in
@@ -63,17 +69,18 @@ k3s_maybe_configure_proxy() {
   local no_proxy_combined="${default_no_proxy}"
   [[ -n "${NO_PROXY_EXTRA:-}" ]] && no_proxy_combined="${no_proxy_combined},${NO_PROXY_EXTRA}"
   run mkdir -p /etc/systemd/system/k3s.service.d
-  write_file /etc/systemd/system/k3s.service.d/proxy.conf "0644" "$(cat <<EOF
+  write_file /etc/systemd/system/k3s.service.d/proxy.conf "0644" "$(
+    cat << EOF
 [Service]
 Environment="HTTP_PROXY=${HTTP_PROXY:-}"
 Environment="HTTPS_PROXY=${HTTPS_PROXY:-}"
 Environment="NO_PROXY=${no_proxy_combined}"
 EOF
-)"
+  )"
   run systemctl daemon-reload || true
 }
 
-k3s_installed() { command -v k3s >/dev/null 2>&1 && systemctl list-unit-files | grep -q '^k3s\.service'; }
+k3s_installed() { command -v k3s > /dev/null 2>&1 && systemctl list-unit-files | grep -q '^k3s\.service'; }
 
 k3s_maybe_skip_install() {
   [[ "$(bool_norm "${FORCE_REINSTALL:-false}")" == "true" ]] && return 1
@@ -99,7 +106,7 @@ k3s_wait_for_api() {
   [[ "${DRY_RUN:-false}" == "true" ]] && return 0
   log "Waiting for Kubernetes API to respond"
   for _ in {1..120}; do
-    if KUBECONFIG="$(kcfg)" kubectl get --raw=/healthz >/dev/null 2>&1; then
+    if KUBECONFIG="$(kcfg)" kubectl get --raw=/healthz > /dev/null 2>&1; then
       return 0
     fi
     sleep 2
@@ -117,7 +124,8 @@ k3s_post_install_checks() {
 traefik_write_nodeport_manifest() {
   log "Writing Traefik NodePort HelmChartConfig manifest"
   run mkdir -p /var/lib/rancher/k3s/server/manifests
-  write_file /var/lib/rancher/k3s/server/manifests/traefik-nodeport.yaml "0644" "$(cat <<EOF
+  write_file /var/lib/rancher/k3s/server/manifests/traefik-nodeport.yaml "0644" "$(
+    cat << EOF
 apiVersion: helm.cattle.io/v1
 kind: HelmChartConfig
 metadata:
@@ -135,7 +143,7 @@ spec:
         port: 443
         nodePort: ${TRAEFIK_NODEPORT_HTTPS}
 EOF
-)"
+  )"
 }
 
 traefik_wait_ready() {

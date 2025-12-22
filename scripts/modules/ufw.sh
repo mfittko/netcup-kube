@@ -10,8 +10,8 @@ ufw_enable_safe_defaults() {
 }
 
 ufw_apply_rules() {
-  command -v ufw >/dev/null 2>&1 || return 0
-  ufw status 2>/dev/null | grep -qi "Status: active" || return 0
+  command -v ufw > /dev/null 2>&1 || return 0
+  ufw status 2> /dev/null | grep -qi "Status: active" || return 0
 
   [[ -n "${ADMIN_SRC_CIDR:-}" ]] && run ufw allow from "${ADMIN_SRC_CIDR}" to any port 6443 proto tcp || true
 
