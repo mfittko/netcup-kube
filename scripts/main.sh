@@ -9,6 +9,7 @@ source "${SCRIPT_DIR}/modules/nat.sh"
 source "${SCRIPT_DIR}/modules/k3s.sh"
 source "${SCRIPT_DIR}/modules/dashboard.sh"
 source "${SCRIPT_DIR}/modules/caddy.sh"
+source "${SCRIPT_DIR}/modules/flux.sh"
 source "${SCRIPT_DIR}/modules/ufw.sh"
 
 # =========================
@@ -70,6 +71,16 @@ DASH_AUTH_FILE="${DASH_AUTH_FILE:-/etc/caddy/dashboard.basicauth}"
 TRAEFIK_NODEPORT_HTTP="${TRAEFIK_NODEPORT_HTTP:-30080}"
 TRAEFIK_NODEPORT_HTTPS="${TRAEFIK_NODEPORT_HTTPS:-30443}"
 
+ENABLE_FLUX="${ENABLE_FLUX:-}"
+FLUX_METHOD="${FLUX_METHOD:-github}"
+FLUX_VERSION="${FLUX_VERSION:-2.5.1}"
+FLUX_NAMESPACE="${FLUX_NAMESPACE:-flux-system}"
+FLUX_GITHUB_OWNER="${FLUX_GITHUB_OWNER:-}"
+FLUX_GITHUB_REPOSITORY="${FLUX_GITHUB_REPOSITORY:-}"
+FLUX_GITHUB_PERSONAL="${FLUX_GITHUB_PERSONAL:-true}"
+FLUX_BRANCH="${FLUX_BRANCH:-main}"
+FLUX_PATH="${FLUX_PATH:-clusters/production}"
+
 DRY_RUN="${DRY_RUN:-false}"
 DRY_RUN_WRITE_FILES="${DRY_RUN_WRITE_FILES:-false}"
 
@@ -119,6 +130,20 @@ resolve_inputs() {
       DASH_ENABLE="$( is_tty && prompt "Install Kubernetes Dashboard (Helm)?" "false" || echo "false" )"
     fi
     DASH_ENABLE="$(bool_norm "${DASH_ENABLE}")"
+  fi
+
+  if [[ -z "${ENABLE_FLUX}" ]]; then
+    ENABLE_FLUX="$( is_tty && prompt "Bootstrap Flux CD now?" "false" || echo "false" )"
+  fi
+  ENABLE_FLUX="$(bool_norm "${ENABLE_FLUX}")"
+  if [[ "${ENABLE_FLUX}" == "true" ]]; then
+    [[ -n "${FLUX_METHOD}" ]] || FLUX_METHOD="$(prompt "Flux bootstrap method (github)" "github")"
+    if [[ "${FLUX_METHOD}" == "github" ]]; then
+      [[ -n "${FLUX_GITHUB_OWNER}" ]] || FLUX_GITHUB_OWNER="$(prompt "Flux GitHub owner/org" "")"
+      [[ -n "${FLUX_GITHUB_REPOSITORY}" ]] || FLUX_GITHUB_REPOSITORY="$(prompt "Flux GitHub repo" "fleet-infra")"
+      [[ -n "${FLUX_PATH}" ]] || FLUX_PATH="$(prompt "Flux sync path in repo" "${FLUX_PATH}")"
+      [[ -n "${FLUX_BRANCH}" ]] || FLUX_BRANCH="$(prompt "Flux branch" "${FLUX_BRANCH}")"
+    fi
   fi
 }
 
@@ -180,6 +205,10 @@ cmd_bootstrap() {
 
   if [[ "${EDGE_PROXY}" == "caddy" ]]; then
     caddy_setup
+  fi
+
+  if [[ "${ENABLE_FLUX}" == "true" ]]; then
+    flux_bootstrap_maybe
   fi
 
   if [[ "${ENABLE_UFW}" == "true" ]]; then
