@@ -1,5 +1,5 @@
 name: Feature request
-description: Suggest an idea for netcup-cube
+description: Suggest an idea for netcup-kube
 labels: [enhancement]
 body:
   - type: textarea

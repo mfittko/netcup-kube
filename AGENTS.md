@@ -1,6 +1,6 @@
 # Agents
 
-This repository ships with opinionated guidance for AI agents and copilots working on netcup-cube. The goal is to keep scripts reliable, secure, and testable.
+This repository ships with opinionated guidance for AI agents and copilots working on netcup-kube. The goal is to keep scripts reliable, secure, and testable.
 
 Core principles
 - Never run destructive commands without explicit confirmation.
@@ -12,11 +12,11 @@ Agents
 
 1) Provisioning Agent
 - Purpose: Prepare a fresh Netcup Debian 13 host from root credentials, create sudo user, set up SSH keys, and clone the repo.
-- Primary files: bin/netcup-cube-remote, scripts/modules/system.sh
+- Primary files: bin/netcup-kube-remote, scripts/modules/system.sh
 - Start prompt:
   - Ensure passwordless SSH for root or instruct user to run ssh-copy-id.
   - Install sudo, git, curl; create sudo user with authorized_keys.
-  - Clone repo to /home/<user>/netcup-cube.
+  - Clone repo to /home/<user>/netcup-kube.
 
 2) Cluster Bootstrap Agent
 - Purpose: Install k3s, force Traefik NodePort, and optionally configure Caddy and Dashboard.

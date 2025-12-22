@@ -1,4 +1,4 @@
-# netcup-cube
+# netcup-kube
 Shell scripts to bootstrap a production-ready k3s cluster on a Netcup root server (public) with up to N private vLAN nodes (Debian 13).
 
 Features
@@ -10,29 +10,29 @@ Features
 - Optional UFW setup with safe defaults
 
 Project layout
-- `bin/netcup-cube` – single entrypoint
-- `bin/netcup-cube-remote` – local helper to prepare a fresh Netcup server via root password
+- `bin/netcup-kube` – single entrypoint
+- `bin/netcup-kube-remote` – local helper to prepare a fresh Netcup server via root password
 - `scripts/main.sh` – orchestrator and defaults
 - `scripts/lib/*.sh` – shared helpers
 - `scripts/modules/*.sh` – logical units (system, k3s, traefik, nat, dashboard, caddy, helm)
 
 Remote bootstrap from Netcup root credentials
 - On your local machine (with ssh, ssh-copy-id; optional sshpass), run one of:
-  1) Secure prompt (recommended, requires sshpass): `./bin/netcup-cube-remote <host-or-ip>`
+  1) Secure prompt (recommended, requires sshpass): `./bin/netcup-kube-remote <host-or-ip>`
      - You will be prompted for the root password without echo.
   2) Pre-set env var without echo:
-     - `read -r -s ROOT_PASS; export ROOT_PASS; ./bin/netcup-cube-remote <host-or-ip>`
+     - `read -r -s ROOT_PASS; export ROOT_PASS; ./bin/netcup-kube-remote <host-or-ip>`
 - Flags: `--user <name>` (default cubeadmin), `--pubkey <path>` to pick a specific public key
 - The helper will:
   1) Push your SSH public key to root@<host> (uses sshpass if available)
   2) Install git/sudo
   3) Create a sudo-enabled user, set up authorized_keys
   4) Clone this repo on the server for that user
-- Then SSH to the server as the new user and run `sudo ~/netcup-cube/bin/netcup-cube bootstrap`.
+- Then SSH to the server as the new user and run `sudo ~/netcup-kube/bin/netcup-kube bootstrap`.
 
 Quick start (on the target Debian 13 server)
-1) Copy the repo (or just `bin/netcup-cube` + `scripts/` folder) to the server
-2) Run: `sudo ./bin/netcup-cube bootstrap`
+1) Copy the repo (or just `bin/netcup-kube` + `scripts/` folder) to the server
+2) Run: `sudo ./bin/netcup-kube bootstrap`
    - On a TTY, the script prompts for missing values (e.g., BASE_DOMAIN, Netcup DNS creds if dns-01)
 3) To join another node: set MODE=join, provide `SERVER_URL` and `TOKEN` or `TOKEN_FILE` and run the same command.
 

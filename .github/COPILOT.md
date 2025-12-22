@@ -5,7 +5,7 @@ Use this document when asking GitHub Copilot Chat to work on this repository.
 Context to provide
 - OS target: Debian 13 (root server on Netcup)
 - Shell: bash with `set -euo pipefail`
-- Entrypoint: `bin/netcup-cube`; orchestrator `scripts/main.sh`
+- Entrypoint: `bin/netcup-kube`; orchestrator `scripts/main.sh`
 - Modules under `scripts/modules/` and helpers under `scripts/lib/`
 - CI: shfmt + shellcheck, run `make check`
 
