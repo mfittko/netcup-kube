@@ -1,0 +1,15 @@
+# macOS
+.DS_Store
+
+# editors
+*.swp
+*.swo
+.idea/
+.vscode/
+
+# env/config
+.env
+.env.*
+
+# build/artefacts
+*.log
