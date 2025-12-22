@@ -9,7 +9,11 @@ die() {
 }
 
 # TTY detection
-is_tty() { [[ -t 0 && -t 1 ]]; }
+is_tty() {
+  [[ -t 0 && -t 1 ]] && return 0
+  [[ -r /dev/tty && -w /dev/tty ]] && return 0
+  return 1
+}
 
 # Bool normalization
 bool_norm() { case "${1,,}" in 1 | true | yes | y | on) echo "true" ;; *) echo "false" ;; esac }
@@ -66,11 +70,20 @@ prompt() {
     echo "$def"
     return 0
   fi
+  local tty="/dev/tty"
   if [[ -n "$def" ]]; then
-    read -r -p "${q} [${def}]: " ans
+    if [[ -r "${tty}" ]]; then
+      read -r -p "${q} [${def}]: " ans < "${tty}"
+    else
+      read -r -p "${q} [${def}]: " ans
+    fi
     echo "${ans:-$def}"
   else
-    read -r -p "${q}: " ans
+    if [[ -r "${tty}" ]]; then
+      read -r -p "${q}: " ans < "${tty}"
+    else
+      read -r -p "${q}: " ans
+    fi
     echo "${ans}"
   fi
 }
@@ -82,7 +95,12 @@ prompt_secret() {
     echo ""
     return 0
   fi
-  read -r -s -p "${q} (input hidden): " ans
+  local tty="/dev/tty"
+  if [[ -r "${tty}" ]]; then
+    read -r -s -p "${q} (input hidden): " ans < "${tty}"
+  else
+    read -r -s -p "${q} (input hidden): " ans
+  fi
   echo
   echo "${ans}"
 }

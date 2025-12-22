@@ -149,5 +149,12 @@ EOF
 traefik_wait_ready() {
   [[ "${DRY_RUN:-false}" == "true" ]] && return 0
   log "Waiting for Traefik to be ready"
-  kctl -n kube-system rollout status deploy/traefik --timeout=300s
+  for _ in {1..150}; do
+    if kctl -n kube-system get deploy/traefik > /dev/null 2>&1; then
+      kctl -n kube-system rollout status deploy/traefik --timeout=300s
+      return 0
+    fi
+    sleep 2
+  done
+  die "Traefik deployment did not appear"
 }

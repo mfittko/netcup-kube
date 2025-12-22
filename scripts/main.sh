@@ -212,6 +212,9 @@ cmd_bootstrap() {
   echo "  node-ip: ${NODE_IP}"
   [[ -n "${NODE_EXTERNAL_IP}" ]] && echo "  node-external-ip: ${NODE_EXTERNAL_IP}"
   echo "  kubeconfig: $(kcfg) (mode ${KUBECONFIG_MODE})"
+  if [[ "${KUBECONFIG_MODE}" == "0600" ]]; then
+    echo "  note: run kubectl via sudo, or set KUBECONFIG_MODE=0644 before bootstrap to use kubectl as non-root"
+  fi
   echo
   echo "traefik:"
   echo "  service: NodePort ${TRAEFIK_NODEPORT_HTTP}/${TRAEFIK_NODEPORT_HTTPS} (persistent via HelmChartConfig)"
