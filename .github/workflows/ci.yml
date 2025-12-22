@@ -14,13 +14,9 @@ jobs:
         run: |
           sudo apt-get update -y
           sudo apt-get install -y shellcheck shfmt
-      - name: Formatting check (shfmt)
+      - name: Lint/format (make check)
         run: |
-          shfmt -d -i 2 -ci -sr bin scripts
-      - name: Lint (shellcheck)
-        run: |
-          SCRIPTS=$(find bin scripts -type f -name "*.sh" -o -path bin/netcup-cube)
-          shellcheck -x $SCRIPTS
+          make check
 
   integration:
     runs-on: ubuntu-latest

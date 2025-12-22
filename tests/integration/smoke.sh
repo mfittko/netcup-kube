@@ -16,7 +16,7 @@ export EDGE_PROXY=none
 export DASH_ENABLE=false
 
 # Bootstrap path
-./bin/netcup-cube bootstrap
+./bin/netcup-kube bootstrap
 
 # Join path (requires dummy server/token but DRY_RUN avoids real calls)
-MODE=join SERVER_URL=https://1.2.3.4:6443 TOKEN=dummytoken ./bin/netcup-cube join
+MODE=join SERVER_URL=https://1.2.3.4:6443 TOKEN=dummytoken ./bin/netcup-kube join
