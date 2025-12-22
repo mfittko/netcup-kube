@@ -10,9 +10,32 @@ netcup_load_creds_from_envfile() {
   # shellcheck disable=SC1090
   source "${NETCUP_ENVFILE}" || true
   set -u
-  NETCUP_CUSTOMER_NUMBER="${NETCUP_CUSTOMER_NUMBER:-${NETCUP_CUSTOMER_NUMBER:-}}"
+  NETCUP_CUSTOMER_NUMBER="${NETCUP_CUSTOMER_NUMBER:-}"
   NETCUP_DNS_API_KEY="${NETCUP_DNS_API_KEY:-${NETCUP_API_KEY:-}}"
   NETCUP_DNS_API_PASSWORD="${NETCUP_DNS_API_PASSWORD:-${NETCUP_API_PASSWORD:-}}"
+}
+
+dns_warn_if_netcup_not_authoritative() {
+  # DNS-01 via Netcup API only works if the domain's authoritative DNS is Netcup.
+  # When not, Let's Encrypt will never see the TXT record and Caddy will log
+  # "No TXT record found at _acme-challenge.<domain>".
+  local domain="$1"
+  if ! command -v dig > /dev/null 2>&1; then
+    log "NOTE: 'dig' not found; cannot verify authoritative nameservers for ${domain}."
+    log "      If DNS-01 fails with 'No TXT record found', ensure ${domain} uses Netcup DNS (NS records)."
+    return 0
+  fi
+  local ns
+  ns="$(dig +short NS "${domain}" 2> /dev/null | sed '/^$/d' | tr -d '\r' || true)"
+  [[ -n "${ns}" ]] || {
+    log "WARN: Could not resolve NS records for ${domain}; DNS-01 may fail."
+    return 0
+  }
+  if ! grep -qiE 'netcup\.net\.?$' <<< "${ns}"; then
+    log "WARN: ${domain} NS records do not look like Netcup (${ns//$'\n'/, })."
+    log "      DNS-01 via Netcup API will not work unless your authoritative DNS is Netcup."
+    log "      Options: switch your DNS NS to Netcup, or use Caddy http-01 (no wildcard), or use a DNS provider matching your authoritative DNS."
+  fi
 }
 
 netcup_write_envfile() {
@@ -137,6 +160,14 @@ caddy_write_caddyfile() {
   fi
 
   if [[ "${CADDY_CERT_MODE}" == "dns01_wildcard" ]]; then
+    # Important: Many recursive resolvers cache TXT records aggressively. If your zone TTL is high
+    # (commonly 86400s), Caddy's default propagation checks may hit stale caches and fail with
+    # "timed out waiting for record to fully propagate" even though the authoritative servers
+    # already serve the correct TXT. Using authoritative resolvers avoids this.
+    [[ -n "${CADDY_DNS_RESOLVERS:-}" ]] || CADDY_DNS_RESOLVERS="root-dns.netcup.net second-dns.netcup.net third-dns.netcup.net"
+    [[ -n "${CADDY_DNS_PROPAGATION_TIMEOUT:-}" ]] || CADDY_DNS_PROPAGATION_TIMEOUT="10m"
+    [[ -n "${CADDY_DNS_PROPAGATION_DELAY:-}" ]] || CADDY_DNS_PROPAGATION_DELAY="5s"
+
     write_file /etc/caddy/Caddyfile "0644" "$(
       cat << EOF
 ${global_email_block}
@@ -149,13 +180,16 @@ ${BASE_DOMAIN}, *.${BASE_DOMAIN} {
       api_key {\$NETCUP_API_KEY}
       api_password {\$NETCUP_API_PASSWORD}
     }
+    resolvers ${CADDY_DNS_RESOLVERS}
+    propagation_timeout ${CADDY_DNS_PROPAGATION_TIMEOUT}
+    propagation_delay ${CADDY_DNS_PROPAGATION_DELAY}
   }
 
 $(if [[ "${DASH_ENABLE:-false}" == "true" && "${DASH_BASICAUTH:-false}" == "true" ]]; then
         cat << EOR
   @kube host ${DASH_HOST}
   handle @kube {
-    basicauth {
+    basic_auth {
       ${DASH_AUTH_USER} ${DASH_AUTH_HASH}
     }
     reverse_proxy ${EDGE_UPSTREAM}
@@ -180,7 +214,7 @@ $(if [[ "${DASH_ENABLE:-false}" == "true" && "${DASH_BASICAUTH:-false}" == "true
         cat << EOR
   @kube host ${DASH_HOST}
   handle @kube {
-    basicauth {
+    basic_auth {
       ${DASH_AUTH_USER} ${DASH_AUTH_HASH}
     }
     reverse_proxy ${EDGE_UPSTREAM}
@@ -228,6 +262,9 @@ caddy_setup() {
 
   if [[ "${DRY_RUN:-false}" != "true" ]]; then
     log "Validating and restarting Caddy"
+    if [[ "${CADDY_CERT_MODE}" == "dns01_wildcard" && -n "${BASE_DOMAIN:-}" ]]; then
+      dns_warn_if_netcup_not_authoritative "${BASE_DOMAIN}"
+    fi
     # Ensure env vars referenced in Caddyfile (e.g. {$NETCUP_*}) are available during validation.
     if [[ -f "${NETCUP_ENVFILE}" ]]; then
       set -a
@@ -235,6 +272,8 @@ caddy_setup() {
       source "${NETCUP_ENVFILE}"
       set +a
     fi
+    # Keep the generated Caddyfile formatted (removes 'Caddyfile input is not formatted' warnings).
+    run /usr/local/bin/caddy fmt --overwrite /etc/caddy/Caddyfile
     run /usr/local/bin/caddy validate --config /etc/caddy/Caddyfile
     run systemctl restart caddy
   else
