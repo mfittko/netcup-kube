@@ -3,18 +3,23 @@ set -euo pipefail
 
 # Logging & errors
 log() { printf '[%s] %s\n' "$(date -Is)" "$*"; }
-die() { echo "ERROR: $*" >&2; exit 1; }
+die() {
+  echo "ERROR: $*" >&2
+  exit 1
+}
 
 # TTY detection
 is_tty() { [[ -t 0 && -t 1 ]]; }
 
 # Bool normalization
-bool_norm() { case "${1,,}" in 1|true|yes|y|on) echo "true";; *) echo "false";; esac; }
+bool_norm() { case "${1,,}" in 1 | true | yes | y | on) echo "true" ;; *) echo "false" ;; esac }
 
 # DRY-RUN aware runner
 run() {
   if [[ "${DRY_RUN:-false}" == "true" ]]; then
-    printf '[DRY_RUN] '; printf '%q ' "$@"; printf '\n'
+    printf '[DRY_RUN] '
+    printf '%q ' "$@"
+    printf '\n'
     return 0
   fi
   "$@"
@@ -22,53 +27,80 @@ run() {
 
 # write_file PATH MODE [CONTENT]
 write_file() {
-  local path="$1"; local mode="$2"; shift 2 || true
+  local path="$1"
+  local mode="$2"
+  shift 2 || true
   local content=""
   if [[ $# -gt 0 ]]; then
     content="$1"
   else
     content="$(cat)"
   fi
-  if [[ "${DRY_RUN:-false}" == "true" && "${DRY_RUN_WRITE_FILES:-false}" != "true" ]]; then
-    log "[DRY_RUN] would write ${path}"
+  if [[ "${DRY_RUN:-false}" == "true" ]]; then
+    if [[ "${DRY_RUN_WRITE_FILES:-false}" != "true" ]]; then
+      log "[DRY_RUN] would write ${path}"
+      return 0
+    fi
+    # In DRY_RUN mode we normally no-op commands via `run`, but when
+    # DRY_RUN_WRITE_FILES=true we *do* want to create directories and write.
+    mkdir -p "$(dirname "$path")"
+    printf '%s' "$content" > "$path"
+    [[ -n "$mode" ]] && chmod "$mode" "$path" || true
     return 0
   fi
   run mkdir -p "$(dirname "$path")"
-  printf '%s' "$content" >"$path"
+  printf '%s' "$content" > "$path"
   [[ -n "$mode" ]] && run chmod "$mode" "$path" || true
 }
 
 # Prompts
 prompt() {
-  local q="$1"; local def="${2:-}"; local ans=""
-  if ! is_tty; then echo "$def"; return 0; fi
+  local q="$1"
+  local def="${2:-}"
+  local ans=""
+  if ! is_tty; then
+    echo "$def"
+    return 0
+  fi
   if [[ -n "$def" ]]; then
-    read -r -p "${q} [${def}]: " ans; echo "${ans:-$def}"
+    read -r -p "${q} [${def}]: " ans
+    echo "${ans:-$def}"
   else
-    read -r -p "${q}: " ans; echo "${ans}"
+    read -r -p "${q}: " ans
+    echo "${ans}"
   fi
 }
 
 prompt_secret() {
-  local q="$1"; local ans=""
-  if ! is_tty; then echo ""; return 0; fi
-  read -r -s -p "${q} (input hidden): " ans; echo; echo "${ans}"
+  local q="$1"
+  local ans=""
+  if ! is_tty; then
+    echo ""
+    return 0
+  fi
+  read -r -s -p "${q} (input hidden): " ans
+  echo
+  echo "${ans}"
 }
 
 # Privileges & commands
 require_root() { [[ "${EUID:-$(id -u)}" -eq 0 ]] || die "Run as root (sudo -s)"; }
-need_cmd() { command -v "$1" >/dev/null 2>&1 || die "Missing command: $1"; }
+need_cmd() { command -v "$1" > /dev/null 2>&1 || die "Missing command: $1"; }
 
 # Networking helpers
-infer_default_iface() { ip -4 route show default 2>/dev/null | awk '{print $5; exit}'; }
-infer_ipv4_on_iface() { ip -4 -o addr show dev "$1" 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -n1; }
+infer_default_iface() { ip -4 route show default 2> /dev/null | awk '{print $5; exit}'; }
+infer_ipv4_on_iface() { ip -4 -o addr show dev "$1" 2> /dev/null | awk '{print $4}' | cut -d/ -f1 | head -n1; }
 
 infer_node_ip() {
   if [[ -n "${PRIVATE_IFACE:-}" ]]; then
-    local ip; ip="$(infer_ipv4_on_iface "${PRIVATE_IFACE}")"
-    [[ -n "$ip" ]] && { echo "$ip"; return; }
+    local ip
+    ip="$(infer_ipv4_on_iface "${PRIVATE_IFACE}")"
+    [[ -n "$ip" ]] && {
+      echo "$ip"
+      return
+    }
   fi
-  ip -4 route get 1.1.1.1 2>/dev/null | awk '/src/{print $7; exit}'
+  ip -4 route get 1.1.1.1 2> /dev/null | awk '/src/{print $7; exit}'
 }
 
 infer_admin_src_cidr() { [[ -n "${SSH_CONNECTION:-}" ]] && echo "${SSH_CONNECTION%% *}/32" || echo ""; }
