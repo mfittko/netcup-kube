@@ -107,6 +107,15 @@ resolve_inputs() {
     validate_cidr_loose "${ADMIN_SRC_CIDR}" || die "ADMIN_SRC_CIDR looks invalid: ${ADMIN_SRC_CIDR}"
   fi
 
+  # Optional: vLAN egress NAT for vLAN-only nodes (opt-in)
+  ENABLE_VLAN_NAT="$(bool_norm "${ENABLE_VLAN_NAT:-false}")"
+  if [[ "${ENABLE_VLAN_NAT}" == "true" ]]; then
+    [[ -n "${PRIVATE_CIDR}" ]] || PRIVATE_CIDR="$(prompt "Private vLAN CIDR for NAT (e.g. 10.10.0.0/24)" "")"
+    validate_cidr_loose "${PRIVATE_CIDR}" || die "PRIVATE_CIDR looks invalid: ${PRIVATE_CIDR}"
+    [[ -n "${PUBLIC_IFACE}" ]] || PUBLIC_IFACE="$(prompt "Public interface for NAT (e.g. eth0)" "$(infer_default_iface)")"
+    [[ -n "${PUBLIC_IFACE}" ]] || die "PUBLIC_IFACE required when ENABLE_VLAN_NAT=true"
+  fi
+
   if [[ "${EDGE_PROXY}" == "caddy" ]]; then
     [[ -n "${EDGE_UPSTREAM}" ]] || EDGE_UPSTREAM="$(prompt "Edge upstream (Caddy forwards HTTP to this)" "http://127.0.0.1:${TRAEFIK_NODEPORT_HTTP}")"
     [[ -n "${BASE_DOMAIN}" ]] || BASE_DOMAIN="$(prompt "Base domain (e.g. example.com)" "")"
@@ -157,8 +166,10 @@ cmd_bootstrap() {
     ufw_enable_safe_defaults
   fi
 
-  log "Configuring NAT gateway (optional)"
-  nat_configure
+  if [[ "${MODE}" == "bootstrap" ]]; then
+    log "Configuring NAT gateway (optional)"
+    nat_configure
+  fi
 
   log "Writing Traefik NodePort HelmChartConfig manifest (persistent)"
   traefik_write_nodeport_manifest

@@ -47,6 +47,7 @@ Environment variables (selected)
 
 Notes
 - The NAT systemd unit uses a dedicated helper at `/usr/local/sbin/vlan-nat-apply` so it’s stable across reboots.
+  - NAT is **opt-in**: it is only configured when `ENABLE_VLAN_NAT=true` (and requires `PRIVATE_CIDR` + `PUBLIC_IFACE`).
 
 Testing
 - Lint/format: `make check` (shfmt + shellcheck)
