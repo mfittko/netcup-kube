@@ -6,6 +6,7 @@ Features
 - Traefik forced to NodePort (30080/30443) via HelmChartConfig
 - Optional edge TLS via Caddy (wildcard dns-01 using Netcup CCP DNS API, or http-01)
 - Optional Kubernetes Dashboard via Helm with Traefik Ingress and optional Caddy Basic Auth
+- Optional Flux CD bootstrap (GitOps)
 - Optional NAT for vLAN-only nodes (+ persistent systemd unit)
 - Optional UFW setup with safe defaults
 
@@ -44,6 +45,17 @@ Environment variables (selected)
 - CADDY_CERT_MODE=dns01_wildcard|http01 (default dns01_wildcard)
 - NETCUP_CUSTOMER_NUMBER, NETCUP_DNS_API_KEY, NETCUP_DNS_API_PASSWORD (dns-01)
 - DASH_ENABLE=true|false (default prompts if EDGE_PROXY=caddy)
+- ENABLE_FLUX=true|false (default false)
+  - FLUX_METHOD=github
+  - FLUX_VERSION=2.5.1 (Flux CLI version)
+  - FLUX_NAMESPACE=flux-system
+  - FLUX_GITHUB_OWNER, FLUX_GITHUB_REPOSITORY, FLUX_GITHUB_PERSONAL=true|false
+  - FLUX_BRANCH=main, FLUX_PATH=clusters/production
+  - GITHUB_TOKEN (PAT; required for github bootstrap)
+
+Flux bootstrap example (GitHub)
+- Creates/updates the repo and installs Flux into the cluster:
+  - `ENABLE_FLUX=true FLUX_METHOD=github FLUX_GITHUB_OWNER=your-user-or-org FLUX_GITHUB_REPOSITORY=fleet-infra FLUX_PATH=clusters/prod GITHUB_TOKEN=... sudo ./bin/netcup-cube bootstrap`
 
 Notes
 - The NAT systemd unit uses a dedicated helper at `/usr/local/sbin/vlan-nat-apply` so it’s stable across reboots.
