@@ -228,6 +228,13 @@ caddy_setup() {
 
   if [[ "${DRY_RUN:-false}" != "true" ]]; then
     log "Validating and restarting Caddy"
+    # Ensure env vars referenced in Caddyfile (e.g. {$NETCUP_*}) are available during validation.
+    if [[ -f "${NETCUP_ENVFILE}" ]]; then
+      set -a
+      # shellcheck disable=SC1090
+      source "${NETCUP_ENVFILE}"
+      set +a
+    fi
     run /usr/local/bin/caddy validate --config /etc/caddy/Caddyfile
     run systemctl restart caddy
   else
