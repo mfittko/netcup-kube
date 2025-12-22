@@ -136,6 +136,4 @@ REMOTE_SCRIPT="${REMOTE_SCRIPT//__PUBKEY__/$PUBKEY_CONTENT}"
 REMOTE_SCRIPT="${REMOTE_SCRIPT//__REPO_URL__/$REPO_URL}"
 REMOTE_SCRIPT="${REMOTE_SCRIPT//__HOST__/$HOST}"
 
-ssh -o StrictHostKeyChecking=no root@"$HOST" "bash -s" << EOF
-$REMOTE_SCRIPT
-EOF
+ssh -o StrictHostKeyChecking=no root@"$HOST" "bash -s" <<< "$REMOTE_SCRIPT"
