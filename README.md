@@ -47,3 +47,8 @@ Environment variables (selected)
 
 Notes
 - The NAT systemd unit uses a dedicated helper at `/usr/local/sbin/vlan-nat-apply` so it’s stable across reboots.
+
+Testing
+- Lint/format: `make check` (shfmt + shellcheck)
+- Integration smoke (Docker, Debian 13/13-slim fallback trixie-slim): `make test`
+  - Requires Docker locally; runs scripts in DRY_RUN mode inside the container to verify bootstrap/join flows wire up.
