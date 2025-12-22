@@ -11,11 +11,19 @@ system_pkg_install() {
     ca-certificates curl iproute2 iptables kmod util-linux procps gnupg lsb-release sed tar coreutils jq nftables
 }
 
-system_ensure_ntp() { command -v timedatectl > /dev/null 2>&1 && run timedatectl set-ntp true || true; }
+system_ensure_ntp() {
+  if command -v timedatectl > /dev/null 2>&1; then
+    run timedatectl set-ntp true || true
+  fi
+}
 
 system_disable_swap() {
-  command -v swapon > /dev/null 2>&1 && run swapoff -a || true
-  [[ -f /etc/fstab ]] && run sed -i.bak -r '/^\s*[^#].*\sswap\s/s/^/#/' /etc/fstab || true
+  if command -v swapon > /dev/null 2>&1; then
+    run swapoff -a || true
+  fi
+  if [[ -f /etc/fstab ]]; then
+    run sed -i.bak -r '/^\s*[^#].*\sswap\s/s/^/#/' /etc/fstab || true
+  fi
 }
 
 system_kernel_prep() {

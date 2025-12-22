@@ -13,7 +13,9 @@ ufw_apply_rules() {
   command -v ufw > /dev/null 2>&1 || return 0
   ufw status 2> /dev/null | grep -qi "Status: active" || return 0
 
-  [[ -n "${ADMIN_SRC_CIDR:-}" ]] && run ufw allow from "${ADMIN_SRC_CIDR}" to any port 6443 proto tcp || true
+  if [[ -n "${ADMIN_SRC_CIDR:-}" ]]; then
+    run ufw allow from "${ADMIN_SRC_CIDR}" to any port 6443 proto tcp || true
+  fi
 
   if [[ "${EDGE_PROXY:-}" == "caddy" ]]; then
     run ufw allow 80/tcp || true
