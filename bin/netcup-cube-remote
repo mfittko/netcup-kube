@@ -1,0 +1,124 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# netcup-cube remote bootstrap helper
+# - Sets up SSH key access via root@<host> (password from Netcup)
+# - Installs sudo + git on the server (apt)
+# - Creates a sudo-enabled user and configures authorized_keys
+# - Clones this repo and runs the bootstrap as that user (sudo)
+#
+# Requirements (local): ssh, ssh-copy-id, scp. Optional: sshpass for non-interactive password entry.
+#
+# Usage examples:
+#   bin/netcup-cube-remote root.example.com                   # prompt for root password, user=cubeadmin
+#   bin/netcup-cube-remote 203.0.113.10 --user ops            # prompt for root password
+#   ROOT_PASS=... bin/netcup-cube-remote host --user ops      # use env var + sshpass if present
+#   bin/netcup-cube-remote host --user ops --pubkey ~/.ssh/id_ed25519.pub
+#
+# After bootstrap you can SSH as the new user: ssh <user>@<host>
+
+HOST="${1:-}"
+if [[ -z "$HOST" ]]; then
+  echo "Usage: $(basename "$0") <host-or-ip> [--user <name>] [--pubkey <path>]" >&2
+  exit 1
+fi
+
+NEW_USER="cubeadmin"
+PUBKEY_PATH=""
+REPO_URL="https://github.com/mfittko/netcup-cube.git"
+
+# Parse flags
+shift || true
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --user)
+      NEW_USER="${2:-}"; shift 2 || true ;;
+    --pubkey)
+      PUBKEY_PATH="${2:-}"; shift 2 || true ;;
+    --repo)
+      REPO_URL="${2:-}"; shift 2 || true ;;
+    *)
+      echo "Unknown flag: $1" >&2; exit 1 ;;
+  esac
+done
+
+# Pick a public key (prefer ed25519)
+default_pubkey=""
+for cand in "$PUBKEY_PATH" "$HOME/.ssh/id_ed25519.pub" "$HOME/.ssh/id_rsa.pub"; do
+  if [[ -n "$cand" && -f "$cand" ]]; then default_pubkey="$cand"; break; fi
+done
+if [[ -z "$default_pubkey" ]]; then
+  echo "No public key found. Generate one, e.g.: ssh-keygen -t ed25519 -C '$(whoami)@$(hostname)'" >&2
+  exit 1
+fi
+PUBKEY_PATH="$default_pubkey"
+PUBKEY_CONTENT="$(cat "$PUBKEY_PATH")"
+
+# 1) Ensure our key is on root via ssh-copy-id (password auth)
+if ssh -o BatchMode=yes -o StrictHostKeyChecking=no root@"$HOST" true 2>/dev/null; then
+  echo "SSH key already works for root@$HOST"
+else
+  if command -v sshpass >/dev/null 2>&1 && [[ -n "${ROOT_PASS:-}" ]]; then
+    echo "Pushing SSH key to root@$HOST with sshpass+ssh-copy-id"
+    sshpass -p "$ROOT_PASS" ssh-copy-id -o StrictHostKeyChecking=no -f -i "$PUBKEY_PATH" root@"$HOST"
+  else
+    echo "Passwordless SSH for root not set up yet."
+    echo "Either: export ROOT_PASS=... (and ensure sshpass is installed), or run:"
+    echo "  ssh-copy-id -o StrictHostKeyChecking=no -i '$PUBKEY_PATH' root@$HOST"
+    echo "Then re-run this script."
+    exit 1
+  fi
+fi
+
+# 2) Run remote provisioning as root
+REMOTE_SCRIPT="$(cat <<'EOS'
+set -euo pipefail
+export DEBIAN_FRONTEND=noninteractive
+apt-get update -y
+apt-get install -y --no-install-recommends sudo git curl ca-certificates
+
+# Create user if missing
+if ! id -u __NEW_USER__ >/dev/null 2>&1; then
+  adduser --disabled-password --gecos "" __NEW_USER__
+fi
+usermod -aG sudo __NEW_USER__
+install -d -m 0700 -o __NEW_USER__ -g __NEW_USER__ /home/__NEW_USER__/.ssh
+# Append key once
+awk 'BEGIN{seen=0} $0=="__PUBKEY__"{seen=1} END{exit !seen}' /home/__NEW_USER__/.ssh/authorized_keys 2>/dev/null || \
+  echo "__PUBKEY__" >> /home/__NEW_USER__/.ssh/authorized_keys
+chown __NEW_USER__:__NEW_USER__ /home/__NEW_USER__/.ssh/authorized_keys
+chmod 0600 /home/__NEW_USER__/.ssh/authorized_keys
+
+# Passwordless sudo for the new user (limited to ALL here; adjust if desired)
+cat >/etc/sudoers.d/90-__NEW_USER__ <<EOF
+__NEW_USER__ ALL=(ALL) NOPASSWD:ALL
+EOF
+chmod 0440 /etc/sudoers.d/90-__NEW_USER__
+
+# Clone or update netcup-cube
+if [[ ! -d /home/__NEW_USER__/netcup-cube ]]; then
+  sudo -u __NEW_USER__ git clone __REPO_URL__ /home/__NEW_USER__/netcup-cube
+else
+  cd /home/__NEW_USER__/netcup-cube && sudo -u __NEW_USER__ git fetch --all -p && sudo -u __NEW_USER__ git pull --ff-only
+fi
+
+# Print how to continue
+cat <<EOM
+[remote] Provisioning complete.
+Now run on your local machine:
+  ssh __NEW_USER__@__HOST__
+Then on the server:
+  sudo /home/__NEW_USER__/netcup-cube/bin/netcup-cube bootstrap
+EOM
+EOS
+)"
+
+# Substitute placeholders safely
+REMOTE_SCRIPT="${REMOTE_SCRIPT//__NEW_USER__/$NEW_USER}"
+REMOTE_SCRIPT="${REMOTE_SCRIPT//__PUBKEY__/$PUBKEY_CONTENT}"
+REMOTE_SCRIPT="${REMOTE_SCRIPT//__REPO_URL__/$REPO_URL}"
+REMOTE_SCRIPT="${REMOTE_SCRIPT//__HOST__/$HOST}"
+
+ssh -o StrictHostKeyChecking=no root@"$HOST" "bash -s" <<'EOF'
+__PAYLOAD__
+EOF

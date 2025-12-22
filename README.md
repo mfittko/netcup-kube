@@ -11,9 +11,21 @@ Features
 
 Project layout
 - `bin/netcup-cube` – single entrypoint
+- `bin/netcup-cube-remote` – local helper to prepare a fresh Netcup server via root password
 - `scripts/main.sh` – orchestrator and defaults
 - `scripts/lib/*.sh` – shared helpers
 - `scripts/modules/*.sh` – logical units (system, k3s, traefik, nat, dashboard, caddy, helm)
+
+Remote bootstrap from Netcup root credentials
+- On your local machine (with ssh, ssh-copy-id; optional sshpass), run:
+  - `ROOT_PASS=... ./bin/netcup-cube-remote <host-or-ip>`
+  - Flags: `--user <name>` (default cubeadmin), `--pubkey <path>` to pick a specific public key
+- The helper will:
+  1) Push your SSH public key to root@<host> (using sshpass if ROOT_PASS is set)
+  2) Install git/sudo
+  3) Create a sudo-enabled user, set up authorized_keys
+  4) Clone this repo on the server for that user
+- Then SSH to the server as the new user and run `sudo ~/netcup-cube/bin/netcup-cube bootstrap`.
 
 Quick start (on the target Debian 13 server)
 1) Copy the repo (or just `bin/netcup-cube` + `scripts/` folder) to the server
@@ -31,5 +43,4 @@ Environment variables (selected)
 - DASH_ENABLE=true|false (default prompts if EDGE_PROXY=caddy)
 
 Notes
-- No git commits are made by default; ask explicitly if you want me to commit.
-- The NAT systemd unit now uses a dedicated helper at `/usr/local/sbin/vlan-nat-apply` so it’s stable across reboots.
+- The NAT systemd unit uses a dedicated helper at `/usr/local/sbin/vlan-nat-apply` so it’s stable across reboots.

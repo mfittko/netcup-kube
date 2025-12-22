@@ -1,0 +1,30 @@
+name: Bug report
+description: Report a problem with netcup-cube
+labels: [bug]
+body:
+  - type: textarea
+    attributes:
+      label: What happened?
+      description: A clear description of the issue
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Steps to reproduce
+      description: Provide exact steps and commands
+    validations:
+      required: true
+  - type: input
+    attributes:
+      label: Debian version
+      placeholder: e.g. Debian 13
+  - type: textarea
+    attributes:
+      label: Logs / output
+      description: Paste relevant logs
+  - type: checkboxes
+    attributes:
+      label: Checks
+      options:
+        - label: I ran `make check` locally
+        - label: I tested on a fresh VM/host

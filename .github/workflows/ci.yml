@@ -1,0 +1,23 @@
+name: CI
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tools
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y shellcheck shfmt
+      - name: Formatting check (shfmt)
+        run: |
+          shfmt -d -i 2 -ci -sr bin scripts
+      - name: Lint (shellcheck)
+        run: |
+          SCRIPTS=$(find bin scripts -type f -name "*.sh" -o -path bin/netcup-cube)
+          shellcheck -x $SCRIPTS

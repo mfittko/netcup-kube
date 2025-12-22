@@ -1,0 +1,3 @@
+shell=bash
+# Allow sourcing relative modules during lint
+source-path=SCRIPTDIR/scripts/lib
