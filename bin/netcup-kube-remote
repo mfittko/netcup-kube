@@ -17,6 +17,70 @@ set -euo pipefail
 #
 # After bootstrap you can SSH as the new user: ssh <user>@<host>
 
+is_tty() { [[ -t 0 && -t 1 ]]; }
+
+install_sshpass() {
+  local os
+  os="$(uname -s | tr '[:upper:]' '[:lower:]')"
+
+  case "$os" in
+    darwin)
+      if ! command -v brew > /dev/null 2>&1; then
+        echo "Homebrew not found. Install it first, then re-run:" >&2
+        echo "  https://brew.sh/" >&2
+        return 1
+      fi
+      echo "Installing sshpass via Homebrew..."
+      brew install sshpass
+      ;;
+    linux)
+      if command -v apt-get > /dev/null 2>&1; then
+        echo "Installing sshpass via apt-get..."
+        sudo apt-get update -y
+        sudo apt-get install -y sshpass
+      elif command -v dnf > /dev/null 2>&1; then
+        echo "Installing sshpass via dnf..."
+        sudo dnf install -y sshpass
+      elif command -v yum > /dev/null 2>&1; then
+        echo "Installing sshpass via yum..."
+        sudo yum install -y sshpass
+      elif command -v pacman > /dev/null 2>&1; then
+        echo "Installing sshpass via pacman..."
+        sudo pacman -Sy --noconfirm sshpass
+      elif command -v apk > /dev/null 2>&1; then
+        echo "Installing sshpass via apk..."
+        sudo apk add --no-cache sshpass
+      elif command -v zypper > /dev/null 2>&1; then
+        echo "Installing sshpass via zypper..."
+        sudo zypper --non-interactive install -y sshpass
+      else
+        echo "No supported package manager found to install sshpass automatically." >&2
+        return 1
+      fi
+      ;;
+    *)
+      echo "Unsupported OS for auto-install: ${os}" >&2
+      return 1
+      ;;
+  esac
+}
+
+maybe_install_sshpass() {
+  command -v sshpass > /dev/null 2>&1 && return 0
+  is_tty || return 1
+  local ans
+  read -r -p "sshpass not found. Install now? [y/N]: " ans
+  case "${ans:-}" in
+    y | Y | yes | YES)
+      install_sshpass || return 1
+      command -v sshpass > /dev/null 2>&1
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
 HOST="${1:-}"
 if [[ -z "$HOST" ]]; then
   echo "Usage: $(basename "$0") <host-or-ip> [--user <name>] [--pubkey <path>]" >&2
@@ -69,6 +133,9 @@ PUBKEY_CONTENT="$(cat "$PUBKEY_PATH")"
 if ssh -o BatchMode=yes -o StrictHostKeyChecking=no root@"$HOST" true 2> /dev/null; then
   echo "SSH key already works for root@$HOST"
 else
+  if ! command -v sshpass > /dev/null 2>&1; then
+    maybe_install_sshpass || true
+  fi
   if command -v sshpass > /dev/null 2>&1; then
     if [[ -z "${ROOT_PASS:-}" ]]; then
       read -r -s -p "Root password for root@${HOST}: " ROOT_PASS
