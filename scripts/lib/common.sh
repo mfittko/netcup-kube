@@ -45,12 +45,16 @@ write_file() {
     # DRY_RUN_WRITE_FILES=true we *do* want to create directories and write.
     mkdir -p "$(dirname "$path")"
     printf '%s' "$content" > "$path"
-    [[ -n "$mode" ]] && chmod "$mode" "$path" || true
+    if [[ -n "$mode" ]]; then
+      chmod "$mode" "$path" || true
+    fi
     return 0
   fi
   run mkdir -p "$(dirname "$path")"
   printf '%s' "$content" > "$path"
-  [[ -n "$mode" ]] && run chmod "$mode" "$path" || true
+  if [[ -n "$mode" ]]; then
+    run chmod "$mode" "$path" || true
+  fi
 }
 
 # Prompts

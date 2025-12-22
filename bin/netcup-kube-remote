@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# netcup-cube remote bootstrap helper
+# netcup-kube remote bootstrap helper
 # - Sets up SSH key access via root@<host> (password from Netcup)
 # - Installs sudo + git on the server (apt)
 # - Creates a sudo-enabled user and configures authorized_keys
@@ -10,10 +10,10 @@ set -euo pipefail
 # Requirements (local): ssh, ssh-copy-id, scp. Optional: sshpass for non-interactive password entry.
 #
 # Usage examples:
-#   bin/netcup-cube-remote root.example.com                   # prompts silently for root password (if sshpass installed), user=cubeadmin
-#   bin/netcup-cube-remote 203.0.113.10 --user ops            # prompts silently
-#   export ROOT_PASS; read -r -s ROOT_PASS; ./bin/netcup-cube-remote host --user ops  # or pre-set env var
-#   bin/netcup-cube-remote host --user ops --pubkey ~/.ssh/id_ed25519.pub
+#   bin/netcup-kube-remote root.example.com                   # prompts silently for root password (if sshpass installed), user=cubeadmin
+#   bin/netcup-kube-remote 203.0.113.10 --user ops            # prompts silently
+#   export ROOT_PASS; read -r -s ROOT_PASS; ./bin/netcup-kube-remote host --user ops  # or pre-set env var
+#   bin/netcup-kube-remote host --user ops --pubkey ~/.ssh/id_ed25519.pub
 #
 # After bootstrap you can SSH as the new user: ssh <user>@<host>
 
@@ -25,7 +25,7 @@ fi
 
 NEW_USER="cubeadmin"
 PUBKEY_PATH=""
-REPO_URL="https://github.com/mfittko/netcup-cube.git"
+REPO_URL="https://github.com/mfittko/netcup-kube.git"
 
 # Parse flags
 shift || true
@@ -112,11 +112,11 @@ __NEW_USER__ ALL=(ALL) NOPASSWD:ALL
 EOF
 chmod 0440 /etc/sudoers.d/90-__NEW_USER__
 
-# Clone or update netcup-cube
-if [[ ! -d /home/__NEW_USER__/netcup-cube ]]; then
-  sudo -u __NEW_USER__ git clone __REPO_URL__ /home/__NEW_USER__/netcup-cube
+# Clone or update netcup-kube
+if [[ ! -d /home/__NEW_USER__/netcup-kube ]]; then
+  sudo -u __NEW_USER__ git clone __REPO_URL__ /home/__NEW_USER__/netcup-kube
 else
-  cd /home/__NEW_USER__/netcup-cube && sudo -u __NEW_USER__ git fetch --all -p && sudo -u __NEW_USER__ git pull --ff-only
+  cd /home/__NEW_USER__/netcup-kube && sudo -u __NEW_USER__ git fetch --all -p && sudo -u __NEW_USER__ git pull --ff-only
 fi
 
 # Print how to continue
@@ -125,7 +125,7 @@ cat <<EOM
 Now run on your local machine:
   ssh __NEW_USER__@__HOST__
 Then on the server:
-  sudo /home/__NEW_USER__/netcup-cube/bin/netcup-cube bootstrap
+  sudo /home/__NEW_USER__/netcup-kube/bin/netcup-kube bootstrap
 EOM
 EOS
 )"
@@ -136,6 +136,4 @@ REMOTE_SCRIPT="${REMOTE_SCRIPT//__PUBKEY__/$PUBKEY_CONTENT}"
 REMOTE_SCRIPT="${REMOTE_SCRIPT//__REPO_URL__/$REPO_URL}"
 REMOTE_SCRIPT="${REMOTE_SCRIPT//__HOST__/$HOST}"
 
-ssh -o StrictHostKeyChecking=no root@"$HOST" "bash -s" << EOF
-$REMOTE_SCRIPT
-EOF
+ssh -o StrictHostKeyChecking=no root@"$HOST" "bash -s" <<< "$REMOTE_SCRIPT"

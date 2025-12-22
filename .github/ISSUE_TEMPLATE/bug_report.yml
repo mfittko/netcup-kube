@@ -1,5 +1,5 @@
 name: Bug report
-description: Report a problem with netcup-cube
+description: Report a problem with netcup-kube
 labels: [bug]
 body:
   - type: textarea
