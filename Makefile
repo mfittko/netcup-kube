@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 
-SCRIPTS := $(shell find bin scripts -type f \( -name "*.sh" -o -path bin/netcup-kube -o -path bin/netcup-kube-remote \))
+SCRIPTS := $(shell find bin scripts -type f \( -name "*.sh" -o -name netcup-kube -o -name netcup-kube-remote \))
 
 .PHONY: fmt fmt-check lint check test
 
