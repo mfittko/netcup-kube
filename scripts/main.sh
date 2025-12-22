@@ -111,6 +111,7 @@ resolve_inputs() {
   ENABLE_VLAN_NAT="$(bool_norm "${ENABLE_VLAN_NAT:-false}")"
   if [[ "${ENABLE_VLAN_NAT}" == "true" ]]; then
     [[ -n "${PRIVATE_CIDR}" ]] || PRIVATE_CIDR="$(prompt "Private vLAN CIDR for NAT (e.g. 10.10.0.0/24)" "")"
+    [[ -n "${PRIVATE_CIDR}" ]] || die "PRIVATE_CIDR required when ENABLE_VLAN_NAT=true"
     validate_cidr_loose "${PRIVATE_CIDR}" || die "PRIVATE_CIDR looks invalid: ${PRIVATE_CIDR}"
     [[ -n "${PUBLIC_IFACE}" ]] || PUBLIC_IFACE="$(prompt "Public interface for NAT (e.g. eth0)" "$(infer_default_iface)")"
     [[ -n "${PUBLIC_IFACE}" ]] || die "PUBLIC_IFACE required when ENABLE_VLAN_NAT=true"
