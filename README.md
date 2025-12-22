@@ -17,11 +17,14 @@ Project layout
 - `scripts/modules/*.sh` – logical units (system, k3s, traefik, nat, dashboard, caddy, helm)
 
 Remote bootstrap from Netcup root credentials
-- On your local machine (with ssh, ssh-copy-id; optional sshpass), run:
-  - `ROOT_PASS=... ./bin/netcup-cube-remote <host-or-ip>`
-  - Flags: `--user <name>` (default cubeadmin), `--pubkey <path>` to pick a specific public key
+- On your local machine (with ssh, ssh-copy-id; optional sshpass), run one of:
+  1) Secure prompt (recommended, requires sshpass): `./bin/netcup-cube-remote <host-or-ip>`
+     - You will be prompted for the root password without echo.
+  2) Pre-set env var without echo:
+     - `read -r -s ROOT_PASS; export ROOT_PASS; ./bin/netcup-cube-remote <host-or-ip>`
+- Flags: `--user <name>` (default cubeadmin), `--pubkey <path>` to pick a specific public key
 - The helper will:
-  1) Push your SSH public key to root@<host> (using sshpass if ROOT_PASS is set)
+  1) Push your SSH public key to root@<host> (uses sshpass if available)
   2) Install git/sudo
   3) Create a sudo-enabled user, set up authorized_keys
   4) Clone this repo on the server for that user
