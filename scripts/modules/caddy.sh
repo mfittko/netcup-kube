@@ -16,11 +16,21 @@ netcup_load_creds_from_envfile() {
 }
 
 netcup_write_envfile() {
+  # systemd EnvironmentFile parsing is sensitive to special characters (e.g. '#' starts a comment unless quoted).
+  # Quote/escape values so secrets survive round-trips.
+  local esc_cn esc_key esc_pw
+  esc_cn="${NETCUP_CUSTOMER_NUMBER//\\/\\\\}"
+  esc_cn="${esc_cn//\"/\\\"}"
+  esc_key="${NETCUP_DNS_API_KEY//\\/\\\\}"
+  esc_key="${esc_key//\"/\\\"}"
+  esc_pw="${NETCUP_DNS_API_PASSWORD//\\/\\\\}"
+  esc_pw="${esc_pw//\"/\\\"}"
+
   write_file "${NETCUP_ENVFILE}" "0600" "$(
     cat << EOF
-NETCUP_CUSTOMER_NUMBER=${NETCUP_CUSTOMER_NUMBER}
-NETCUP_API_KEY=${NETCUP_DNS_API_KEY}
-NETCUP_API_PASSWORD=${NETCUP_DNS_API_PASSWORD}
+NETCUP_CUSTOMER_NUMBER="${esc_cn}"
+NETCUP_API_KEY="${esc_key}"
+NETCUP_API_PASSWORD="${esc_pw}"
 EOF
   )"
 }

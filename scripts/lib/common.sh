@@ -101,7 +101,12 @@ prompt_secret() {
   else
     read -r -s -p "${q} (input hidden): " ans
   fi
-  echo
+  # Print the newline to the user's terminal, not stdout (stdout is used as the return value).
+  if [[ -w "${tty}" ]]; then
+    printf '\n' > "${tty}"
+  else
+    printf '\n' >&2
+  fi
   echo "${ans}"
 }
 
