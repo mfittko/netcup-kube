@@ -3,18 +3,25 @@ set -euo pipefail
 
 # Load libs
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck disable=SC1091
 source "${SCRIPT_DIR}/lib/common.sh"
+# shellcheck disable=SC1091
 source "${SCRIPT_DIR}/modules/system.sh"
+# shellcheck disable=SC1091
 source "${SCRIPT_DIR}/modules/nat.sh"
+# shellcheck disable=SC1091
 source "${SCRIPT_DIR}/modules/k3s.sh"
+# shellcheck disable=SC1091
 source "${SCRIPT_DIR}/modules/dashboard.sh"
+# shellcheck disable=SC1091
 source "${SCRIPT_DIR}/modules/caddy.sh"
+# shellcheck disable=SC1091
 source "${SCRIPT_DIR}/modules/ufw.sh"
 
 # =========================
 # Defaults / tunables
 # =========================
-MODE="${MODE:-bootstrap}"                  # bootstrap|join
+MODE="${MODE:-bootstrap}" # bootstrap|join
 CHANNEL="${CHANNEL:-stable}"
 K3S_VERSION="${K3S_VERSION:-}"
 
@@ -87,12 +94,12 @@ resolve_inputs() {
   fi
 
   if [[ -z "${EDGE_PROXY}" ]]; then
-    EDGE_PROXY="$( is_tty && prompt "Configure host TLS reverse proxy now? (none/caddy)" "caddy" || echo "none" )"
+    EDGE_PROXY="$(is_tty && prompt "Configure host TLS reverse proxy now? (none/caddy)" "caddy" || echo "none")"
   fi
   [[ "${EDGE_PROXY}" == "none" || "${EDGE_PROXY}" == "caddy" ]] || die "EDGE_PROXY must be none|caddy"
 
   if [[ -z "${ENABLE_UFW}" ]]; then
-    ENABLE_UFW="$( is_tty && prompt "Enable UFW firewall with safe defaults (recommended)?" "false" || echo "false" )"
+    ENABLE_UFW="$(is_tty && prompt "Enable UFW firewall with safe defaults (recommended)?" "false" || echo "false")"
   fi
   ENABLE_UFW="$(bool_norm "${ENABLE_UFW}")"
   if [[ "${ENABLE_UFW}" == "true" ]]; then
@@ -110,13 +117,13 @@ resolve_inputs() {
     [[ "${CADDY_CERT_MODE}" == "dns01_wildcard" || "${CADDY_CERT_MODE}" == "http01" ]] || die "Bad CADDY_CERT_MODE"
 
     if [[ -z "${DASH_ENABLE}" ]]; then
-      DASH_ENABLE="$( is_tty && prompt "Install Kubernetes Dashboard (Helm)?" "true" || echo "false" )"
+      DASH_ENABLE="$(is_tty && prompt "Install Kubernetes Dashboard (Helm)?" "true" || echo "false")"
     fi
     DASH_ENABLE="$(bool_norm "${DASH_ENABLE}")"
     [[ -n "${DASH_HOST}" ]] || DASH_HOST="${DASH_SUBDOMAIN}.${BASE_DOMAIN}"
   else
     if [[ -z "${DASH_ENABLE}" ]]; then
-      DASH_ENABLE="$( is_tty && prompt "Install Kubernetes Dashboard (Helm)?" "false" || echo "false" )"
+      DASH_ENABLE="$(is_tty && prompt "Install Kubernetes Dashboard (Helm)?" "false" || echo "false")"
     fi
     DASH_ENABLE="$(bool_norm "${DASH_ENABLE}")"
   fi
@@ -221,7 +228,7 @@ cmd_bootstrap() {
 }
 
 usage() {
-  cat <<EOF
+  cat << EOF
 Usage: $(basename "$0") <command>
 
 Commands:
@@ -246,11 +253,12 @@ main() {
       MODE="join"
       cmd_bootstrap
       ;;
-    help|-h|--help)
+    help | -h | --help)
       usage
       ;;
     *)
-      usage; exit 1;
+      usage
+      exit 1
       ;;
   esac
 }
