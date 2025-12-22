@@ -99,7 +99,7 @@ resolve_inputs() {
   [[ "${EDGE_PROXY}" == "none" || "${EDGE_PROXY}" == "caddy" ]] || die "EDGE_PROXY must be none|caddy"
 
   if [[ -z "${ENABLE_UFW}" ]]; then
-    ENABLE_UFW="$(is_tty && prompt "Enable UFW firewall with safe defaults (recommended)?" "false" || echo "false")"
+    ENABLE_UFW="$(is_tty && prompt "Enable UFW firewall with safe defaults (recommended)?" "true" || echo "false")"
   fi
   ENABLE_UFW="$(bool_norm "${ENABLE_UFW}")"
   if [[ "${ENABLE_UFW}" == "true" ]]; then
