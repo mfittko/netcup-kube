@@ -502,8 +502,14 @@ if [[ "${DO_RUN}" == "true" ]]; then
     scp_user "${RUN_ENV_FILE}" "${NEW_USER}@${HOST}:${remote_env}"
   fi
 
-  echo "[local] Running on ${NEW_USER}@${HOST}: sudo ${remote_bin} ${RUN_ARGS[*]}"
-  ssh_user "${tty_flags[@]}" "sudo -E bash -s" -- "${remote_env}" "${remote_bin}" "${RUN_ARGS[@]}" << 'EOS'
+  # ssh joins argv into a single remote shell string; shell-escape args to avoid interpretation (e.g. pipes in --domains).
+  remote_cmd=(sudo -E bash -s -- "${remote_env}" "${remote_bin}" "${RUN_ARGS[@]}")
+  remote_cmd_q=""
+  printf -v remote_cmd_q '%q ' "${remote_cmd[@]}"
+  remote_cmd_q="${remote_cmd_q% }"
+
+  echo "[local] Running on ${NEW_USER}@${HOST}: ${remote_cmd_q}"
+  ssh_user "${tty_flags[@]}" "${remote_cmd_q}" << 'EOS'
 set -euo pipefail
 env_file="${1:-}"
 bin="${2:-}"

@@ -353,6 +353,7 @@ cmd_dns() {
 
   local type="wildcard"
   local domains=""
+  local plan_hosts=""
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -360,7 +361,7 @@ cmd_dns() {
         cat << EOF
 Usage: $(basename "$0") dns
        $(basename "$0") dns --type wildcard
-       $(basename "$0") dns --type edge-http --domains "kube.example.com|demo.example.com"
+       $(basename "$0") dns --type edge-http --domains "kube.example.com,demo.example.com"
 
 Configure edge TLS via Caddy using either:
 - DNS-01 wildcard (default) via Netcup DNS API (apex + wildcard), or
@@ -368,7 +369,7 @@ Configure edge TLS via Caddy using either:
 
 Options:
   --type <wildcard|edge-http>   Certificate mode (default: wildcard)
-  --domains "<a|b|c>"           Required when --type edge-http (pipe-separated hostnames)
+  --domains "<a,b,c>"           Required when --type edge-http (comma-separated hostnames; '|' also accepted)
 
 Notes:
   - This overwrites /etc/caddy/Caddyfile and restarts Caddy.
@@ -398,8 +399,6 @@ EOF
     shift || true
   done
 
-  confirm_dangerous_or_die "This will overwrite /etc/caddy/Caddyfile and restart Caddy"
-
   EDGE_PROXY="caddy"
   case "${type}" in
     "" | wildcard)
@@ -407,14 +406,30 @@ EOF
       unset CADDY_HTTP01_HOSTS || true
       ;;
     edge-http)
-      [[ -n "${domains}" ]] || die "--domains is required for --type edge-http (format: a|b|c)"
+      [[ -n "${domains}" ]] || die "--domains is required for --type edge-http (format: a,b,c)"
       CADDY_CERT_MODE="http01"
-      CADDY_HTTP01_HOSTS="${domains//|/ }"
+      plan_hosts="${domains}"
+      plan_hosts="${plan_hosts//,/ }"
+      plan_hosts="${plan_hosts//|/ }"
+      CADDY_HTTP01_HOSTS="${plan_hosts}"
       ;;
     *)
       die "Unknown --type for dns: ${type} (use wildcard or edge-http)"
       ;;
   esac
+
+  cat << EOF
+Will configure edge TLS via Caddy:
+  - cert mode: ${CADDY_CERT_MODE}
+EOF
+  if [[ "${CADDY_CERT_MODE}" == "http01" ]]; then
+    echo "  - hosts: ${CADDY_HTTP01_HOSTS}"
+  else
+    echo "  - hosts: wildcard for BASE_DOMAIN (apex + *)"
+  fi
+  echo
+
+  confirm_dangerous_or_die "This will overwrite /etc/caddy/Caddyfile and restart Caddy"
 
   [[ -n "${NODE_IP}" ]] || NODE_IP="$(infer_node_ip)"
   [[ -n "${EDGE_UPSTREAM}" ]] || EDGE_UPSTREAM="http://127.0.0.1:${TRAEFIK_NODEPORT_HTTP}"
