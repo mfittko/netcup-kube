@@ -33,7 +33,22 @@ TLS_SANS_EXTRA="${TLS_SANS_EXTRA:-}"
 SERVER_URL="${SERVER_URL:-}"
 TOKEN="${TOKEN:-}"
 TOKEN_FILE="${TOKEN_FILE:-}"
-KUBECONFIG_MODE="${KUBECONFIG_MODE:-0600}"
+# kubeconfig permissions:
+# - By default, when running via sudo, make kubeconfig group-readable by the sudo user's primary group
+#   so non-root kubectl works (still not world-readable).
+# - When running directly as root (no sudo user), default to 0600.
+infer_kubeconfig_group() {
+  [[ -n "${SUDO_USER:-}" ]] || return 0
+  id -gn "${SUDO_USER}" 2> /dev/null || true
+}
+KUBECONFIG_GROUP="${KUBECONFIG_GROUP:-$(infer_kubeconfig_group)}"
+if [[ -z "${KUBECONFIG_MODE:-}" ]]; then
+  if [[ -n "${KUBECONFIG_GROUP}" ]]; then
+    KUBECONFIG_MODE="0640"
+  else
+    KUBECONFIG_MODE="0600"
+  fi
+fi
 
 HTTP_PROXY="${HTTP_PROXY:-}"
 HTTPS_PROXY="${HTTPS_PROXY:-}"
@@ -227,9 +242,13 @@ cmd_bootstrap() {
   echo "k3s:"
   echo "  node-ip: ${NODE_IP}"
   [[ -n "${NODE_EXTERNAL_IP}" ]] && echo "  node-external-ip: ${NODE_EXTERNAL_IP}"
-  echo "  kubeconfig: $(kcfg) (mode ${KUBECONFIG_MODE})"
+  if [[ -n "${KUBECONFIG_GROUP:-}" ]]; then
+    echo "  kubeconfig: $(kcfg) (mode ${KUBECONFIG_MODE}, group ${KUBECONFIG_GROUP})"
+  else
+    echo "  kubeconfig: $(kcfg) (mode ${KUBECONFIG_MODE})"
+  fi
   if [[ "${KUBECONFIG_MODE}" == "0600" ]]; then
-    echo "  note: run kubectl via sudo, or set KUBECONFIG_MODE=0644 before bootstrap to use kubectl as non-root"
+    echo "  note: run kubectl via sudo, or set KUBECONFIG_MODE=0640 and KUBECONFIG_GROUP=<your-group> before bootstrap to use kubectl as non-root"
   fi
   echo
   echo "traefik:"

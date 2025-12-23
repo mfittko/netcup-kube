@@ -26,6 +26,8 @@ k3s_write_config() {
   local node_ip="$1"
   local flannel_iface_line=""
   [[ -n "${PRIVATE_IFACE:-}" ]] && flannel_iface_line=$'flannel-iface: '"${PRIVATE_IFACE}"
+  local kubeconfig_group_line=""
+  [[ -n "${KUBECONFIG_GROUP:-}" ]] && kubeconfig_group_line=$'write-kubeconfig-group: '"\"${KUBECONFIG_GROUP}\""
 
   local cfg
   case "${MODE}" in
@@ -35,6 +37,7 @@ k3s_write_config() {
       cfg="$(
         cat << EOF
 write-kubeconfig-mode: "${KUBECONFIG_MODE}"
+${kubeconfig_group_line}
 node-ip: "${node_ip}"
 ${flannel_iface_line}
 flannel-backend: "${FLANNEL_BACKEND}"

@@ -39,6 +39,8 @@ Quick start (on the target Debian 13 server)
 Environment variables (selected)
 - MODE=bootstrap|join (default bootstrap)
 - CHANNEL=stable (or set K3S_VERSION)
+- KUBECONFIG_MODE=0600|0640 (defaults to 0640 when running via sudo; otherwise 0600)
+- KUBECONFIG_GROUP=ops (defaults to sudo user's primary group; used for k3s write-kubeconfig-group)
 - PRIVATE_IFACE, PRIVATE_CIDR, ENABLE_VLAN_NAT=true, PUBLIC_IFACE
 - EDGE_PROXY=none|caddy, BASE_DOMAIN=example.com, ACME_EMAIL=user@example.com
 - CADDY_CERT_MODE=dns01_wildcard|http01 (default dns01_wildcard)
