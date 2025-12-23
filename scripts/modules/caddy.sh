@@ -124,6 +124,21 @@ caddy_load_or_create_dashboard_basicauth() {
   DASH_BASICAUTH="$(bool_norm "${DASH_BASICAUTH}")"
   [[ "${DASH_BASICAUTH}" == "true" ]] || return 0
 
+  # If an auth file already exists, default to reusing it. On a TTY, offer to regenerate.
+  # This prevents confusion where users "set a password" but an old hash is still in effect.
+  if [[ -z "${DASH_AUTH_HASH:-}" && -z "${DASH_AUTH_PASS:-}" && -f "${DASH_AUTH_FILE}" ]]; then
+    if [[ "$(bool_norm "${DASH_AUTH_REGEN:-false}")" == "true" ]]; then
+      rm -f "${DASH_AUTH_FILE}" || true
+    elif is_tty; then
+      local reuse
+      reuse="$(prompt "Reuse existing dashboard basic auth from ${DASH_AUTH_FILE}? (set DASH_AUTH_REGEN=true to force regen)" "true")"
+      reuse="$(bool_norm "${reuse}")"
+      if [[ "${reuse}" != "true" ]]; then
+        rm -f "${DASH_AUTH_FILE}" || true
+      fi
+    fi
+  fi
+
   if [[ -z "${DASH_AUTH_HASH:-}" && -f "${DASH_AUTH_FILE}" ]]; then
     local line
     line="$(head -n1 "${DASH_AUTH_FILE}" 2> /dev/null || true)"
@@ -137,7 +152,16 @@ caddy_load_or_create_dashboard_basicauth() {
   fi
 
   if [[ -z "${DASH_AUTH_HASH:-}" ]]; then
-    [[ -n "${DASH_AUTH_PASS:-}" ]] || DASH_AUTH_PASS="$(prompt_secret "Caddy Basic Auth password for ${DASH_AUTH_USER} (protects https://${DASH_HOST}/)")"
+    if [[ -z "${DASH_AUTH_PASS:-}" ]]; then
+      local p1 p2
+      p1="$(prompt_secret "Caddy Basic Auth password for ${DASH_AUTH_USER} (protects https://${DASH_HOST}/)")"
+      [[ -n "${p1}" ]] || die "Dashboard basic auth enabled but no password provided"
+      if is_tty; then
+        p2="$(prompt_secret "Confirm Caddy Basic Auth password for ${DASH_AUTH_USER}")"
+        [[ "${p1}" == "${p2}" ]] || die "Passwords did not match"
+      fi
+      DASH_AUTH_PASS="${p1}"
+    fi
     [[ -n "${DASH_AUTH_PASS}" ]] || die "Dashboard basic auth enabled but no password provided"
     DASH_AUTH_HASH="/usr/local/bin/caddy hash-password --plaintext "
     DASH_AUTH_HASH="$(${DASH_AUTH_HASH} "${DASH_AUTH_PASS}")"
