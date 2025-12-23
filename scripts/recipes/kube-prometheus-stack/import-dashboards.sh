@@ -87,6 +87,22 @@ else
   GRAFANA_URL="http://localhost:3000"
 fi
 
+# Wait for Grafana to be ready and accepting authentication
+log "Waiting for Grafana to be ready..."
+max_retries=30
+retry_count=0
+while [[ $retry_count -lt $max_retries ]]; do
+  if curl -sf -u "admin:${GRAFANA_PASSWORD}" "${GRAFANA_URL}/api/health" > /dev/null 2>&1; then
+    log "Grafana is ready!"
+    break
+  fi
+  retry_count=$((retry_count + 1))
+  if [[ $retry_count -ge $max_retries ]]; then
+    die "Grafana failed to become ready after ${max_retries} attempts"
+  fi
+  sleep 2
+done
+
 # Function to import dashboard by ID
 import_dashboard() {
   local dashboard_id="$1"
@@ -94,10 +110,12 @@ import_dashboard() {
 
   log "Importing dashboard: ${dashboard_name} (ID: ${dashboard_id})"
 
-  if curl -s -X POST "${GRAFANA_URL}/api/dashboards/import" \
-    -H "Content-Type: application/json" \
-    -u "admin:${GRAFANA_PASSWORD}" \
-    -d @- << EOF; then
+  local response
+  response=$(
+    curl -s -w "\n%{http_code}" -X POST "${GRAFANA_URL}/api/dashboards/import" \
+      -H "Content-Type: application/json" \
+      -u "admin:${GRAFANA_PASSWORD}" \
+      -d @- << EOF
 {
   "dashboard": {
     "id": null,
@@ -124,10 +142,39 @@ import_dashboard() {
   "gnetId": ${dashboard_id}
 }
 EOF
-    log "✓ Successfully imported ${dashboard_name}"
-  else
-    log "⚠ Failed to import ${dashboard_name}"
+  )
+
+  local http_code
+  http_code=$(echo "$response" | tail -n1)
+  local body
+  body=$(echo "$response" | sed '$d')
+
+  # Check HTTP status code first
+  if [[ ! "$http_code" =~ ^2[0-9][0-9]$ ]]; then
+    log "⚠ Failed to import ${dashboard_name} (HTTP ${http_code})"
+    if [[ -n "$body" ]]; then
+      echo "  Response: $body" >&2
+    fi
+    return 1
   fi
+
+  # Check JSON response for errors (Grafana may return 200 with error in body)
+  if echo "$body" | grep -q '"message".*"Invalid username or password"'; then
+    log "⚠ Failed to import ${dashboard_name} (Authentication failed)"
+    echo "  Response: $body" >&2
+    return 1
+  elif echo "$body" | grep -q '"message"'; then
+    # Check if there's any error message in the response
+    local error_msg
+    error_msg=$(echo "$body" | grep -o '"message":"[^"]*"' | head -n1 || true)
+    if [[ -n "$error_msg" && ! "$body" =~ '"status".*"success"' ]]; then
+      log "⚠ Failed to import ${dashboard_name}"
+      echo "  Error: $error_msg" >&2
+      return 1
+    fi
+  fi
+
+  log "✓ Successfully imported ${dashboard_name}"
   echo ""
 }
 
@@ -146,3 +193,4 @@ else
 fi
 echo "  Username: admin"
 echo "  Password: ${GRAFANA_PASSWORD}"
+

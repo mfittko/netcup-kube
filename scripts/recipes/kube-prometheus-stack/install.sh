@@ -233,3 +233,26 @@ echo "  - Kubernetes / Compute Resources / Cluster"
 echo "  - Kubernetes / Compute Resources / Namespace (Pods)"
 echo "  - Node Exporter / Nodes"
 echo "  - And many more in the 'Dashboards' menu!"
+echo
+echo "Importing community dashboards..."
+IMPORT_SCRIPT="${SCRIPT_DIR}/import-dashboards.sh"
+if [[ -x "${IMPORT_SCRIPT}" ]]; then
+  if [[ -n "${HOST}" ]]; then
+    if ! "${IMPORT_SCRIPT}" --namespace "${NAMESPACE}" --grafana-host "${HOST}"; then
+      echo ""
+      echo "⚠ WARNING: Dashboard import encountered errors, but kube-prometheus-stack is installed."
+      echo "  You can retry dashboard import later with:"
+      echo "    ${IMPORT_SCRIPT} --namespace ${NAMESPACE} --grafana-host ${HOST}"
+    fi
+  else
+    if ! "${IMPORT_SCRIPT}" --namespace "${NAMESPACE}"; then
+      echo ""
+      echo "⚠ WARNING: Dashboard import encountered errors, but kube-prometheus-stack is installed."
+      echo "  You can retry dashboard import later with:"
+      echo "    ${IMPORT_SCRIPT} --namespace ${NAMESPACE}"
+    fi
+  fi
+else
+  log "⚠ Dashboard import script not found at ${IMPORT_SCRIPT}"
+fi
+
