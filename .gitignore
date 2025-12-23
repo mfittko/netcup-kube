@@ -11,6 +11,10 @@
 .env
 .env.*
 
+# local repo config (preferred over .env since some environments block dotfiles)
+config/netcup-kube.env
+config/k3s.yaml
+
 # build/artefacts
 *.log
 

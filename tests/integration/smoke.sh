@@ -15,6 +15,9 @@ export ENABLE_UFW=false
 export EDGE_PROXY=none
 export DASH_ENABLE=false
 
+# Local helper sanity: ensure tunnel script is present and runnable.
+./bin/netcup-kube-tunnel --help > /dev/null
+
 # Bootstrap path
 ./bin/netcup-kube bootstrap
 
