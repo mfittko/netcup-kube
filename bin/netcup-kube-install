@@ -141,15 +141,20 @@ if [[ -z "${KUBECONFIG:-}" ]]; then
     if [[ -n "${REMOTE_HOST:-}" && -n "${REMOTE_USER:-}" ]]; then
       TUNNEL_PORT="${TUNNEL_LOCAL_PORT:-6443}"
       if ! is_tunnel_running "${REMOTE_HOST}" "${REMOTE_USER}" "${TUNNEL_PORT}"; then
-        echo ""
-        echo "ERROR: kubectl cannot connect without an SSH tunnel" >&2
-        echo "" >&2
-        echo "Start the tunnel first:" >&2
-        echo "  bin/netcup-kube-tunnel start" >&2
-        echo "" >&2
-        echo "Then retry this command." >&2
-        echo "" >&2
-        exit 1
+        echo "SSH tunnel not running. Starting tunnel..."
+        TUNNEL_SCRIPT="${SCRIPT_DIR}/netcup-kube-tunnel"
+        if [[ ! -x "${TUNNEL_SCRIPT}" ]]; then
+          echo "ERROR: netcup-kube-tunnel script not found at ${TUNNEL_SCRIPT}" >&2
+          exit 1
+        fi
+        "${TUNNEL_SCRIPT}" start
+        # Give tunnel a moment to establish
+        sleep 1
+        # Verify tunnel is now running
+        if ! is_tunnel_running "${REMOTE_HOST}" "${REMOTE_USER}" "${TUNNEL_PORT}"; then
+          echo "ERROR: Failed to start SSH tunnel" >&2
+          exit 1
+        fi
       fi
       echo "Using tunnel: localhost:${TUNNEL_PORT} -> ${REMOTE_HOST}:6443"
     fi
