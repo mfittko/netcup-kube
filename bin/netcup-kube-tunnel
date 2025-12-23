@@ -1,0 +1,273 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat << 'EOF'
+Usage:
+  netcup-kube-tunnel [start] [--host HOST] [--user USER] [--local-port PORT] [--remote-host HOST] [--remote-port PORT]
+  netcup-kube-tunnel stop  [--host HOST] [--user USER] [--local-port PORT]
+  netcup-kube-tunnel status [--host HOST] [--user USER] [--local-port PORT]
+  netcup-kube-tunnel [start|stop|status] [--env-file PATH] [--no-env]
+
+Defaults:
+  --env-file    <repo>/config/netcup-kube.env (if present) else <repo>/.env (if present)
+  --host        mfittko.com (or $TUNNEL_HOST)
+  --user        ops (or $TUNNEL_USER)
+  --local-port  6443 (or $TUNNEL_LOCAL_PORT)
+  --remote-host 127.0.0.1 (or $TUNNEL_REMOTE_HOST)
+  --remote-port 6443 (or $TUNNEL_REMOTE_PORT)
+
+Behavior:
+  - start runs ssh in the background (-fN) with keepalives, using a ControlMaster socket.
+  - stop requests the ControlMaster to exit (no PID killing).
+  - status checks the ControlMaster socket state.
+  - If an env file is loaded, it may set any of:
+    - TUNNEL_HOST, TUNNEL_USER, TUNNEL_LOCAL_PORT, TUNNEL_REMOTE_HOST, TUNNEL_REMOTE_PORT
+
+Examples:
+  bin/netcup-kube-tunnel
+  bin/netcup-kube-tunnel start --host mfittko.com --user ops
+  bin/netcup-kube-tunnel stop
+EOF
+}
+
+need_cmd() {
+  command -v "$1" > /dev/null 2>&1 || {
+    echo "ERROR: missing required command: $1" >&2
+    exit 1
+  }
+}
+
+is_darwin() { [[ "$(uname -s)" == "Darwin" ]]; }
+
+load_env_file() {
+  local env_file="$1"
+  [[ -n "$env_file" ]] || return 0
+  [[ -f "$env_file" ]] || return 0
+
+  # NOTE: .env is treated as a bash-compatible file and will be executed.
+  # Keep it simple: KEY=value pairs only.
+  set -a
+  # shellcheck disable=SC1090
+  source "$env_file"
+  set +a
+}
+
+ctl_socket() {
+  local user="$1" host="$2" local_port="$3"
+  local base="${XDG_RUNTIME_DIR:-/tmp}"
+  local key="${user}@${host}-${local_port}"
+  key="${key//@/_}"
+  key="${key//:/_}"
+  key="${key//\//_}"
+  echo "${base%/}/netcup-kube-tunnel-${key}.ctl"
+}
+
+port_in_use() {
+  local port="$1"
+  if is_darwin; then
+    command -v lsof > /dev/null 2>&1 || return 1
+    lsof -nP -iTCP:"${port}" -sTCP:LISTEN > /dev/null 2>&1
+  else
+    command -v ss > /dev/null 2>&1 || return 1
+    ss -ltn "( sport = :${port} )" | tail -n +2 | grep -q .
+  fi
+}
+
+start_tunnel() {
+  local host="$1" user="$2" local_port="$3" remote_host="$4" remote_port="$5"
+  local sock
+  sock="$(ctl_socket "$user" "$host" "$local_port")"
+
+  if ssh -S "$sock" -O check "${user}@${host}" > /dev/null 2>&1; then
+    echo "Tunnel already running on localhost:${local_port} -> ${remote_host}:${remote_port} via ${user}@${host}"
+    return 0
+  fi
+
+  if port_in_use "$local_port"; then
+    echo "ERROR: localhost:${local_port} is already in use. Stop the existing process or choose --local-port." >&2
+    exit 1
+  fi
+
+  need_cmd ssh
+
+  # -f: background after auth
+  # -N: no remote command
+  # -M/-S: ControlMaster socket for start/stop/status
+  # ExitOnForwardFailure: fail fast if bind/forward can't be established
+  # ServerAlive*: detect broken links
+  ssh -M -S "$sock" -fN \
+    -L "${local_port}:${remote_host}:${remote_port}" \
+    "${user}@${host}" \
+    -o ControlPersist=yes \
+    -o ExitOnForwardFailure=yes \
+    -o ServerAliveInterval=30 \
+    -o ServerAliveCountMax=3
+
+  echo "Started tunnel on localhost:${local_port} -> ${remote_host}:${remote_port} via ${user}@${host}"
+}
+
+stop_tunnel() {
+  local host="$1" user="$2" local_port="$3"
+  local sock
+  sock="$(ctl_socket "$user" "$host" "$local_port")"
+
+  need_cmd ssh
+
+  if ! ssh -S "$sock" -O check "${user}@${host}" > /dev/null 2>&1; then
+    echo "No tunnel running for localhost:${local_port} via ${user}@${host}."
+    return 0
+  fi
+
+  ssh -S "$sock" -O exit "${user}@${host}" > /dev/null 2>&1 || true
+  echo "Stopped tunnel on localhost:${local_port} via ${user}@${host}."
+}
+
+status_tunnel() {
+  local host="$1" user="$2" local_port="$3" remote_host="$4" remote_port="$5"
+  local sock
+  sock="$(ctl_socket "$user" "$host" "$local_port")"
+
+  need_cmd ssh
+
+  local check_out=""
+  check_out="$(ssh -S "$sock" -O check "${user}@${host}" 2>&1 || true)"
+
+  if [[ "$check_out" == *"Master running"* ]]; then
+    echo "running:  localhost:${local_port} -> ${remote_host}:${remote_port} via ${user}@${host}"
+    echo "socket:   ${sock}"
+    echo "control:  ${check_out}"
+    # Best-effort: show what is listening on the local port (helpful if something else bound it).
+    if is_darwin && command -v lsof > /dev/null 2>&1; then
+      echo "listen:"
+      lsof -nP -iTCP:"${local_port}" -sTCP:LISTEN 2> /dev/null || true
+    elif command -v ss > /dev/null 2>&1; then
+      echo "listen:"
+      ss -ltnp "( sport = :${local_port} )" 2> /dev/null || true
+    fi
+    return 0
+  fi
+
+  echo "not running: localhost:${local_port} -> ${remote_host}:${remote_port} via ${user}@${host}"
+  echo "socket:      ${sock}"
+  echo "control:     ${check_out:-<no output>}"
+  if port_in_use "$local_port"; then
+    echo "listen:      yes (something is bound to localhost:${local_port})"
+  else
+    echo "listen:      no"
+  fi
+  return 1
+}
+
+main() {
+  local script_dir repo_root
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  repo_root="$(cd "${script_dir}/.." && pwd)"
+
+  local default_env_file="${repo_root}/config/netcup-kube.env"
+  if [[ ! -f "$default_env_file" ]]; then
+    default_env_file="${repo_root}/.env"
+  fi
+  local env_file="${NETCUP_KUBE_ENV_FILE:-${default_env_file}}"
+  local no_env="false"
+
+  local cmd="start"
+  if [[ $# -gt 0 ]]; then
+    case "$1" in
+      start | stop | status)
+        cmd="$1"
+        shift
+        ;;
+      -h | --help | help)
+        usage
+        exit 0
+        ;;
+    esac
+  fi
+
+  # First pass: allow selecting/disabling env file before reading defaults from it.
+  local args=("$@")
+  local i=0
+  while [[ $i -lt ${#args[@]} ]]; do
+    case "${args[$i]}" in
+      --env-file)
+        i=$((i + 1))
+        [[ $i -lt ${#args[@]} ]] || {
+          echo "ERROR: --env-file requires a value" >&2
+          exit 1
+        }
+        env_file="${args[$i]}"
+        ;;
+      --no-env)
+        no_env="true"
+        ;;
+    esac
+    i=$((i + 1))
+  done
+
+  if [[ "$no_env" != "true" ]]; then
+    load_env_file "$env_file"
+  fi
+
+  local host="${TUNNEL_HOST:-mfittko.com}"
+  local user="${TUNNEL_USER:-ops}"
+  local local_port="${TUNNEL_LOCAL_PORT:-6443}"
+  local remote_host="${TUNNEL_REMOTE_HOST:-127.0.0.1}"
+  local remote_port="${TUNNEL_REMOTE_PORT:-6443}"
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --env-file)
+        shift
+        [[ -n "${1:-}" ]] || {
+          echo "ERROR: --env-file requires a value" >&2
+          exit 1
+        }
+        env_file="${1}"
+        ;;
+      --no-env) ;;
+      --host)
+        shift
+        host="${1:-}"
+        ;;
+      --user)
+        shift
+        user="${1:-}"
+        ;;
+      --local-port)
+        shift
+        local_port="${1:-}"
+        ;;
+      --remote-host)
+        shift
+        remote_host="${1:-}"
+        ;;
+      --remote-port)
+        shift
+        remote_port="${1:-}"
+        ;;
+      -h | --help)
+        usage
+        exit 0
+        ;;
+      *)
+        echo "Unknown arg: $1" >&2
+        usage
+        exit 1
+        ;;
+    esac
+    shift
+  done
+
+  case "$cmd" in
+    start) start_tunnel "$host" "$user" "$local_port" "$remote_host" "$remote_port" ;;
+    stop) stop_tunnel "$host" "$user" "$local_port" ;;
+    status) status_tunnel "$host" "$user" "$local_port" "$remote_host" "$remote_port" ;;
+    *)
+      usage
+      exit 1
+      ;;
+  esac
+}
+
+main "$@"
