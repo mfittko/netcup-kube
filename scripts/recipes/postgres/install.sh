@@ -134,29 +134,35 @@ helm "${HELM_ARGS[@]}"
 log "PostgreSQL installed successfully!"
 echo
 
-# Fetch password
-POSTGRES_PASSWORD=""
-if POSTGRES_PASSWORD=$(k get secret --namespace "${NAMESPACE}" postgres-postgresql -o jsonpath='{.data.postgres-password}' 2> /dev/null | base64 -d); then
+# Fetch passwords
+POSTGRES_ADMIN_PASSWORD=""
+POSTGRES_APP_PASSWORD=""
+if POSTGRES_ADMIN_PASSWORD=$(k get secret --namespace "${NAMESPACE}" postgres-postgresql -o jsonpath='{.data.postgres-password}' 2> /dev/null | base64 -d); then
+  POSTGRES_APP_PASSWORD=$(k get secret --namespace "${NAMESPACE}" postgres-postgresql -o jsonpath='{.data.password}' 2> /dev/null | base64 -d || echo "")
   echo "Connection details:"
-  echo "  Host:     postgres-postgresql.${NAMESPACE}.svc.cluster.local"
-  echo "  Port:     5432"
-  echo "  Database: app"
-  echo "  User:     app"
-  echo "  Password: ${POSTGRES_PASSWORD}"
+  echo "  Host:       postgres-postgresql.${NAMESPACE}.svc.cluster.local"
+  echo "  Port:       5432"
+  echo "  Database:   app"
+  echo
+  echo "  User:       app"
+  echo "  Password:   ${POSTGRES_APP_PASSWORD}"
+  echo
+  echo "  Admin User: postgres"
+  echo "  Password:   ${POSTGRES_ADMIN_PASSWORD}"
 else
   echo "Connection details:"
   echo "  Host:     postgres-postgresql.${NAMESPACE}.svc.cluster.local"
   echo "  Port:     5432"
   echo "  Database: app"
-  echo "  User:     app"
   echo
-  echo "To get the password:"
-  echo "  kubectl get secret --namespace ${NAMESPACE} postgres-postgresql -o jsonpath='{.data.postgres-password}' | base64 -d"
+  echo "To get the passwords:"
+  echo "  App user:   kubectl get secret --namespace ${NAMESPACE} postgres-postgresql -o jsonpath='{.data.password}' | base64 -d"
+  echo "  Admin user: kubectl get secret --namespace ${NAMESPACE} postgres-postgresql -o jsonpath='{.data.postgres-password}' | base64 -d"
 fi
 echo
 echo "Connection string (for apps in cluster):"
-if [[ -n "${POSTGRES_PASSWORD}" ]]; then
-  echo "  postgresql://app:${POSTGRES_PASSWORD}@postgres-postgresql.${NAMESPACE}.svc.cluster.local:5432/app"
+if [[ -n "${POSTGRES_APP_PASSWORD}" ]]; then
+  echo "  postgresql://app:${POSTGRES_APP_PASSWORD}@postgres-postgresql.${NAMESPACE}.svc.cluster.local:5432/app"
 else
   echo "  postgresql://app:<password>@postgres-postgresql.${NAMESPACE}.svc.cluster.local:5432/app"
 fi
