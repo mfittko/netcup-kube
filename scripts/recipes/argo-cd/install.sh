@@ -122,6 +122,31 @@ if [[ -n "${ARGO_HOST}" ]]; then
   log "Creating/Updating Traefik ingress for ${ARGO_HOST}"
   export ARGO_HOST
   envsubst < "${SCRIPT_DIR}/ingress.yaml" | k apply -f -
+
+  log "NOTE: Ensure ${ARGO_HOST} is in your edge-http domains before accessing the UI."
+  if [[ -f "/etc/caddy/Caddyfile" ]]; then
+    # We are on the server; try to auto-append the domain if missing.
+    current_csv=""
+    if command -v "${SCRIPTS_DIR}/main.sh" > /dev/null 2>&1; then
+      current_csv="$("${SCRIPTS_DIR}/main.sh" dns --show --type edge-http --format csv 2> /dev/null || true)"
+    fi
+
+    if [[ -n "${current_csv}" ]]; then
+      if grep -qw "${ARGO_HOST}" <<< "${current_csv//,/ }"; then
+        log "  ${ARGO_HOST} is already in Caddy edge-http domains."
+      else
+        new_domains="${current_csv},${ARGO_HOST}"
+        log "  Appending ${ARGO_HOST} to Caddy edge-http domains."
+        "${SCRIPTS_DIR}/main.sh" dns --type edge-http --domains "${new_domains}"
+      fi
+    else
+      echo "  Run: sudo ./bin/netcup-kube dns --type edge-http --domains \"<current>,${ARGO_HOST}\""
+    fi
+  else
+    echo "  From your laptop:"
+    echo "    bin/netcup-kube-remote domains  # to see current list"
+    echo "    bin/netcup-kube-remote run dns --type edge-http --domains \"<current>,${ARGO_HOST}\""
+  fi
 fi
 
 log "Initial admin password (if still present)"
