@@ -17,8 +17,12 @@ helm_install_cli() {
 
 dashboard_install() {
   [[ "${DASH_ENABLE:-false}" == "true" ]] || return 0
-  [[ -n "${BASE_DOMAIN:-}" ]] || die "DASH_ENABLE=true requires BASE_DOMAIN (edge proxy should be enabled)"
-  [[ -n "${DASH_HOST:-}" ]] || DASH_HOST="${DASH_SUBDOMAIN:-kube}.${BASE_DOMAIN}"
+  # Dashboard ingress host can either be derived from BASE_DOMAIN (kube.<base>)
+  # or set explicitly for multi-domain http01 setups.
+  if [[ -z "${DASH_HOST:-}" ]]; then
+    [[ -n "${BASE_DOMAIN:-}" ]] || die "DASH_ENABLE=true requires DASH_HOST or BASE_DOMAIN"
+    DASH_HOST="${DASH_SUBDOMAIN:-kube}.${BASE_DOMAIN}"
+  fi
 
   helm_install_cli
 

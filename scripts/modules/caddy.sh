@@ -179,9 +179,17 @@ caddy_load_or_create_dashboard_basicauth() {
 
 caddy_write_caddyfile() {
   [[ "${EDGE_PROXY:-}" == "caddy" ]] || return 0
-  [[ -n "${BASE_DOMAIN:-}" ]] || die "EDGE_PROXY=caddy requires BASE_DOMAIN"
   [[ -n "${EDGE_UPSTREAM:-}" ]] || EDGE_UPSTREAM="http://127.0.0.1:${TRAEFIK_NODEPORT_HTTP}"
-  [[ -n "${DASH_HOST:-}" ]] || DASH_HOST="${DASH_SUBDOMAIN}.${BASE_DOMAIN}"
+  if [[ "${CADDY_CERT_MODE}" == "dns01_wildcard" ]]; then
+    [[ -n "${BASE_DOMAIN:-}" ]] || die "CADDY_CERT_MODE=dns01_wildcard requires BASE_DOMAIN"
+    [[ -n "${DASH_HOST:-}" ]] || DASH_HOST="${DASH_SUBDOMAIN}.${BASE_DOMAIN}"
+  else
+    # http01 mode can serve multiple unrelated domains; BASE_DOMAIN is optional.
+    [[ -n "${CADDY_HTTP01_HOSTS:-}" ]] || die "CADDY_CERT_MODE=http01 requires CADDY_HTTP01_HOSTS"
+    if [[ -z "${DASH_HOST:-}" && -n "${BASE_DOMAIN:-}" ]]; then
+      DASH_HOST="${DASH_SUBDOMAIN}.${BASE_DOMAIN}"
+    fi
+  fi
 
   # Hosts served by Caddy.
   # - dns01_wildcard: serve apex + wildcard
@@ -192,14 +200,6 @@ caddy_write_caddyfile() {
   else
     # Space-separated list of hostnames. Example: "kube.example.com demo.example.com"
     local http01_hosts="${CADDY_HTTP01_HOSTS:-}"
-    if [[ -z "${http01_hosts}" ]]; then
-      # Sensible default: ensure the dashboard host is covered (if present), otherwise the apex.
-      if [[ -n "${DASH_HOST:-}" ]]; then
-        http01_hosts="${DASH_HOST}"
-      else
-        http01_hosts="${BASE_DOMAIN}"
-      fi
-    fi
     # Reject wildcards in http-01 mode (Let's Encrypt requires DNS-01 for wildcards).
     if grep -q '\*' <<< "${http01_hosts}"; then
       die "CADDY_CERT_MODE=http01 does not support wildcard hosts. Remove '*' from CADDY_HTTP01_HOSTS."
