@@ -1,0 +1,13 @@
+architecture: standalone
+
+auth:
+  enabled: true
+  # password will be set via --set if provided
+
+master:
+  persistence:
+    enabled: true
+    size: 8Gi
+
+metrics:
+  enabled: false

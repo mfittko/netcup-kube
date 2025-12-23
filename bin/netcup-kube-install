@@ -39,7 +39,6 @@ Available recipes:
   postgres        Install PostgreSQL (Bitnami Helm chart)
   redis           Install Redis (Bitnami Helm chart)
   sealed-secrets  Install Sealed Secrets (encrypt secrets for Git)
-  metrics-server  Install Metrics Server (resource metrics, HPA)
 
 Examples:
   netcup-kube-install argo-cd --help
