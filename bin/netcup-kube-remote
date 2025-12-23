@@ -17,7 +17,8 @@ set -euo pipefail
 #   # Run a netcup-kube command on the remote host (forces a TTY so prompts work)
 #   bin/netcup-kube-remote host --user ops run bootstrap
 #   bin/netcup-kube-remote host --user ops run pair
-#   bin/netcup-kube-remote host --user ops run edge-http01 kube.example.com demo.example.com
+#   bin/netcup-kube-remote host --user ops run dns
+#   bin/netcup-kube-remote host --user ops run dns --type edge-http --domains "kube.example.com|demo.example.com"
 #
 # After bootstrap you can SSH as the new user: ssh <user>@<host>
 
@@ -55,6 +56,25 @@ Command options:
 Notes:
   - `run` uses SSH with a forced TTY (unless --no-tty) so prompts can read from /dev/tty.
   - `--env-file` is copied to the remote host and bash-sourced before running netcup-kube.
+EOF
+  exit "${exit_code}"
+}
+
+usage_run() {
+  local exit_code="${1:-0}"
+  cat >&2 << 'EOF'
+Usage:
+  netcup-kube-remote [<host-or-ip>] [--user <name>] run [--no-tty] [--env-file <path>] [--branch <name>] [--ref <ref>] [--pull|--no-pull] [--] <netcup-kube args...>
+
+Examples:
+  netcup-kube-remote run bootstrap
+  netcup-kube-remote run pair
+  netcup-kube-remote run dns
+  netcup-kube-remote run dns --type edge-http --domains "kube.example.com|demo.example.com"
+  netcup-kube-remote run --env-file ./config/netcup-kube.env bootstrap
+
+Notes:
+  - Pass -- to stop parsing netcup-kube-remote flags, e.g.: netcup-kube-remote run -- --help
 EOF
   exit "${exit_code}"
 }
@@ -212,6 +232,10 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+if [[ "${DO_RUN}" == "true" && "${#RUN_ARGS[@]}" -lt 1 ]]; then
+  usage_run 1
+fi
+
 if [[ "${DO_PROVISION}" != "true" && "${DO_GIT}" != "true" && "${DO_RUN}" != "true" ]]; then
   usage 1
 fi
@@ -314,30 +338,61 @@ fi
 EOS
 }
 
-# 1) Ensure our key is on root via ssh-copy-id (password auth)
-if ssh -o BatchMode=yes -o StrictHostKeyChecking=no root@"$HOST" true 2> /dev/null; then
-  echo "SSH key already works for root@$HOST"
-else
+ensure_root_access_or_die() {
+  # Ensure our key is on root via ssh-copy-id (password auth)
+  if ssh -o BatchMode=yes -o StrictHostKeyChecking=no root@"$HOST" true 2> /dev/null; then
+    echo "SSH key already works for root@${HOST}"
+    return 0
+  fi
+
   if command -v sshpass > /dev/null 2>&1; then
     if [[ -z "${ROOT_PASS:-}" ]]; then
       read -r -s -p "Root password for root@${HOST}: " ROOT_PASS
       echo
     fi
-    echo "Pushing SSH key to root@$HOST with sshpass+ssh-copy-id"
+    echo "Pushing SSH key to root@${HOST} with sshpass+ssh-copy-id"
     sshpass -p "$ROOT_PASS" ssh-copy-id -o StrictHostKeyChecking=no -f -i "$PUBKEY_PATH" root@"$HOST"
     unset ROOT_PASS || true
-  else
-    echo "Passwordless SSH for root not set up yet."
-    echo "Install sshpass to allow a silent prompt here, or run:"
-    echo "  ssh-copy-id -o StrictHostKeyChecking=no -i '$PUBKEY_PATH' root@$HOST"
-    echo "Then re-run this script."
-    exit 1
+    return 0
   fi
-fi
 
-# 2) Run remote provisioning as root
-REMOTE_SCRIPT="$(
-  cat << 'EOS'
+  echo "Passwordless SSH for root not set up yet." >&2
+  echo "Install sshpass to allow a silent prompt here, or run:" >&2
+  echo "  ssh-copy-id -o StrictHostKeyChecking=no -i '$PUBKEY_PATH' root@${HOST}" >&2
+  echo "Then re-run: ${LOCAL_CMD} ${HOST} provision" >&2
+  exit 1
+}
+
+ensure_user_access_or_die() {
+  # Do NOT touch root for run/git. Require that provisioning already happened.
+  if ssh -o BatchMode=yes -o StrictHostKeyChecking=no "${NEW_USER}@${HOST}" true 2> /dev/null; then
+    return 0
+  fi
+
+  echo "SSH key does not work for ${NEW_USER}@${HOST}." >&2
+  echo "Run provisioning first (uses root once):" >&2
+  echo "  ${LOCAL_CMD} ${HOST} --user ${NEW_USER} provision" >&2
+  exit 1
+}
+
+ensure_remote_repo_or_die() {
+  local repo
+  repo="$(remote_repo_dir)"
+  if ssh -o BatchMode=yes -o StrictHostKeyChecking=no "${NEW_USER}@${HOST}" "test -d '${repo}'" 2> /dev/null; then
+    return 0
+  fi
+
+  echo "Remote repo not found at ${NEW_USER}@${HOST}:${repo}" >&2
+  echo "Run provisioning first:" >&2
+  echo "  ${LOCAL_CMD} ${HOST} --user ${NEW_USER} provision" >&2
+  exit 1
+}
+
+run_provision() {
+  ensure_root_access_or_die
+
+  REMOTE_SCRIPT="$(
+    cat << 'EOS'
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -y
@@ -382,19 +437,26 @@ Then on the server:
   sudo /home/__NEW_USER__/netcup-kube/bin/netcup-kube bootstrap
 EOM
 EOS
-)"
+  )"
 
-# Substitute placeholders safely
-REMOTE_SCRIPT="${REMOTE_SCRIPT//__NEW_USER__/$NEW_USER}"
-REMOTE_SCRIPT="${REMOTE_SCRIPT//__PUBKEY__/$PUBKEY_CONTENT}"
-REMOTE_SCRIPT="${REMOTE_SCRIPT//__REPO_URL__/$REPO_URL}"
-REMOTE_SCRIPT="${REMOTE_SCRIPT//__HOST__/$HOST}"
-REMOTE_SCRIPT="${REMOTE_SCRIPT//__LOCAL_CMD__/$LOCAL_CMD}"
+  # Substitute placeholders safely
+  REMOTE_SCRIPT="${REMOTE_SCRIPT//__NEW_USER__/$NEW_USER}"
+  REMOTE_SCRIPT="${REMOTE_SCRIPT//__PUBKEY__/$PUBKEY_CONTENT}"
+  REMOTE_SCRIPT="${REMOTE_SCRIPT//__REPO_URL__/$REPO_URL}"
+  REMOTE_SCRIPT="${REMOTE_SCRIPT//__HOST__/$HOST}"
+  REMOTE_SCRIPT="${REMOTE_SCRIPT//__LOCAL_CMD__/$LOCAL_CMD}"
 
-ssh_root "bash -s" <<< "$REMOTE_SCRIPT"
+  ssh_root "bash -s" <<< "$REMOTE_SCRIPT"
+}
 
 if [[ "${DO_PROVISION}" == "true" ]]; then
+  run_provision
   exit 0
+fi
+
+if [[ "${DO_GIT}" == "true" || "${DO_RUN}" == "true" ]]; then
+  ensure_user_access_or_die
+  ensure_remote_repo_or_die
 fi
 
 if [[ "${DO_GIT}" == "true" ]]; then
