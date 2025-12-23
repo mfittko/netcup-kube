@@ -140,17 +140,30 @@ resolve_inputs() {
 
   if [[ "${EDGE_PROXY}" == "caddy" ]]; then
     [[ -n "${EDGE_UPSTREAM}" ]] || EDGE_UPSTREAM="$(prompt "Edge upstream (Caddy forwards HTTP to this)" "http://127.0.0.1:${TRAEFIK_NODEPORT_HTTP}")"
+    
+    [[ -n "${CADDY_CERT_MODE}" ]] || CADDY_CERT_MODE="$(prompt "Caddy certificate mode (dns01_wildcard/http01)" "dns01_wildcard")"
+    [[ "${CADDY_CERT_MODE}" == "dns01_wildcard" || "${CADDY_CERT_MODE}" == "http01" ]] || die "Bad CADDY_CERT_MODE"
+    
     if [[ "${CADDY_CERT_MODE}" == "dns01_wildcard" ]]; then
       [[ -n "${BASE_DOMAIN}" ]] || BASE_DOMAIN="$(prompt "Base domain (e.g. example.com)" "")"
       [[ -n "${BASE_DOMAIN}" ]] || die "BASE_DOMAIN required for EDGE_PROXY=caddy with dns01_wildcard"
     else
-      # http01 can serve arbitrary explicit hostnames; BASE_DOMAIN is optional unless you want kube.<BASE_DOMAIN> defaults.
-      true
+      # http01 mode: prompt for explicit hosts if not provided
+      if [[ -z "${CADDY_HTTP01_HOSTS:-}" ]]; then
+        # Fallback: if BASE_DOMAIN and DASH_HOST are set, use DASH_HOST as default
+        local default_host=""
+        if [[ -n "${DASH_HOST:-}" ]]; then
+          default_host="${DASH_HOST}"
+        elif [[ -n "${BASE_DOMAIN:-}" ]]; then
+          default_host="${DASH_SUBDOMAIN}.${BASE_DOMAIN}"
+        fi
+        CADDY_HTTP01_HOSTS="$(prompt "HTTP-01 hostnames (space-separated)" "${default_host}")"
+      fi
+      [[ -n "${CADDY_HTTP01_HOSTS}" ]] || die "CADDY_CERT_MODE=http01 requires CADDY_HTTP01_HOSTS"
+      # BASE_DOMAIN is optional for http01 (can serve unrelated domains)
     fi
+    
     [[ -n "${ACME_EMAIL}" ]] || ACME_EMAIL="$(prompt "ACME email (recommended)" "")"
-
-    [[ -n "${CADDY_CERT_MODE}" ]] || CADDY_CERT_MODE="$(prompt "Caddy certificate mode (dns01_wildcard/http01)" "dns01_wildcard")"
-    [[ "${CADDY_CERT_MODE}" == "dns01_wildcard" || "${CADDY_CERT_MODE}" == "http01" ]] || die "Bad CADDY_CERT_MODE"
 
     if [[ -z "${DASH_ENABLE}" ]]; then
       DASH_ENABLE="$(is_tty && prompt "Install Kubernetes Dashboard (Helm)?" "false" || echo "false")"
@@ -451,35 +464,49 @@ EOF
     shift || true
   done
 
+  # Helper function to parse Caddyfile site label
+  parse_caddyfile_site_label() {
+    awk '
+      BEGIN { in_global=0 }
+      /^[[:space:]]*$/ { next }
+      /^[[:space:]]*\{/ { in_global=1; next }
+      in_global && /^[[:space:]]*\}/ { in_global=0; next }
+      in_global { next }
+      /\{$/ {
+        sub(/[[:space:]]*\{$/, "", $0)
+        print $0
+        exit
+      }
+    ' /etc/caddy/Caddyfile
+  }
+
   if [[ "${do_show}" == "true" ]]; then
     [[ "${show_format}" == "human" || "${show_format}" == "csv" ]] || die "--format must be human or csv"
     [[ -f "/etc/caddy/Caddyfile" ]] || die "Caddyfile not found at /etc/caddy/Caddyfile"
 
     local site_label
-    site_label="$(
-      awk '
-        BEGIN { in_global=0 }
-        /^[[:space:]]*$/ { next }
-        /^[[:space:]]*\{/ { in_global=1; next }
-        in_global && /^[[:space:]]*\}/ { in_global=0; next }
-        in_global { next }
-        /\{$/ {
-          sub(/[[:space:]]*\{$/, "", $0)
-          print $0
-          exit
-        }
-      ' /etc/caddy/Caddyfile
-    )"
+    site_label="$(parse_caddyfile_site_label)"
     [[ -n "${site_label}" ]] || die "Could not parse Caddyfile site label"
 
+    # Auto-detect current mode from Caddyfile (ignore --type parameter for --show)
     local is_wildcard="false"
     if grep -q "dns netcup" /etc/caddy/Caddyfile 2> /dev/null; then
       is_wildcard="true"
     fi
 
-    if [[ "${type}" == "edge-http" ]]; then
-      [[ "${is_wildcard}" != "true" ]] || die "Caddy is currently configured for wildcard DNS-01, not edge-http"
-      # Convert "a, b, c" to "a,b,c"
+    if [[ "${is_wildcard}" == "true" ]]; then
+      # DNS-01 wildcard mode
+      local base
+      base="$(sed -e 's/,.*$//' -e 's/[[:space:]]//g' <<< "${site_label}")"
+      [[ -n "${base}" ]] || die "Could not parse base domain from site label"
+      if [[ "${show_format}" == "csv" ]]; then
+        echo "${base}"
+      else
+        echo "cert_mode=dns01_wildcard"
+        echo "base_domain=${base}"
+      fi
+    else
+      # HTTP-01 mode
       local csv
       csv="$(sed -e 's/[[:space:]]*,[[:space:]]*/,/g' -e 's/[[:space:]]\+//g' <<< "${site_label}")"
       if [[ "${show_format}" == "csv" ]]; then
@@ -488,19 +515,6 @@ EOF
         echo "cert_mode=http01"
         echo "domains=${csv}"
       fi
-      return 0
-    fi
-
-    # default/wildcard
-    [[ "${is_wildcard}" == "true" ]] || die "Caddy is currently configured for HTTP-01, not wildcard DNS-01"
-    local base
-    base="$(sed -e 's/,.*$//' -e 's/[[:space:]]//g' <<< "${site_label}")"
-    [[ -n "${base}" ]] || die "Could not parse base domain from site label"
-    if [[ "${show_format}" == "csv" ]]; then
-      echo "${base}"
-    else
-      echo "cert_mode=dns01_wildcard"
-      echo "base_domain=${base}"
     fi
     return 0
   fi
@@ -515,20 +529,7 @@ EOF
     fi
 
     local site_label
-    site_label="$(
-      awk '
-        BEGIN { in_global=0 }
-        /^[[:space:]]*$/ { next }
-        /^[[:space:]]*\{/ { in_global=1; next }
-        in_global && /^[[:space:]]*\}/ { in_global=0; next }
-        in_global { next }
-        /\{$/ {
-          sub(/[[:space:]]*\{$/, "", $0)
-          print $0
-          exit
-        }
-      ' /etc/caddy/Caddyfile
-    )"
+    site_label="$(parse_caddyfile_site_label)"
     [[ -n "${site_label}" ]] || die "Could not parse existing domains from Caddyfile"
 
     local is_wildcard="false"
