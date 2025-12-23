@@ -125,6 +125,7 @@ HELM_ARGS=(
   --set primary.persistence.size="${STORAGE}"
   --set metrics.enabled=true
   --set metrics.serviceMonitor.enabled=true
+  --set metrics.serviceMonitor.labels.release=kube-prometheus-stack
   --wait
   --timeout 5m
 )
