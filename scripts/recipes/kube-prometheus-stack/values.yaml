@@ -1,0 +1,40 @@
+# kube-prometheus-stack configuration
+
+# Grafana settings
+grafana:
+  enabled: true
+  # adminPassword will be set via --set
+  persistence:
+    enabled: true
+    size: 10Gi
+  # Fix permission issues with persistent volume
+  securityContext:
+    runAsUser: 472
+    runAsGroup: 472
+    fsGroup: 472
+  # Disable problematic init container (fsGroup handles permissions)
+  initChownData:
+    enabled: false
+
+# Prometheus settings
+prometheus:
+  prometheusSpec:
+    retention: 30d
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 50Gi
+
+# Alertmanager settings
+alertmanager:
+  alertmanagerSpec:
+    storage:
+      volumeClaimTemplate:
+        spec:
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 10Gi
