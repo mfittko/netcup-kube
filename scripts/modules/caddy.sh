@@ -152,6 +152,33 @@ caddy_write_caddyfile() {
   [[ -n "${EDGE_UPSTREAM:-}" ]] || EDGE_UPSTREAM="http://127.0.0.1:${TRAEFIK_NODEPORT_HTTP}"
   [[ -n "${DASH_HOST:-}" ]] || DASH_HOST="${DASH_SUBDOMAIN}.${BASE_DOMAIN}"
 
+  # Hosts served by Caddy.
+  # - dns01_wildcard: serve apex + wildcard
+  # - http01: serve explicit hostnames (wildcards are NOT supported with http-01)
+  local site_hosts=""
+  if [[ "${CADDY_CERT_MODE}" == "dns01_wildcard" ]]; then
+    site_hosts="${BASE_DOMAIN}, *.${BASE_DOMAIN}"
+  else
+    # Space-separated list of hostnames. Example: "kube.example.com demo.example.com"
+    local http01_hosts="${CADDY_HTTP01_HOSTS:-}"
+    if [[ -z "${http01_hosts}" ]]; then
+      # Sensible default: ensure the dashboard host is covered (if present), otherwise the apex.
+      if [[ -n "${DASH_HOST:-}" ]]; then
+        http01_hosts="${DASH_HOST}"
+      else
+        http01_hosts="${BASE_DOMAIN}"
+      fi
+    fi
+    # Reject wildcards in http-01 mode (Let's Encrypt requires DNS-01 for wildcards).
+    if grep -q '\*' <<< "${http01_hosts}"; then
+      die "CADDY_CERT_MODE=http01 does not support wildcard hosts. Remove '*' from CADDY_HTTP01_HOSTS."
+    fi
+    # Convert to comma-separated list for the Caddyfile site label.
+    # shellcheck disable=SC2001
+    site_hosts="$(sed -e 's/[[:space:]]\+/, /g' <<< "${http01_hosts}" | sed -e 's/^, *//' -e 's/, *$//')"
+    [[ -n "${site_hosts}" ]] || die "No hosts provided for HTTP-01. Set CADDY_HTTP01_HOSTS."
+  fi
+
   local global_email_block=""
   if [[ -n "${ACME_EMAIL:-}" ]]; then
     global_email_block="{
@@ -172,7 +199,7 @@ caddy_write_caddyfile() {
       cat << EOF
 ${global_email_block}
 
-${BASE_DOMAIN}, *.${BASE_DOMAIN} {
+${site_hosts} {
 
   tls {
     dns netcup {
@@ -208,7 +235,7 @@ EOF
       cat << EOF
 ${global_email_block}
 
-${BASE_DOMAIN}, *.${BASE_DOMAIN} {
+${site_hosts} {
 
 $(if [[ "${DASH_ENABLE:-false}" == "true" && "${DASH_BASICAUTH:-false}" == "true" ]]; then
         cat << EOR
