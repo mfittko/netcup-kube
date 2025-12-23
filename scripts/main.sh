@@ -362,6 +362,7 @@ cmd_dns() {
 
   local type="wildcard"
   local domains=""
+  local add_domains=""
   local plan_hosts=""
   local base_domain_arg=""
   local dash_host_arg=""
@@ -375,6 +376,7 @@ cmd_dns() {
 Usage: $(basename "$0") dns
        $(basename "$0") dns --type wildcard
        $(basename "$0") dns --type edge-http --domains "kube.example.com,demo.example.com"
+       $(basename "$0") dns --type edge-http --add-domains "new.example.com"
        $(basename "$0") dns --show --type edge-http --format csv
 
 Configure edge TLS via Caddy using either:
@@ -384,6 +386,7 @@ Configure edge TLS via Caddy using either:
 Options:
   --type <wildcard|edge-http>   Certificate mode (default: wildcard)
   --domains "<a,b,c>"           Required when --type edge-http (comma-separated hostnames; '|' also accepted)
+  --add-domains "<a,b,c>"       Append to existing domains (only for --type edge-http)
   --base-domain <domain>        Base domain (required for wildcard; optional for edge-http)
   --dash-host <host>            Dashboard host (optional; for edge-http default is first host)
   --show                       Print the currently configured domains from /etc/caddy/Caddyfile and exit
@@ -409,6 +412,13 @@ EOF
         ;;
       --domains=*)
         domains="${1#*=}"
+        ;;
+      --add-domains)
+        shift
+        add_domains="${1:-}"
+        ;;
+      --add-domains=*)
+        add_domains="${1#*=}"
         ;;
       --base-domain)
         shift
@@ -493,6 +503,77 @@ EOF
       echo "base_domain=${base}"
     fi
     return 0
+  fi
+
+  # Handle --add-domains: fetch current and append
+  if [[ -n "${add_domains}" ]]; then
+    [[ "${type}" == "edge-http" ]] || die "--add-domains is only supported with --type edge-http"
+    [[ -z "${domains}" ]] || die "Cannot use both --domains and --add-domains (use one or the other)"
+
+    if [[ ! -f "/etc/caddy/Caddyfile" ]]; then
+      die "Cannot --add-domains: Caddyfile not found at /etc/caddy/Caddyfile (run 'dns --type edge-http --domains' first)"
+    fi
+
+    local site_label
+    site_label="$(
+      awk '
+        BEGIN { in_global=0 }
+        /^[[:space:]]*$/ { next }
+        /^[[:space:]]*\{/ { in_global=1; next }
+        in_global && /^[[:space:]]*\}/ { in_global=0; next }
+        in_global { next }
+        /\{$/ {
+          sub(/[[:space:]]*\{$/, "", $0)
+          print $0
+          exit
+        }
+      ' /etc/caddy/Caddyfile
+    )"
+    [[ -n "${site_label}" ]] || die "Could not parse existing domains from Caddyfile"
+
+    local is_wildcard="false"
+    if grep -q "dns netcup" /etc/caddy/Caddyfile 2> /dev/null; then
+      is_wildcard="true"
+    fi
+    [[ "${is_wildcard}" != "true" ]] || die "Caddy is currently in wildcard DNS-01 mode; --add-domains requires edge-http mode"
+
+    # Parse existing domains (convert "a, b, c" to "a,b,c")
+    local current_csv
+    current_csv="$(sed -e 's/[[:space:]]*,[[:space:]]*/,/g' -e 's/[[:space:]]\+//g' <<< "${site_label}")"
+
+    # Normalize add_domains (allow comma or pipe separator)
+    local new_csv
+    new_csv="$(sed -e 's/[[:space:]]*[,|][[:space:]]*/,/g' -e 's/[[:space:]]\+//g' <<< "${add_domains}")"
+
+    # Merge: current + new (deduplicate via simple bash array)
+    local -a all_domains=()
+    local -A seen=()
+    local d
+    IFS=',' read -ra existing_arr <<< "${current_csv}"
+    for d in "${existing_arr[@]}"; do
+      [[ -z "$d" ]] && continue
+      if [[ -z "${seen[$d]:-}" ]]; then
+        all_domains+=("$d")
+        seen[$d]=1
+      fi
+    done
+    IFS=',' read -ra new_arr <<< "${new_csv}"
+    for d in "${new_arr[@]}"; do
+      [[ -z "$d" ]] && continue
+      if [[ -z "${seen[$d]:-}" ]]; then
+        all_domains+=("$d")
+        seen[$d]=1
+      fi
+    done
+
+    domains="$(
+      IFS=','
+      echo "${all_domains[*]}"
+    )"
+    [[ -n "${domains}" ]] || die "No domains after merge (current: ${current_csv}, adding: ${new_csv})"
+
+    log "Adding domain(s): ${new_csv}"
+    log "Full domain list: ${domains}"
   fi
 
   EDGE_PROXY="caddy"
