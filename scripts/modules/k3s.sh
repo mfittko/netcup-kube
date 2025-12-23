@@ -68,8 +68,10 @@ k3s_maybe_configure_proxy() {
   local default_no_proxy=".svc,.cluster.local,localhost,127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,${CLUSTER_CIDR},${SERVICE_CIDR}"
   local no_proxy_combined="${default_no_proxy}"
   [[ -n "${NO_PROXY_EXTRA:-}" ]] && no_proxy_combined="${no_proxy_combined},${NO_PROXY_EXTRA}"
-  run mkdir -p /etc/systemd/system/k3s.service.d
-  write_file /etc/systemd/system/k3s.service.d/proxy.conf "0644" "$(
+  local svc
+  svc="$(k3s_service_name)"
+  run mkdir -p "/etc/systemd/system/${svc}.service.d"
+  write_file "/etc/systemd/system/${svc}.service.d/proxy.conf" "0644" "$(
     cat << EOF
 [Service]
 Environment="HTTP_PROXY=${HTTP_PROXY:-}"
@@ -80,7 +82,21 @@ EOF
   run systemctl daemon-reload || true
 }
 
-k3s_installed() { command -v k3s > /dev/null 2>&1 && systemctl list-unit-files | grep -q '^k3s\.service'; }
+k3s_service_name() {
+  # In this repo, MODE=bootstrap is the initial server/control-plane.
+  # MODE=join is intended for workers (agent).
+  if [[ "${MODE}" == "join" ]]; then
+    echo "k3s-agent"
+  else
+    echo "k3s"
+  fi
+}
+
+k3s_installed() {
+  local svc
+  svc="$(k3s_service_name)"
+  command -v k3s > /dev/null 2>&1 && systemctl list-unit-files | grep -q "^${svc}\\.service"
+}
 
 k3s_maybe_skip_install() {
   [[ "$(bool_norm "${FORCE_REINSTALL:-false}")" == "true" ]] && return 1
@@ -95,10 +111,14 @@ k3s_download_installer() {
 }
 
 k3s_install() {
+  local exec_mode="server"
+  if [[ "${MODE}" == "join" ]]; then
+    exec_mode="agent"
+  fi
   if [[ -n "${K3S_VERSION:-}" ]]; then
-    run env INSTALL_K3S_VERSION="${K3S_VERSION}" INSTALL_K3S_EXEC="server" K3S_CONFIG_FILE="/etc/rancher/k3s/config.yaml" "${INSTALLER_PATH}"
+    run env INSTALL_K3S_VERSION="${K3S_VERSION}" INSTALL_K3S_EXEC="${exec_mode}" K3S_CONFIG_FILE="/etc/rancher/k3s/config.yaml" "${INSTALLER_PATH}"
   else
-    run env INSTALL_K3S_CHANNEL="${CHANNEL}" INSTALL_K3S_EXEC="server" K3S_CONFIG_FILE="/etc/rancher/k3s/config.yaml" "${INSTALLER_PATH}"
+    run env INSTALL_K3S_CHANNEL="${CHANNEL}" INSTALL_K3S_EXEC="${exec_mode}" K3S_CONFIG_FILE="/etc/rancher/k3s/config.yaml" "${INSTALLER_PATH}"
   fi
 }
 
@@ -115,9 +135,11 @@ k3s_wait_for_api() {
 }
 
 k3s_post_install_checks() {
-  log "Ensuring k3s service is enabled and (re)started"
+  local svc
+  svc="$(k3s_service_name)"
+  log "Ensuring ${svc} service is enabled and (re)started"
   run systemctl daemon-reload || true
-  run systemctl enable --now k3s || true
+  run systemctl enable --now "${svc}" || true
   k3s_wait_for_api
 }
 
