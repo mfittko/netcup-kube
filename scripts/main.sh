@@ -184,8 +184,10 @@ cmd_bootstrap() {
     nat_configure
   fi
 
-  log "Writing Traefik NodePort HelmChartConfig manifest (persistent)"
-  traefik_write_nodeport_manifest
+  if [[ "${MODE}" == "bootstrap" ]]; then
+    log "Writing Traefik NodePort HelmChartConfig manifest (persistent)"
+    traefik_write_nodeport_manifest
+  fi
 
   log "Writing k3s config (MODE=${MODE})"
   k3s_write_config "${NODE_IP}"
@@ -203,7 +205,9 @@ cmd_bootstrap() {
   fi
 
   k3s_post_install_checks
-  traefik_wait_ready
+  if [[ "${MODE}" == "bootstrap" ]]; then
+    traefik_wait_ready
+  fi
 
   if [[ "${DASH_ENABLE}" == "true" ]]; then
     dashboard_install
