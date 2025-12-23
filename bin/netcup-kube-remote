@@ -18,7 +18,7 @@ set -euo pipefail
 #   bin/netcup-kube-remote host --user ops run bootstrap
 #   bin/netcup-kube-remote host --user ops run pair
 #   bin/netcup-kube-remote host --user ops run dns
-#   bin/netcup-kube-remote host --user ops run dns --type edge-http --domains "kube.example.com|demo.example.com"
+#   bin/netcup-kube-remote host --user ops run dns --type edge-http --domains "kube.example.com,demo.example.com"
 #
 # After bootstrap you can SSH as the new user: ssh <user>@<host>
 
@@ -70,7 +70,7 @@ Examples:
   netcup-kube-remote run bootstrap
   netcup-kube-remote run pair
   netcup-kube-remote run dns
-  netcup-kube-remote run dns --type edge-http --domains "kube.example.com|demo.example.com"
+  netcup-kube-remote run dns --type edge-http --domains "kube.example.com,demo.example.com"
   netcup-kube-remote run --env-file ./config/netcup-kube.env bootstrap
 
 Notes:
