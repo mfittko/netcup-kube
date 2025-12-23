@@ -11,11 +11,12 @@ usage() {
 Install kube-prometheus-stack on the cluster using Helm (Grafana + Prometheus + Alertmanager).
 
 Usage:
-  netcup-kube-install kube-prometheus-stack [--namespace monitoring] [--host grafana.example.com]
+  netcup-kube-install kube-prometheus-stack [--namespace monitoring] [--host grafana.example.com] [--password <pass>]
 
 Options:
   --namespace <name>   Namespace to install into (default: monitoring).
   --host <fqdn>        Create a Traefik Ingress for Grafana (entrypoint: web).
+  --password <pass>    Grafana admin password (default: auto-generated).
   -h, --help           Show this help.
 
 Environment:
@@ -25,13 +26,14 @@ Notes:
   - This installs kube-prometheus-stack from the prometheus-community Helm chart.
   - Includes: Grafana (dashboards), Prometheus (metrics), Alertmanager (alerts)
   - Pre-configured with dashboards for Kubernetes monitoring
-  - Default Grafana credentials: admin / prom-operator
+  - Grafana admin password: auto-generated (or specify with --password)
   - If you pass --host, the domain will be auto-added to Caddy edge-http domains (if on server).
 EOF
 }
 
 NAMESPACE="monitoring"
 HOST=""
+PASSWORD=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -48,6 +50,13 @@ while [[ $# -gt 0 ]]; do
       ;;
     --host=*)
       HOST="${1#*=}"
+      ;;
+    --password)
+      shift
+      PASSWORD="${1:-}"
+      ;;
+    --password=*)
+      PASSWORD="${1#*=}"
       ;;
     -h | --help | help)
       usage
@@ -86,6 +95,12 @@ if ! helm repo list 2> /dev/null | grep -q "^prometheus-community"; then
 fi
 helm repo update
 
+# Generate secure password if not provided
+if [[ -z "${PASSWORD}" ]]; then
+  log "Generating secure Grafana admin password"
+  PASSWORD=$(LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 16)
+fi
+
 # Prepare Helm values
 VALUES_FILE="${SCRIPT_DIR}/values.yaml"
 if [[ ! -f "${VALUES_FILE}" ]]; then
@@ -96,7 +111,7 @@ if [[ ! -f "${VALUES_FILE}" ]]; then
 # Grafana settings
 grafana:
   enabled: true
-  adminPassword: prom-operator
+  # adminPassword will be set via --set
   persistence:
     enabled: true
     size: 10Gi
@@ -131,6 +146,7 @@ log "Installing/Upgrading kube-prometheus-stack via Helm (this may take a few mi
 helm upgrade --install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
   --namespace "${NAMESPACE}" \
   --values "${VALUES_FILE}" \
+  --set grafana.adminPassword="${PASSWORD}" \
   --wait \
   --timeout 10m
 
@@ -194,7 +210,9 @@ else
   echo "  Then open: http://localhost:3000"
 fi
 echo "  Username: admin"
-echo "  Password: prom-operator"
+echo "  Password: ${PASSWORD}"
+echo
+echo "IMPORTANT: Save this password securely!"
 echo
 echo "Prometheus UI:"
 echo "  Port-forward: kubectl port-forward -n ${NAMESPACE} svc/kube-prometheus-stack-prometheus 9090:9090"
