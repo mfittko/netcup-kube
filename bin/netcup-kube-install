@@ -10,6 +10,23 @@ RECIPES_DIR="${PROJECT_ROOT}/scripts/recipes"
 CONFIG_DIR="${PROJECT_ROOT}/config"
 LOCAL_KUBECONFIG="${CONFIG_DIR}/k3s.yaml"
 
+ctl_socket() {
+  local user="$1" host="$2" local_port="$3"
+  local base="${XDG_RUNTIME_DIR:-/tmp}"
+  local key="${user}@${host}-${local_port}"
+  key="${key//@/_}"
+  key="${key//:/_}"
+  key="${key//\//_}"
+  echo "${base%/}/netcup-kube-tunnel-${key}.ctl"
+}
+
+is_tunnel_running() {
+  local host="$1" user="$2" local_port="$3"
+  local sock
+  sock="$(ctl_socket "$user" "$host" "$local_port")"
+  ssh -S "$sock" -O check "${user}@${host}" > /dev/null 2>&1
+}
+
 usage() {
   cat << 'EOF'
 Install optional components and tools onto the k3s cluster.
@@ -81,20 +98,43 @@ if [[ -z "${KUBECONFIG:-}" ]]; then
       echo "Fetching kubeconfig from ${REMOTE_USER}@${REMOTE_HOST}:/etc/rancher/k3s/k3s.yaml"
       scp "${REMOTE_USER}@${REMOTE_HOST}:/etc/rancher/k3s/k3s.yaml" "${LOCAL_KUBECONFIG}"
 
-      # Replace server: https://127.0.0.1:6443 with the actual host
-      if command -v sed > /dev/null 2>&1; then
-        # macOS sed requires -i '' for in-place edit
-        if [[ "$(uname)" == "Darwin" ]]; then
-          sed -i '' "s|server: https://127.0.0.1:6443|server: https://${REMOTE_HOST}:6443|g" "${LOCAL_KUBECONFIG}"
-        else
-          sed -i "s|server: https://127.0.0.1:6443|server: https://${REMOTE_HOST}:6443|g" "${LOCAL_KUBECONFIG}"
-        fi
-      fi
-
       echo "Kubeconfig saved to ${LOCAL_KUBECONFIG}"
     fi
 
+    # Always ensure server URL is set to REMOTE_HOST (in case file was fetched earlier)
+    if grep -q "server: https://127.0.0.1:6443" "${LOCAL_KUBECONFIG}"; then
+      # Source env to get REMOTE_HOST if not already sourced
+      if [[ -z "${REMOTE_HOST:-}" ]]; then
+        ENV_FILE="${CONFIG_DIR}/netcup-kube.env"
+        # shellcheck disable=SC1090
+        source "${ENV_FILE}"
+        REMOTE_HOST="${MGMT_HOST:-}"
+      fi
+
+      echo "Updating server URL in ${LOCAL_KUBECONFIG} to ${REMOTE_HOST}"
+      # Portable in-place sed: use a temp file to avoid platform differences
+      sed "s|server: https://127.0.0.1:6443|server: https://${REMOTE_HOST}:6443|g" "${LOCAL_KUBECONFIG}" > "${LOCAL_KUBECONFIG}.tmp"
+      mv "${LOCAL_KUBECONFIG}.tmp" "${LOCAL_KUBECONFIG}"
+    fi
+
     export KUBECONFIG="${LOCAL_KUBECONFIG}"
+
+    # Check if tunnel is needed and running
+    # The kubeconfig now points to REMOTE_HOST:6443, but we need an SSH tunnel for kubectl to work
+    if [[ -n "${REMOTE_HOST:-}" && -n "${REMOTE_USER:-}" ]]; then
+      TUNNEL_PORT="${TUNNEL_LOCAL_PORT:-6443}"
+      if ! is_tunnel_running "${REMOTE_HOST}" "${REMOTE_USER}" "${TUNNEL_PORT}"; then
+        echo ""
+        echo "WARNING: kubectl needs an SSH tunnel to connect to ${REMOTE_HOST}:6443"
+        echo ""
+        echo "Run this in another terminal:"
+        echo "  bin/netcup-kube-tunnel start"
+        echo ""
+        echo "Or press Ctrl+C to abort and start the tunnel first."
+        echo ""
+        sleep 3
+      fi
+    fi
   fi
 fi
 
