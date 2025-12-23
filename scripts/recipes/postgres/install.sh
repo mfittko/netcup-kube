@@ -123,6 +123,8 @@ HELM_ARGS=(
   --namespace "${NAMESPACE}"
   --values "${VALUES_FILE}"
   --set primary.persistence.size="${STORAGE}"
+  --set metrics.enabled=true
+  --set metrics.serviceMonitor.enabled=true
   --wait
   --timeout 5m
 )
