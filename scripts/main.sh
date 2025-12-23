@@ -431,6 +431,23 @@ EOF
 
   confirm_dangerous_or_die "This will overwrite /etc/caddy/Caddyfile and restart Caddy"
 
+  # For http01 we can infer BASE_DOMAIN from the first provided hostname to avoid an extra prompt.
+  # Heuristic:
+  # - if host has 3+ labels (a.b.c), assume base is everything after the first label (b.c)
+  # - if host has 2 labels (b.c), assume it is the base domain
+  # This is not perfect for public suffixes (e.g. co.uk), so BASE_DOMAIN can always be overridden.
+  if [[ -z "${BASE_DOMAIN:-}" && "${CADDY_CERT_MODE}" == "http01" && -n "${CADDY_HTTP01_HOSTS:-}" ]]; then
+    local first_host
+    first_host="${CADDY_HTTP01_HOSTS%% *}"
+    if [[ -n "${first_host}" ]]; then
+      if [[ "${first_host}" == *.*.* ]]; then
+        BASE_DOMAIN="${first_host#*.}"
+      elif [[ "${first_host}" == *.* ]]; then
+        BASE_DOMAIN="${first_host}"
+      fi
+    fi
+  fi
+
   [[ -n "${NODE_IP}" ]] || NODE_IP="$(infer_node_ip)"
   [[ -n "${EDGE_UPSTREAM}" ]] || EDGE_UPSTREAM="http://127.0.0.1:${TRAEFIK_NODEPORT_HTTP}"
   [[ -n "${BASE_DOMAIN}" ]] || BASE_DOMAIN="$(prompt "Base domain (e.g. example.com)" "")"
