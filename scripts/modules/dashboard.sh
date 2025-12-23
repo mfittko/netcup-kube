@@ -26,8 +26,10 @@ dashboard_install() {
   export KUBECONFIG
 
   log "Installing/Upgrading Kubernetes Dashboard via Helm (ingress disabled; we create our own Traefik ingress)"
-  run helm repo add kubernetes-dashboard https://kubernetes-dashboard.github.io/kubernetes-dashboard/ 2> /dev/null || true
-  run helm repo update
+  # Ensure repo exists and URL is correct (don't swallow failures; otherwise `helm repo update` will error with "no repositories found")
+  # Upstream chart repo URL: https://kubernetes.github.io/dashboard/
+  run helm repo add kubernetes-dashboard https://kubernetes.github.io/dashboard/ --force-update
+  run helm repo update kubernetes-dashboard
 
   run helm upgrade --install kubernetes-dashboard kubernetes-dashboard/kubernetes-dashboard \
     --namespace kubernetes-dashboard --create-namespace \

@@ -36,14 +36,31 @@ Quick start (on the target Debian 13 server)
    - On a TTY, the script prompts for missing values (e.g., BASE_DOMAIN, Netcup DNS creds if dns-01)
 3) To join another node: set MODE=join, provide `SERVER_URL` and `TOKEN` or `TOKEN_FILE` and run the same command.
 
+Commands
+- `bootstrap`: install/configure k3s server + Traefik NodePort, optionally Caddy + Dashboard
+- `join`: install/configure a k3s **agent** (worker)
+  - Defaults on join nodes: `EDGE_PROXY=none`, `DASH_ENABLE=false` (no prompts) unless explicitly set
+- `pair`: print a copy/paste worker join command (and optionally open UFW 6443 from a source IP/CIDR)
+  - Run on the management node after bootstrap: `sudo ./bin/netcup-kube pair`
+  - Optional: `sudo ./bin/netcup-kube pair --allow-from <worker-ip-or-cidr>`
+- `edge-http01`: switch Caddy to HTTP-01 cert mode for explicit hostnames (no wildcard)
+  - Example: `sudo BASE_DOMAIN=example.com ./bin/netcup-kube edge-http01 kube.example.com demo.example.com`
+  - Safety: this overwrites `/etc/caddy/Caddyfile` and restarts Caddy (requires TTY confirmation or `CONFIRM=true`)
+
 Environment variables (selected)
 - MODE=bootstrap|join (default bootstrap)
 - CHANNEL=stable (or set K3S_VERSION)
+- KUBECONFIG_MODE=0600|0640 (defaults to 0640 when running via sudo; otherwise 0600)
+- KUBECONFIG_GROUP=ops (defaults to sudo user's primary group; used for k3s write-kubeconfig-group)
+- SERVER_URL, TOKEN, TOKEN_FILE (required for `MODE=join`)
 - PRIVATE_IFACE, PRIVATE_CIDR, ENABLE_VLAN_NAT=true, PUBLIC_IFACE
 - EDGE_PROXY=none|caddy, BASE_DOMAIN=example.com, ACME_EMAIL=user@example.com
 - CADDY_CERT_MODE=dns01_wildcard|http01 (default dns01_wildcard)
+- CADDY_HTTP01_HOSTS="kube.example.com demo.example.com" (optional; used for HTTP-01 mode)
 - NETCUP_CUSTOMER_NUMBER, NETCUP_DNS_API_KEY, NETCUP_DNS_API_PASSWORD (dns-01)
 - DASH_ENABLE=true|false (default prompts if EDGE_PROXY=caddy)
+- DASH_AUTH_REGEN=true (optional; force regenerating dashboard basic auth hash)
+- CONFIRM=true (required for non-interactive runs of commands that would overwrite configs / open firewall rules)
 
 Notes
 - The NAT systemd unit uses a dedicated helper at `/usr/local/sbin/vlan-nat-apply` so it’s stable across reboots.

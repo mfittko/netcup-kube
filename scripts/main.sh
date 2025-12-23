@@ -33,7 +33,22 @@ TLS_SANS_EXTRA="${TLS_SANS_EXTRA:-}"
 SERVER_URL="${SERVER_URL:-}"
 TOKEN="${TOKEN:-}"
 TOKEN_FILE="${TOKEN_FILE:-}"
-KUBECONFIG_MODE="${KUBECONFIG_MODE:-0600}"
+# kubeconfig permissions:
+# - By default, when running via sudo, make kubeconfig group-readable by the sudo user's primary group
+#   so non-root kubectl works (still not world-readable).
+# - When running directly as root (no sudo user), default to 0600.
+infer_kubeconfig_group() {
+  [[ -n "${SUDO_USER:-}" ]] || return 0
+  id -gn "${SUDO_USER}" 2> /dev/null || true
+}
+KUBECONFIG_GROUP="${KUBECONFIG_GROUP:-$(infer_kubeconfig_group)}"
+if [[ -z "${KUBECONFIG_MODE:-}" ]]; then
+  if [[ -n "${KUBECONFIG_GROUP}" ]]; then
+    KUBECONFIG_MODE="0640"
+  else
+    KUBECONFIG_MODE="0600"
+  fi
+fi
 
 HTTP_PROXY="${HTTP_PROXY:-}"
 HTTPS_PROXY="${HTTPS_PROXY:-}"
@@ -93,13 +108,19 @@ resolve_inputs() {
     NODE_EXTERNAL_IP="${NODE_IP}"
   fi
 
+  # Join nodes should not, by default, configure an edge proxy. If the user wants
+  # to configure Caddy on a join node they can set EDGE_PROXY=caddy explicitly.
   if [[ -z "${EDGE_PROXY}" ]]; then
-    EDGE_PROXY="$(is_tty && prompt "Configure host TLS reverse proxy now? (none/caddy)" "caddy" || echo "none")"
+    if [[ "${MODE}" == "join" ]]; then
+      EDGE_PROXY="none"
+    else
+      EDGE_PROXY="$(is_tty && prompt "Configure host TLS reverse proxy now? (none/caddy)" "caddy" || echo "none")"
+    fi
   fi
   [[ "${EDGE_PROXY}" == "none" || "${EDGE_PROXY}" == "caddy" ]] || die "EDGE_PROXY must be none|caddy"
 
   if [[ -z "${ENABLE_UFW}" ]]; then
-    ENABLE_UFW="$(is_tty && prompt "Enable UFW firewall with safe defaults (recommended)?" "false" || echo "false")"
+    ENABLE_UFW="$(is_tty && prompt "Enable UFW firewall with safe defaults (recommended)?" "true" || echo "false")"
   fi
   ENABLE_UFW="$(bool_norm "${ENABLE_UFW}")"
   if [[ "${ENABLE_UFW}" == "true" ]]; then
@@ -132,8 +153,14 @@ resolve_inputs() {
     DASH_ENABLE="$(bool_norm "${DASH_ENABLE}")"
     [[ -n "${DASH_HOST}" ]] || DASH_HOST="${DASH_SUBDOMAIN}.${BASE_DOMAIN}"
   else
+    # On join nodes, default dashboard install to false and avoid prompting unless
+    # the user explicitly set DASH_ENABLE.
     if [[ -z "${DASH_ENABLE}" ]]; then
-      DASH_ENABLE="$(is_tty && prompt "Install Kubernetes Dashboard (Helm)?" "false" || echo "false")"
+      if [[ "${MODE}" == "join" ]]; then
+        DASH_ENABLE="false"
+      else
+        DASH_ENABLE="$(is_tty && prompt "Install Kubernetes Dashboard (Helm)?" "false" || echo "false")"
+      fi
     fi
     DASH_ENABLE="$(bool_norm "${DASH_ENABLE}")"
   fi
@@ -172,8 +199,10 @@ cmd_bootstrap() {
     nat_configure
   fi
 
-  log "Writing Traefik NodePort HelmChartConfig manifest (persistent)"
-  traefik_write_nodeport_manifest
+  if [[ "${MODE}" == "bootstrap" ]]; then
+    log "Writing Traefik NodePort HelmChartConfig manifest (persistent)"
+    traefik_write_nodeport_manifest
+  fi
 
   log "Writing k3s config (MODE=${MODE})"
   k3s_write_config "${NODE_IP}"
@@ -191,7 +220,9 @@ cmd_bootstrap() {
   fi
 
   k3s_post_install_checks
-  traefik_wait_ready
+  if [[ "${MODE}" == "bootstrap" ]]; then
+    traefik_wait_ready
+  fi
 
   if [[ "${DASH_ENABLE}" == "true" ]]; then
     dashboard_install
@@ -211,7 +242,14 @@ cmd_bootstrap() {
   echo "k3s:"
   echo "  node-ip: ${NODE_IP}"
   [[ -n "${NODE_EXTERNAL_IP}" ]] && echo "  node-external-ip: ${NODE_EXTERNAL_IP}"
-  echo "  kubeconfig: $(kcfg) (mode ${KUBECONFIG_MODE})"
+  if [[ -n "${KUBECONFIG_GROUP:-}" ]]; then
+    echo "  kubeconfig: $(kcfg) (mode ${KUBECONFIG_MODE}, group ${KUBECONFIG_GROUP})"
+  else
+    echo "  kubeconfig: $(kcfg) (mode ${KUBECONFIG_MODE})"
+  fi
+  if [[ "${KUBECONFIG_MODE}" == "0600" ]]; then
+    echo "  note: run kubectl via sudo, or set KUBECONFIG_MODE=0640 and KUBECONFIG_GROUP=<your-group> before bootstrap to use kubectl as non-root"
+  fi
   echo
   echo "traefik:"
   echo "  service: NodePort ${TRAEFIK_NODEPORT_HTTP}/${TRAEFIK_NODEPORT_HTTPS} (persistent via HelmChartConfig)"
@@ -239,6 +277,130 @@ cmd_bootstrap() {
   echo "  sudo cat /var/lib/rancher/k3s/server/node-token"
 }
 
+confirm_dangerous_or_die() {
+  local msg="$1"
+  local ok="${2:-false}"
+  if [[ "${DRY_RUN:-false}" == "true" ]]; then
+    log "[DRY_RUN] Skipping confirmation: ${msg}"
+    return 0
+  fi
+  if is_tty; then
+    ok="$(prompt "${msg} (type 'yes' to continue)" "no")"
+    [[ "${ok}" == "yes" ]] || die "Aborted."
+    return 0
+  fi
+  [[ "${CONFIRM:-false}" == "true" ]] || die "Non-interactive run requires CONFIRM=true. Refusing: ${msg}"
+}
+
+cmd_edge_http01() {
+  require_root
+  # This command only (re)configures Caddy. Force MODE to avoid accidentally
+  # inheriting MODE=join from the environment and confusing follow-up output.
+  MODE="bootstrap"
+
+  # Safe guard: this command rewrites the host Caddy config.
+  confirm_dangerous_or_die "This will overwrite /etc/caddy/Caddyfile and restart Caddy"
+
+  EDGE_PROXY="caddy"
+  CADDY_CERT_MODE="http01"
+
+  # Determine hosts to serve. Arguments are treated as hostnames.
+  # If none provided, default to the dashboard host.
+  if [[ $# -gt 0 ]]; then
+    CADDY_HTTP01_HOSTS="$*"
+  fi
+
+  # Resolve minimal required inputs.
+  [[ -n "${NODE_IP}" ]] || NODE_IP="$(infer_node_ip)"
+  [[ -n "${EDGE_UPSTREAM}" ]] || EDGE_UPSTREAM="http://127.0.0.1:${TRAEFIK_NODEPORT_HTTP}"
+  [[ -n "${BASE_DOMAIN}" ]] || BASE_DOMAIN="$(prompt "Base domain (e.g. example.com)" "")"
+  [[ -n "${BASE_DOMAIN}" ]] || die "BASE_DOMAIN required"
+  [[ -n "${DASH_HOST}" ]] || DASH_HOST="${DASH_SUBDOMAIN}.${BASE_DOMAIN}"
+
+  # If no explicit hosts were provided, default to the dashboard host.
+  [[ -n "${CADDY_HTTP01_HOSTS:-}" ]] || CADDY_HTTP01_HOSTS="${DASH_HOST}"
+
+  # Keep the existing dashboard auth UX if Dashboard is enabled (or defaults to enabled on TTY).
+  if [[ -z "${DASH_ENABLE}" ]]; then
+    DASH_ENABLE="$(is_tty && prompt "Install Kubernetes Dashboard (Helm)?" "true" || echo "false")"
+  fi
+  DASH_ENABLE="$(bool_norm "${DASH_ENABLE}")"
+
+  # Configure Caddy only (no k3s changes).
+  caddy_setup
+}
+
+cmd_pair() {
+  require_root
+
+  local allow_from=""
+  local server_url="${SERVER_URL:-}"
+  local self_bin
+  self_bin="$(basename "$0")"
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --allow-from)
+        shift
+        allow_from="${1:-}"
+        [[ -n "${allow_from}" ]] || die "--allow-from requires an argument (IP/CIDR)"
+        ;;
+      --server-url)
+        shift
+        server_url="${1:-}"
+        [[ -n "${server_url}" ]] || die "--server-url requires an argument"
+        ;;
+      -h | --help)
+        cat << EOF
+Usage: $(basename "$0") pair [--server-url URL] [--allow-from IP/CIDR]
+
+Print a copy/paste join command for a worker node (and optionally open UFW 6443 on the
+management node for the provided source IP/CIDR).
+
+Examples:
+  sudo $(basename "$0") pair
+  sudo $(basename "$0") pair --server-url https://152.53.136.34:6443
+  sudo $(basename "$0") pair --allow-from 159.195.64.217
+EOF
+        return 0
+        ;;
+      *)
+        die "Unknown argument for pair: $1"
+        ;;
+    esac
+    shift
+  done
+
+  [[ -n "${server_url}" ]] || server_url="https://$(infer_node_ip):6443"
+
+  local token
+  token="$(tr -d ' \n\r\t' < /var/lib/rancher/k3s/server/node-token)"
+  [[ -n "${token}" ]] || die "Could not read join token from /var/lib/rancher/k3s/server/node-token"
+
+  if [[ -n "${allow_from}" ]]; then
+    confirm_dangerous_or_die "Open k3s API (6443/tcp) in UFW from ${allow_from}"
+    run ufw allow from "${allow_from}" to any port 6443 proto tcp
+    run ufw reload
+  fi
+
+  cat << EOF
+Join pairing info
+-----------------
+SERVER_URL=${server_url}
+
+On the WORKER node, run:
+
+  sudo env SERVER_URL="${server_url}" TOKEN="${token}" ENABLE_UFW=false EDGE_PROXY=none DASH_ENABLE=false \\
+    ${self_bin} join
+
+Notes:
+- If ${self_bin} is not in PATH on the worker, use the full path (example: ~/netcup-kube/bin/netcup-kube join).
+- If your worker uses a different route to reach the management node (vLAN/VPN vs public),
+  pass --server-url accordingly.
+- If 6443 is firewalled, rerun this command with: --allow-from <worker-ip-or-cidr>
+EOF
+}
+
 usage() {
   cat << EOF
 Usage: $(basename "$0") <command>
@@ -246,11 +408,17 @@ Usage: $(basename "$0") <command>
 Commands:
   bootstrap        Install and configure k3s + Traefik NodePort + optional Caddy & Dashboard
   join             Same as bootstrap but MODE=join (set SERVER_URL and TOKEN/TOKEN_FILE)
+  edge-http01      Configure Caddy for HTTP-01 certificates for explicit hostnames (no wildcard)
+  pair             Print a copy/paste join command (and optional UFW allow rule) for a worker node
   help             Show this help
 
 Examples:
   sudo $(basename "$0") bootstrap
   MODE=join SERVER_URL=https://x.x.x.x:6443 TOKEN=... sudo $(basename "$0") join
+  # Switch edge TLS to HTTP-01 for the dashboard host (defaults to kube.<BASE_DOMAIN>)
+  BASE_DOMAIN=example.com sudo $(basename "$0") edge-http01
+  # Switch edge TLS to HTTP-01 for multiple hostnames
+  BASE_DOMAIN=example.com sudo $(basename "$0") edge-http01 kube.example.com demo.example.com
 EOF
 }
 
@@ -264,6 +432,14 @@ main() {
     join)
       MODE="join"
       cmd_bootstrap
+      ;;
+    edge-http01)
+      shift || true
+      cmd_edge_http01 "$@"
+      ;;
+    pair)
+      shift || true
+      cmd_pair "$@"
       ;;
     help | -h | --help)
       usage

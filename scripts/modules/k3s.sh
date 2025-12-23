@@ -26,13 +26,18 @@ k3s_write_config() {
   local node_ip="$1"
   local flannel_iface_line=""
   [[ -n "${PRIVATE_IFACE:-}" ]] && flannel_iface_line=$'flannel-iface: '"${PRIVATE_IFACE}"
-  local tls_sans
-  tls_sans="$(k3s_build_tls_sans_yaml "${node_ip}")"
+  local kubeconfig_group_line=""
+  [[ -n "${KUBECONFIG_GROUP:-}" ]] && kubeconfig_group_line=$'write-kubeconfig-group: '"\"${KUBECONFIG_GROUP}\""
 
   local cfg
-  cfg="$(
-    cat << EOF
+  case "${MODE}" in
+    bootstrap)
+      local tls_sans
+      tls_sans="$(k3s_build_tls_sans_yaml "${node_ip}")"
+      cfg="$(
+        cat << EOF
 write-kubeconfig-mode: "${KUBECONFIG_MODE}"
+${kubeconfig_group_line}
 node-ip: "${node_ip}"
 ${flannel_iface_line}
 flannel-backend: "${FLANNEL_BACKEND}"
@@ -44,7 +49,21 @@ etcd-snapshot-retention: 12
 tls-san:
 ${tls_sans}
 EOF
-  )"
+      )"
+      ;;
+    join)
+      # Join nodes run k3s in agent mode. Keep the config minimal and avoid server-only flags
+      # (e.g. etcd/tls-san/cluster-init), otherwise k3s-agent will fail to start with "flag provided but not defined".
+      cfg="$(
+        cat << EOF
+node-ip: "${node_ip}"
+${flannel_iface_line}
+EOF
+      )"
+      ;;
+    *) die "Unknown MODE: ${MODE}" ;;
+  esac
+
   [[ -n "${NODE_EXTERNAL_IP:-}" ]] && cfg+=$'\n'"node-external-ip: \"${NODE_EXTERNAL_IP}\""$'\n'
 
   case "${MODE}" in
@@ -68,8 +87,10 @@ k3s_maybe_configure_proxy() {
   local default_no_proxy=".svc,.cluster.local,localhost,127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,${CLUSTER_CIDR},${SERVICE_CIDR}"
   local no_proxy_combined="${default_no_proxy}"
   [[ -n "${NO_PROXY_EXTRA:-}" ]] && no_proxy_combined="${no_proxy_combined},${NO_PROXY_EXTRA}"
-  run mkdir -p /etc/systemd/system/k3s.service.d
-  write_file /etc/systemd/system/k3s.service.d/proxy.conf "0644" "$(
+  local svc
+  svc="$(k3s_service_name)"
+  run mkdir -p "/etc/systemd/system/${svc}.service.d"
+  write_file "/etc/systemd/system/${svc}.service.d/proxy.conf" "0644" "$(
     cat << EOF
 [Service]
 Environment="HTTP_PROXY=${HTTP_PROXY:-}"
@@ -80,7 +101,21 @@ EOF
   run systemctl daemon-reload || true
 }
 
-k3s_installed() { command -v k3s > /dev/null 2>&1 && systemctl list-unit-files | grep -q '^k3s\.service'; }
+k3s_service_name() {
+  # In this repo, MODE=bootstrap is the initial server/control-plane.
+  # MODE=join is intended for workers (agent).
+  if [[ "${MODE}" == "join" ]]; then
+    echo "k3s-agent"
+  else
+    echo "k3s"
+  fi
+}
+
+k3s_installed() {
+  local svc
+  svc="$(k3s_service_name)"
+  command -v k3s > /dev/null 2>&1 && systemctl list-unit-files | grep -q "^${svc}\\.service"
+}
 
 k3s_maybe_skip_install() {
   [[ "$(bool_norm "${FORCE_REINSTALL:-false}")" == "true" ]] && return 1
@@ -95,10 +130,14 @@ k3s_download_installer() {
 }
 
 k3s_install() {
+  local exec_mode="server"
+  if [[ "${MODE}" == "join" ]]; then
+    exec_mode="agent"
+  fi
   if [[ -n "${K3S_VERSION:-}" ]]; then
-    run env INSTALL_K3S_VERSION="${K3S_VERSION}" INSTALL_K3S_EXEC="server" K3S_CONFIG_FILE="/etc/rancher/k3s/config.yaml" "${INSTALLER_PATH}"
+    run env INSTALL_K3S_VERSION="${K3S_VERSION}" INSTALL_K3S_EXEC="${exec_mode}" K3S_CONFIG_FILE="/etc/rancher/k3s/config.yaml" "${INSTALLER_PATH}"
   else
-    run env INSTALL_K3S_CHANNEL="${CHANNEL}" INSTALL_K3S_EXEC="server" K3S_CONFIG_FILE="/etc/rancher/k3s/config.yaml" "${INSTALLER_PATH}"
+    run env INSTALL_K3S_CHANNEL="${CHANNEL}" INSTALL_K3S_EXEC="${exec_mode}" K3S_CONFIG_FILE="/etc/rancher/k3s/config.yaml" "${INSTALLER_PATH}"
   fi
 }
 
@@ -115,10 +154,25 @@ k3s_wait_for_api() {
 }
 
 k3s_post_install_checks() {
-  log "Ensuring k3s service is enabled and (re)started"
+  local svc
+  svc="$(k3s_service_name)"
+  log "Ensuring ${svc} service is enabled and (re)started"
   run systemctl daemon-reload || true
-  run systemctl enable --now k3s || true
-  k3s_wait_for_api
+  run systemctl enable --now "${svc}" || true
+  if [[ "${svc}" == "k3s" ]]; then
+    k3s_wait_for_api
+  else
+    # On agents, the API is remote. Just wait for the agent service to become active.
+    [[ "${DRY_RUN:-false}" == "true" ]] && return 0
+    log "Waiting for k3s-agent service to become active"
+    for _ in {1..60}; do
+      if systemctl is-active --quiet k3s-agent; then
+        return 0
+      fi
+      sleep 1
+    done
+    die "k3s-agent did not become active"
+  fi
 }
 
 traefik_write_nodeport_manifest() {
@@ -149,5 +203,12 @@ EOF
 traefik_wait_ready() {
   [[ "${DRY_RUN:-false}" == "true" ]] && return 0
   log "Waiting for Traefik to be ready"
-  kctl -n kube-system rollout status deploy/traefik --timeout=300s
+  for _ in {1..150}; do
+    if kctl -n kube-system get deploy/traefik > /dev/null 2>&1; then
+      kctl -n kube-system rollout status deploy/traefik --timeout=300s
+      return 0
+    fi
+    sleep 2
+  done
+  die "Traefik deployment did not appear"
 }

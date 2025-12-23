@@ -10,17 +10,57 @@ netcup_load_creds_from_envfile() {
   # shellcheck disable=SC1090
   source "${NETCUP_ENVFILE}" || true
   set -u
-  NETCUP_CUSTOMER_NUMBER="${NETCUP_CUSTOMER_NUMBER:-${NETCUP_CUSTOMER_NUMBER:-}}"
+  NETCUP_CUSTOMER_NUMBER="${NETCUP_CUSTOMER_NUMBER:-}"
   NETCUP_DNS_API_KEY="${NETCUP_DNS_API_KEY:-${NETCUP_API_KEY:-}}"
   NETCUP_DNS_API_PASSWORD="${NETCUP_DNS_API_PASSWORD:-${NETCUP_API_PASSWORD:-}}"
 }
 
+dns_warn_if_netcup_not_authoritative() {
+  # DNS-01 via Netcup API only works if the domain's authoritative DNS is Netcup.
+  # When not, Let's Encrypt will never see the TXT record and Caddy will log
+  # "No TXT record found at _acme-challenge.<domain>".
+  local domain="$1"
+  if ! command -v dig > /dev/null 2>&1; then
+    log "NOTE: 'dig' not found; cannot verify authoritative nameservers for ${domain}."
+    log "      If DNS-01 fails with 'No TXT record found', ensure ${domain} uses Netcup DNS (NS records)."
+    return 0
+  fi
+  local ns
+  ns="$(dig +short NS "${domain}" 2> /dev/null | sed '/^$/d' | tr -d '\r' || true)"
+  [[ -n "${ns}" ]] || {
+    log "WARN: Could not resolve NS records for ${domain}; DNS-01 may fail."
+    return 0
+  }
+  if ! grep -qiE 'netcup\.net\.?$' <<< "${ns}"; then
+    log "WARN: ${domain} NS records do not look like Netcup (${ns//$'\n'/, })."
+    log "      DNS-01 via Netcup API will not work unless your authoritative DNS is Netcup."
+    log "      Options: switch your DNS NS to Netcup, or use Caddy http-01 (no wildcard), or use a DNS provider matching your authoritative DNS."
+  fi
+}
+
+escape_env_value() {
+  # Escape a value so it is safe for use in a systemd EnvironmentFile inside double quotes.
+  # We escape backslashes, double quotes, and dollar signs to avoid parsing issues and expansion.
+  local v="$1"
+  v="${v//\\/\\\\}" # backslash
+  v="${v//\"/\\\"}" # double quote
+  v="${v//\$/\\$}"  # dollar (prevents variable expansion)
+  printf '%s' "$v"
+}
+
 netcup_write_envfile() {
+  # systemd EnvironmentFile parsing is sensitive to special characters (e.g. '#' starts a comment unless quoted).
+  # Quote/escape values so secrets survive round-trips.
+  local esc_cn esc_key esc_pw
+  esc_cn="$(escape_env_value "${NETCUP_CUSTOMER_NUMBER}")"
+  esc_key="$(escape_env_value "${NETCUP_DNS_API_KEY}")"
+  esc_pw="$(escape_env_value "${NETCUP_DNS_API_PASSWORD}")"
+
   write_file "${NETCUP_ENVFILE}" "0600" "$(
     cat << EOF
-NETCUP_CUSTOMER_NUMBER=${NETCUP_CUSTOMER_NUMBER}
-NETCUP_API_KEY=${NETCUP_DNS_API_KEY}
-NETCUP_API_PASSWORD=${NETCUP_DNS_API_PASSWORD}
+NETCUP_CUSTOMER_NUMBER="${esc_cn}"
+NETCUP_API_KEY="${esc_key}"
+NETCUP_API_PASSWORD="${esc_pw}"
 EOF
   )"
 }
@@ -91,6 +131,21 @@ caddy_load_or_create_dashboard_basicauth() {
   DASH_BASICAUTH="$(bool_norm "${DASH_BASICAUTH}")"
   [[ "${DASH_BASICAUTH}" == "true" ]] || return 0
 
+  # If an auth file already exists, default to reusing it. On a TTY, offer to regenerate.
+  # This prevents confusion where users "set a password" but an old hash is still in effect.
+  if [[ -z "${DASH_AUTH_HASH:-}" && -z "${DASH_AUTH_PASS:-}" && -f "${DASH_AUTH_FILE}" ]]; then
+    if [[ "$(bool_norm "${DASH_AUTH_REGEN:-false}")" == "true" ]]; then
+      rm -f "${DASH_AUTH_FILE}" || true
+    elif is_tty; then
+      local reuse
+      reuse="$(prompt "Reuse existing dashboard basic auth from ${DASH_AUTH_FILE}? (set DASH_AUTH_REGEN=true to force regen)" "true")"
+      reuse="$(bool_norm "${reuse}")"
+      if [[ "${reuse}" != "true" ]]; then
+        rm -f "${DASH_AUTH_FILE}" || true
+      fi
+    fi
+  fi
+
   if [[ -z "${DASH_AUTH_HASH:-}" && -f "${DASH_AUTH_FILE}" ]]; then
     local line
     line="$(head -n1 "${DASH_AUTH_FILE}" 2> /dev/null || true)"
@@ -104,7 +159,16 @@ caddy_load_or_create_dashboard_basicauth() {
   fi
 
   if [[ -z "${DASH_AUTH_HASH:-}" ]]; then
-    [[ -n "${DASH_AUTH_PASS:-}" ]] || DASH_AUTH_PASS="$(prompt_secret "Caddy Basic Auth password for ${DASH_AUTH_USER} (protects https://${DASH_HOST}/)")"
+    if [[ -z "${DASH_AUTH_PASS:-}" ]]; then
+      local p1 p2
+      p1="$(prompt_secret "Caddy Basic Auth password for ${DASH_AUTH_USER} (protects https://${DASH_HOST}/)")"
+      [[ -n "${p1}" ]] || die "Dashboard basic auth enabled but no password provided"
+      if is_tty; then
+        p2="$(prompt_secret "Confirm Caddy Basic Auth password for ${DASH_AUTH_USER}")"
+        [[ "${p1}" == "${p2}" ]] || die "Passwords did not match"
+      fi
+      DASH_AUTH_PASS="${p1}"
+    fi
     [[ -n "${DASH_AUTH_PASS}" ]] || die "Dashboard basic auth enabled but no password provided"
     DASH_AUTH_HASH="/usr/local/bin/caddy hash-password --plaintext "
     DASH_AUTH_HASH="$(${DASH_AUTH_HASH} "${DASH_AUTH_PASS}")"
@@ -119,6 +183,33 @@ caddy_write_caddyfile() {
   [[ -n "${EDGE_UPSTREAM:-}" ]] || EDGE_UPSTREAM="http://127.0.0.1:${TRAEFIK_NODEPORT_HTTP}"
   [[ -n "${DASH_HOST:-}" ]] || DASH_HOST="${DASH_SUBDOMAIN}.${BASE_DOMAIN}"
 
+  # Hosts served by Caddy.
+  # - dns01_wildcard: serve apex + wildcard
+  # - http01: serve explicit hostnames (wildcards are NOT supported with http-01)
+  local site_hosts=""
+  if [[ "${CADDY_CERT_MODE}" == "dns01_wildcard" ]]; then
+    site_hosts="${BASE_DOMAIN}, *.${BASE_DOMAIN}"
+  else
+    # Space-separated list of hostnames. Example: "kube.example.com demo.example.com"
+    local http01_hosts="${CADDY_HTTP01_HOSTS:-}"
+    if [[ -z "${http01_hosts}" ]]; then
+      # Sensible default: ensure the dashboard host is covered (if present), otherwise the apex.
+      if [[ -n "${DASH_HOST:-}" ]]; then
+        http01_hosts="${DASH_HOST}"
+      else
+        http01_hosts="${BASE_DOMAIN}"
+      fi
+    fi
+    # Reject wildcards in http-01 mode (Let's Encrypt requires DNS-01 for wildcards).
+    if grep -q '\*' <<< "${http01_hosts}"; then
+      die "CADDY_CERT_MODE=http01 does not support wildcard hosts. Remove '*' from CADDY_HTTP01_HOSTS."
+    fi
+    # Convert to comma-separated list for the Caddyfile site label.
+    # shellcheck disable=SC2001
+    site_hosts="$(sed -e 's/[[:space:]]\+/, /g' <<< "${http01_hosts}" | sed -e 's/^, *//' -e 's/, *$//')"
+    [[ -n "${site_hosts}" ]] || die "No hosts provided for HTTP-01. Set CADDY_HTTP01_HOSTS."
+  fi
+
   local global_email_block=""
   if [[ -n "${ACME_EMAIL:-}" ]]; then
     global_email_block="{
@@ -127,11 +218,19 @@ caddy_write_caddyfile() {
   fi
 
   if [[ "${CADDY_CERT_MODE}" == "dns01_wildcard" ]]; then
+    # Important: Many recursive resolvers cache TXT records aggressively. If your zone TTL is high
+    # (commonly 86400s), Caddy's default propagation checks may hit stale caches and fail with
+    # "timed out waiting for record to fully propagate" even though the authoritative servers
+    # already serve the correct TXT. Using authoritative resolvers avoids this.
+    [[ -n "${CADDY_DNS_RESOLVERS:-}" ]] || CADDY_DNS_RESOLVERS="root-dns.netcup.net second-dns.netcup.net third-dns.netcup.net"
+    [[ -n "${CADDY_DNS_PROPAGATION_TIMEOUT:-}" ]] || CADDY_DNS_PROPAGATION_TIMEOUT="10m"
+    [[ -n "${CADDY_DNS_PROPAGATION_DELAY:-}" ]] || CADDY_DNS_PROPAGATION_DELAY="5s"
+
     write_file /etc/caddy/Caddyfile "0644" "$(
       cat << EOF
 ${global_email_block}
 
-${BASE_DOMAIN}, *.${BASE_DOMAIN} {
+${site_hosts} {
 
   tls {
     dns netcup {
@@ -139,6 +238,9 @@ ${BASE_DOMAIN}, *.${BASE_DOMAIN} {
       api_key {\$NETCUP_API_KEY}
       api_password {\$NETCUP_API_PASSWORD}
     }
+    resolvers ${CADDY_DNS_RESOLVERS}
+    propagation_timeout ${CADDY_DNS_PROPAGATION_TIMEOUT}
+    propagation_delay ${CADDY_DNS_PROPAGATION_DELAY}
   }
 
 $(if [[ "${DASH_ENABLE:-false}" == "true" && "${DASH_BASICAUTH:-false}" == "true" ]]; then
@@ -164,7 +266,7 @@ EOF
       cat << EOF
 ${global_email_block}
 
-${BASE_DOMAIN}, *.${BASE_DOMAIN} {
+${site_hosts} {
 
 $(if [[ "${DASH_ENABLE:-false}" == "true" && "${DASH_BASICAUTH:-false}" == "true" ]]; then
         cat << EOR
@@ -218,6 +320,18 @@ caddy_setup() {
 
   if [[ "${DRY_RUN:-false}" != "true" ]]; then
     log "Validating and restarting Caddy"
+    if [[ "${CADDY_CERT_MODE}" == "dns01_wildcard" && -n "${BASE_DOMAIN:-}" ]]; then
+      dns_warn_if_netcup_not_authoritative "${BASE_DOMAIN}"
+    fi
+    # Ensure env vars referenced in Caddyfile (e.g. {$NETCUP_*}) are available during validation.
+    if [[ -f "${NETCUP_ENVFILE}" ]]; then
+      set -a
+      # shellcheck disable=SC1090
+      source "${NETCUP_ENVFILE}"
+      set +a
+    fi
+    # Keep the generated Caddyfile formatted (removes 'Caddyfile input is not formatted' warnings).
+    run /usr/local/bin/caddy fmt --overwrite /etc/caddy/Caddyfile
     run /usr/local/bin/caddy validate --config /etc/caddy/Caddyfile
     run systemctl restart caddy
   else

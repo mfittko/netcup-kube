@@ -9,7 +9,16 @@ die() {
 }
 
 # TTY detection
-is_tty() { [[ -t 0 && -t 1 ]]; }
+is_tty() {
+  [[ -t 0 && -t 1 ]] && return 0
+  # Some SSH contexts have no stdio TTY, but still provide /dev/tty for interactive input.
+  # Only treat /dev/tty as interactive if it can actually be opened (a controlling tty exists).
+  if [[ -e /dev/tty ]] && { exec 3<> /dev/tty; } 2> /dev/null; then
+    exec 3>&- 3<&-
+    return 0
+  fi
+  return 1
+}
 
 # Bool normalization
 bool_norm() { case "${1,,}" in 1 | true | yes | y | on) echo "true" ;; *) echo "false" ;; esac }
@@ -66,11 +75,20 @@ prompt() {
     echo "$def"
     return 0
   fi
+  local tty="/dev/tty"
   if [[ -n "$def" ]]; then
-    read -r -p "${q} [${def}]: " ans
+    if [[ -r "${tty}" ]]; then
+      read -r -p "${q} [${def}]: " ans < "${tty}"
+    else
+      read -r -p "${q} [${def}]: " ans
+    fi
     echo "${ans:-$def}"
   else
-    read -r -p "${q}: " ans
+    if [[ -r "${tty}" ]]; then
+      read -r -p "${q}: " ans < "${tty}"
+    else
+      read -r -p "${q}: " ans
+    fi
     echo "${ans}"
   fi
 }
@@ -82,8 +100,18 @@ prompt_secret() {
     echo ""
     return 0
   fi
-  read -r -s -p "${q} (input hidden): " ans
-  echo
+  local tty="/dev/tty"
+  if [[ -r "${tty}" ]]; then
+    read -r -s -p "${q} (input hidden): " ans < "${tty}"
+  else
+    read -r -s -p "${q} (input hidden): " ans
+  fi
+  # Print the newline to the user's terminal, not stdout (stdout is used as the return value).
+  if [[ -w "${tty}" ]]; then
+    printf '\n' > "${tty}"
+  else
+    printf '\n' >&2
+  fi
   echo "${ans}"
 }
 
