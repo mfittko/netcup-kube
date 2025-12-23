@@ -18,6 +18,10 @@ export DASH_ENABLE=false
 # Local helper sanity: ensure tunnel script is present and runnable.
 ./bin/netcup-kube-tunnel --help > /dev/null
 
+# netcup-kube subcommand help should not require interactivity.
+./bin/netcup-kube dns --help > /dev/null
+./bin/netcup-kube dns --type edge-http --help > /dev/null
+
 # Bootstrap path
 ./bin/netcup-kube bootstrap
 

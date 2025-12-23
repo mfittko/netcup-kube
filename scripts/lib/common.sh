@@ -2,7 +2,16 @@
 set -euo pipefail
 
 # Logging & errors
-log() { printf '[%s] %s\n' "$(date -Is)" "$*"; }
+log() {
+  # Portable timestamp (GNU date uses -Is, BSD/macOS date doesn't support -I)
+  local ts
+  if date -Is > /dev/null 2>&1; then
+    ts="$(date -Is)"
+  else
+    ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  fi
+  printf '[%s] %s\n' "$ts" "$*"
+}
 die() {
   echo "ERROR: $*" >&2
   exit 1
