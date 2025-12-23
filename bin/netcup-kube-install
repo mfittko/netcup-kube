@@ -101,39 +101,33 @@ if [[ -z "${KUBECONFIG:-}" ]]; then
       echo "Kubeconfig saved to ${LOCAL_KUBECONFIG}"
     fi
 
-    # Always ensure server URL is set to REMOTE_HOST (in case file was fetched earlier)
-    if grep -q "server: https://127.0.0.1:6443" "${LOCAL_KUBECONFIG}"; then
-      # Source env to get REMOTE_HOST if not already sourced
-      if [[ -z "${REMOTE_HOST:-}" ]]; then
-        ENV_FILE="${CONFIG_DIR}/netcup-kube.env"
-        # shellcheck disable=SC1090
-        source "${ENV_FILE}"
-        REMOTE_HOST="${MGMT_HOST:-}"
-      fi
-
-      echo "Updating server URL in ${LOCAL_KUBECONFIG} to ${REMOTE_HOST}"
-      # Portable in-place sed: use a temp file to avoid platform differences
-      sed "s|server: https://127.0.0.1:6443|server: https://${REMOTE_HOST}:6443|g" "${LOCAL_KUBECONFIG}" > "${LOCAL_KUBECONFIG}.tmp"
-      mv "${LOCAL_KUBECONFIG}.tmp" "${LOCAL_KUBECONFIG}"
-    fi
-
     export KUBECONFIG="${LOCAL_KUBECONFIG}"
 
     # Check if tunnel is needed and running
-    # The kubeconfig now points to REMOTE_HOST:6443, but we need an SSH tunnel for kubectl to work
+    # The kubeconfig uses 127.0.0.1:6443, which requires an active SSH tunnel
+    # Source env to get REMOTE_HOST if not already sourced
+    if [[ -z "${REMOTE_HOST:-}" ]]; then
+      ENV_FILE="${CONFIG_DIR}/netcup-kube.env"
+      # shellcheck disable=SC1090
+      source "${ENV_FILE}"
+      REMOTE_HOST="${MGMT_HOST:-}"
+      REMOTE_USER="${MGMT_USER:-ops}"
+    fi
+
     if [[ -n "${REMOTE_HOST:-}" && -n "${REMOTE_USER:-}" ]]; then
       TUNNEL_PORT="${TUNNEL_LOCAL_PORT:-6443}"
       if ! is_tunnel_running "${REMOTE_HOST}" "${REMOTE_USER}" "${TUNNEL_PORT}"; then
         echo ""
-        echo "WARNING: kubectl needs an SSH tunnel to connect to ${REMOTE_HOST}:6443"
-        echo ""
-        echo "Run this in another terminal:"
-        echo "  bin/netcup-kube-tunnel start"
-        echo ""
-        echo "Or press Ctrl+C to abort and start the tunnel first."
-        echo ""
-        sleep 3
+        echo "ERROR: kubectl cannot connect without an SSH tunnel" >&2
+        echo "" >&2
+        echo "Start the tunnel first:" >&2
+        echo "  bin/netcup-kube-tunnel start" >&2
+        echo "" >&2
+        echo "Then retry this command." >&2
+        echo "" >&2
+        exit 1
       fi
+      echo "Using tunnel: localhost:${TUNNEL_PORT} -> ${REMOTE_HOST}:6443"
     fi
   fi
 fi

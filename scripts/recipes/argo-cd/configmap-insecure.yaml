@@ -5,3 +5,4 @@ metadata:
   namespace: ${ARGO_NS}
 data:
   server.insecure: "true"
+
