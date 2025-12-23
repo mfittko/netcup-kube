@@ -140,18 +140,38 @@ resolve_inputs() {
 
   if [[ "${EDGE_PROXY}" == "caddy" ]]; then
     [[ -n "${EDGE_UPSTREAM}" ]] || EDGE_UPSTREAM="$(prompt "Edge upstream (Caddy forwards HTTP to this)" "http://127.0.0.1:${TRAEFIK_NODEPORT_HTTP}")"
-    [[ -n "${BASE_DOMAIN}" ]] || BASE_DOMAIN="$(prompt "Base domain (e.g. example.com)" "")"
-    [[ -n "${BASE_DOMAIN}" ]] || die "BASE_DOMAIN required for EDGE_PROXY=caddy"
-    [[ -n "${ACME_EMAIL}" ]] || ACME_EMAIL="$(prompt "ACME email (recommended)" "")"
 
     [[ -n "${CADDY_CERT_MODE}" ]] || CADDY_CERT_MODE="$(prompt "Caddy certificate mode (dns01_wildcard/http01)" "dns01_wildcard")"
     [[ "${CADDY_CERT_MODE}" == "dns01_wildcard" || "${CADDY_CERT_MODE}" == "http01" ]] || die "Bad CADDY_CERT_MODE"
 
+    if [[ "${CADDY_CERT_MODE}" == "dns01_wildcard" ]]; then
+      [[ -n "${BASE_DOMAIN}" ]] || BASE_DOMAIN="$(prompt "Base domain (e.g. example.com)" "")"
+      [[ -n "${BASE_DOMAIN}" ]] || die "BASE_DOMAIN required for EDGE_PROXY=caddy with dns01_wildcard"
+    else
+      # http01 mode: prompt for explicit hosts if not provided
+      if [[ -z "${CADDY_HTTP01_HOSTS:-}" ]]; then
+        # Fallback: if BASE_DOMAIN and DASH_HOST are set, use DASH_HOST as default
+        local default_host=""
+        if [[ -n "${DASH_HOST:-}" ]]; then
+          default_host="${DASH_HOST}"
+        elif [[ -n "${BASE_DOMAIN:-}" ]]; then
+          default_host="${DASH_SUBDOMAIN}.${BASE_DOMAIN}"
+        fi
+        CADDY_HTTP01_HOSTS="$(prompt "HTTP-01 hostnames (space-separated)" "${default_host}")"
+      fi
+      [[ -n "${CADDY_HTTP01_HOSTS}" ]] || die "CADDY_CERT_MODE=http01 requires CADDY_HTTP01_HOSTS"
+      # BASE_DOMAIN is optional for http01 (can serve unrelated domains)
+    fi
+
+    [[ -n "${ACME_EMAIL}" ]] || ACME_EMAIL="$(prompt "ACME email (recommended)" "")"
+
     if [[ -z "${DASH_ENABLE}" ]]; then
-      DASH_ENABLE="$(is_tty && prompt "Install Kubernetes Dashboard (Helm)?" "true" || echo "false")"
+      DASH_ENABLE="$(is_tty && prompt "Install Kubernetes Dashboard (Helm)?" "false" || echo "false")"
     fi
     DASH_ENABLE="$(bool_norm "${DASH_ENABLE}")"
-    [[ -n "${DASH_HOST}" ]] || DASH_HOST="${DASH_SUBDOMAIN}.${BASE_DOMAIN}"
+    if [[ -z "${DASH_HOST}" && -n "${BASE_DOMAIN}" ]]; then
+      DASH_HOST="${DASH_SUBDOMAIN}.${BASE_DOMAIN}"
+    fi
   else
     # On join nodes, default dashboard install to false and avoid prompting unless
     # the user explicitly set DASH_ENABLE.
@@ -292,11 +312,28 @@ confirm_dangerous_or_die() {
   [[ "${CONFIRM:-false}" == "true" ]] || die "Non-interactive run requires CONFIRM=true. Refusing: ${msg}"
 }
 
-cmd_edge_http01() {
+cmd_edge_http() {
   require_root
   # This command only (re)configures Caddy. Force MODE to avoid accidentally
   # inheriting MODE=join from the environment and confusing follow-up output.
   MODE="bootstrap"
+
+  if [[ "${1:-}" == "-h" || "${1:-}" == "--help" || "${1:-}" == "help" ]]; then
+    cat << EOF
+Usage: $(basename "$0") http [HOST...]
+
+Configure Caddy for HTTP-01 certificates for explicit hostnames (no wildcard).
+
+Arguments:
+  HOST...   Space-separated hostnames to serve. If omitted, defaults to the dashboard host
+           (kube.<BASE_DOMAIN> by default).
+
+Notes:
+  - This overwrites /etc/caddy/Caddyfile and restarts Caddy.
+  - Use CONFIRM=true for non-interactive runs.
+EOF
+    return 0
+  fi
 
   # Safe guard: this command rewrites the host Caddy config.
   confirm_dangerous_or_die "This will overwrite /etc/caddy/Caddyfile and restart Caddy"
@@ -321,12 +358,285 @@ cmd_edge_http01() {
   [[ -n "${CADDY_HTTP01_HOSTS:-}" ]] || CADDY_HTTP01_HOSTS="${DASH_HOST}"
 
   # Keep the existing dashboard auth UX if Dashboard is enabled (or defaults to enabled on TTY).
+  # This command is "configure edge TLS via Caddy". Do not auto-enable the dashboard here;
+  # users who want it can set DASH_ENABLE=true (and optionally --dash-host).
   if [[ -z "${DASH_ENABLE}" ]]; then
-    DASH_ENABLE="$(is_tty && prompt "Install Kubernetes Dashboard (Helm)?" "true" || echo "false")"
+    DASH_ENABLE="false"
   fi
   DASH_ENABLE="$(bool_norm "${DASH_ENABLE}")"
 
   # Configure Caddy only (no k3s changes).
+  caddy_setup
+}
+
+cmd_dns() {
+  require_root
+  MODE="bootstrap"
+
+  local type="wildcard"
+  local domains=""
+  local add_domains=""
+  local plan_hosts=""
+  local base_domain_arg=""
+  local dash_host_arg=""
+  local do_show="false"
+  local show_format="human" # human|csv
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -h | --help | help)
+        cat << EOF
+Usage: $(basename "$0") dns
+       $(basename "$0") dns --type wildcard
+       $(basename "$0") dns --type edge-http --domains "kube.example.com,demo.example.com"
+       $(basename "$0") dns --type edge-http --add-domains "new.example.com"
+       $(basename "$0") dns --show --type edge-http --format csv
+
+Configure edge TLS via Caddy using either:
+- DNS-01 wildcard (default) via Netcup DNS API (apex + wildcard), or
+- HTTP-01 for explicit hostnames.
+
+Options:
+  --type <wildcard|edge-http>   Certificate mode (default: wildcard)
+  --domains "<a,b,c>"           Required when --type edge-http (comma-separated hostnames; '|' also accepted)
+  --add-domains "<a,b,c>"       Append to existing domains (only for --type edge-http)
+  --base-domain <domain>        Base domain (required for wildcard; optional for edge-http)
+  --dash-host <host>            Dashboard host (optional; for edge-http default is first host)
+  --show                       Print the currently configured domains from /etc/caddy/Caddyfile and exit
+  --format <human|csv>          Output format for --show (default: human)
+
+Notes:
+  - This overwrites /etc/caddy/Caddyfile and restarts Caddy.
+  - wildcard requires Netcup DNS API credentials (NETCUP_CUSTOMER_NUMBER / NETCUP_DNS_API_KEY / NETCUP_DNS_API_PASSWORD).
+  - Use CONFIRM=true for non-interactive runs.
+EOF
+        return 0
+        ;;
+      --type)
+        shift
+        type="${1:-}"
+        ;;
+      --type=*)
+        type="${1#*=}"
+        ;;
+      --domains)
+        shift
+        domains="${1:-}"
+        ;;
+      --domains=*)
+        domains="${1#*=}"
+        ;;
+      --add-domains)
+        shift
+        add_domains="${1:-}"
+        ;;
+      --add-domains=*)
+        add_domains="${1#*=}"
+        ;;
+      --base-domain)
+        shift
+        base_domain_arg="${1:-}"
+        ;;
+      --base-domain=*)
+        base_domain_arg="${1#*=}"
+        ;;
+      --dash-host)
+        shift
+        dash_host_arg="${1:-}"
+        ;;
+      --dash-host=*)
+        dash_host_arg="${1#*=}"
+        ;;
+      --show)
+        do_show="true"
+        ;;
+      --format)
+        shift
+        show_format="${1:-}"
+        ;;
+      --format=*)
+        show_format="${1#*=}"
+        ;;
+      *)
+        die "Unknown argument for dns: $1"
+        ;;
+    esac
+    shift || true
+  done
+
+  # Helper function to parse Caddyfile site label
+  parse_caddyfile_site_label() {
+    awk '
+      BEGIN { in_global=0 }
+      /^[[:space:]]*$/ { next }
+      /^[[:space:]]*\{/ { in_global=1; next }
+      in_global && /^[[:space:]]*\}/ { in_global=0; next }
+      in_global { next }
+      /\{$/ {
+        sub(/[[:space:]]*\{$/, "", $0)
+        print $0
+        exit
+      }
+    ' /etc/caddy/Caddyfile
+  }
+
+  if [[ "${do_show}" == "true" ]]; then
+    [[ "${show_format}" == "human" || "${show_format}" == "csv" ]] || die "--format must be human or csv"
+    [[ -f "/etc/caddy/Caddyfile" ]] || die "Caddyfile not found at /etc/caddy/Caddyfile"
+
+    local site_label
+    site_label="$(parse_caddyfile_site_label)"
+    [[ -n "${site_label}" ]] || die "Could not parse Caddyfile site label"
+
+    # Auto-detect current mode from Caddyfile (ignore --type parameter for --show)
+    local is_wildcard="false"
+    if grep -q "dns netcup" /etc/caddy/Caddyfile 2> /dev/null; then
+      is_wildcard="true"
+    fi
+
+    if [[ "${is_wildcard}" == "true" ]]; then
+      # DNS-01 wildcard mode
+      local base
+      base="$(sed -e 's/,.*$//' -e 's/[[:space:]]//g' <<< "${site_label}")"
+      [[ -n "${base}" ]] || die "Could not parse base domain from site label"
+      if [[ "${show_format}" == "csv" ]]; then
+        echo "${base}"
+      else
+        echo "cert_mode=dns01_wildcard"
+        echo "base_domain=${base}"
+      fi
+    else
+      # HTTP-01 mode
+      local csv
+      csv="$(sed -e 's/[[:space:]]*,[[:space:]]*/,/g' -e 's/[[:space:]]\+//g' <<< "${site_label}")"
+      if [[ "${show_format}" == "csv" ]]; then
+        echo "${csv}"
+      else
+        echo "cert_mode=http01"
+        echo "domains=${csv}"
+      fi
+    fi
+    return 0
+  fi
+
+  # Handle --add-domains: fetch current and append
+  if [[ -n "${add_domains}" ]]; then
+    [[ "${type}" == "edge-http" ]] || die "--add-domains is only supported with --type edge-http"
+    [[ -z "${domains}" ]] || die "Cannot use both --domains and --add-domains (use one or the other)"
+
+    if [[ ! -f "/etc/caddy/Caddyfile" ]]; then
+      die "Cannot --add-domains: Caddyfile not found at /etc/caddy/Caddyfile (run 'dns --type edge-http --domains' first)"
+    fi
+
+    local site_label
+    site_label="$(parse_caddyfile_site_label)"
+    [[ -n "${site_label}" ]] || die "Could not parse existing domains from Caddyfile"
+
+    local is_wildcard="false"
+    if grep -q "dns netcup" /etc/caddy/Caddyfile 2> /dev/null; then
+      is_wildcard="true"
+    fi
+    [[ "${is_wildcard}" != "true" ]] || die "Caddy is currently in wildcard DNS-01 mode; --add-domains requires edge-http mode"
+
+    # Parse existing domains (convert "a, b, c" to "a,b,c")
+    local current_csv
+    current_csv="$(sed -e 's/[[:space:]]*,[[:space:]]*/,/g' -e 's/[[:space:]]\+//g' <<< "${site_label}")"
+
+    # Normalize add_domains (allow comma or pipe separator)
+    local new_csv
+    new_csv="$(sed -e 's/[[:space:]]*[,|][[:space:]]*/,/g' -e 's/[[:space:]]\+//g' <<< "${add_domains}")"
+
+    # Merge: current + new (deduplicate via simple bash array)
+    local -a all_domains=()
+    local -A seen=()
+    local d
+    IFS=',' read -ra existing_arr <<< "${current_csv}"
+    for d in "${existing_arr[@]}"; do
+      [[ -z "$d" ]] && continue
+      if [[ -z "${seen[$d]:-}" ]]; then
+        all_domains+=("$d")
+        seen[$d]=1
+      fi
+    done
+    IFS=',' read -ra new_arr <<< "${new_csv}"
+    for d in "${new_arr[@]}"; do
+      [[ -z "$d" ]] && continue
+      if [[ -z "${seen[$d]:-}" ]]; then
+        all_domains+=("$d")
+        seen[$d]=1
+      fi
+    done
+
+    domains="$(
+      IFS=','
+      echo "${all_domains[*]}"
+    )"
+    [[ -n "${domains}" ]] || die "No domains after merge (current: ${current_csv}, adding: ${new_csv})"
+
+    log "Adding domain(s): ${new_csv}"
+    log "Full domain list: ${domains}"
+  fi
+
+  EDGE_PROXY="caddy"
+  [[ -n "${base_domain_arg}" ]] && BASE_DOMAIN="${base_domain_arg}"
+  [[ -n "${dash_host_arg}" ]] && DASH_HOST="${dash_host_arg}"
+  case "${type}" in
+    "" | wildcard)
+      CADDY_CERT_MODE="dns01_wildcard"
+      unset CADDY_HTTP01_HOSTS || true
+      ;;
+    edge-http)
+      [[ -n "${domains}" ]] || die "--domains is required for --type edge-http (format: a,b,c)"
+      CADDY_CERT_MODE="http01"
+      plan_hosts="${domains}"
+      plan_hosts="${plan_hosts//,/ }"
+      plan_hosts="${plan_hosts//|/ }"
+      CADDY_HTTP01_HOSTS="${plan_hosts}"
+      ;;
+    *)
+      die "Unknown --type for dns: ${type} (use wildcard or edge-http)"
+      ;;
+  esac
+
+  cat << EOF
+Will configure edge TLS via Caddy:
+  - cert mode: ${CADDY_CERT_MODE}
+EOF
+  if [[ "${CADDY_CERT_MODE}" == "http01" ]]; then
+    echo "  - hosts: ${CADDY_HTTP01_HOSTS}"
+    [[ -n "${DASH_HOST:-}" ]] && echo "  - dash host: ${DASH_HOST}"
+  else
+    echo "  - hosts: wildcard for BASE_DOMAIN (apex + *)"
+    [[ -n "${BASE_DOMAIN:-}" ]] && echo "  - base domain: ${BASE_DOMAIN}"
+  fi
+  echo
+
+  confirm_dangerous_or_die "This will overwrite /etc/caddy/Caddyfile and restart Caddy"
+
+  [[ -n "${NODE_IP}" ]] || NODE_IP="$(infer_node_ip)"
+  [[ -n "${EDGE_UPSTREAM}" ]] || EDGE_UPSTREAM="http://127.0.0.1:${TRAEFIK_NODEPORT_HTTP}"
+  if [[ "${CADDY_CERT_MODE}" == "dns01_wildcard" ]]; then
+    [[ -n "${BASE_DOMAIN}" ]] || BASE_DOMAIN="$(prompt "Base domain (e.g. example.com)" "")"
+    [[ -n "${BASE_DOMAIN}" ]] || die "BASE_DOMAIN required"
+    [[ -n "${DASH_HOST}" ]] || DASH_HOST="${DASH_SUBDOMAIN}.${BASE_DOMAIN}"
+  else
+    # For http01, BASE_DOMAIN is optional (multiple unrelated domains are supported).
+    # If the user wants the dashboard on a specific host, they can pass --dash-host.
+    # Otherwise, if dashboard is enabled, we will default to the first http01 host later.
+    if [[ -z "${DASH_HOST:-}" && -n "${BASE_DOMAIN:-}" ]]; then
+      DASH_HOST="${DASH_SUBDOMAIN}.${BASE_DOMAIN}"
+    fi
+  fi
+
+  if [[ -z "${DASH_ENABLE}" ]]; then
+    DASH_ENABLE="$(is_tty && prompt "Install Kubernetes Dashboard (Helm)?" "false" || echo "false")"
+  fi
+  DASH_ENABLE="$(bool_norm "${DASH_ENABLE}")"
+
+  if [[ "${DASH_ENABLE}" == "true" && -z "${DASH_HOST:-}" && "${CADDY_CERT_MODE}" == "http01" ]]; then
+    DASH_HOST="${CADDY_HTTP01_HOSTS%% *}"
+  fi
+
   caddy_setup
 }
 
@@ -408,17 +718,17 @@ Usage: $(basename "$0") <command>
 Commands:
   bootstrap        Install and configure k3s + Traefik NodePort + optional Caddy & Dashboard
   join             Same as bootstrap but MODE=join (set SERVER_URL and TOKEN/TOKEN_FILE)
-  edge-http01      Configure Caddy for HTTP-01 certificates for explicit hostnames (no wildcard)
+  dns              Configure edge TLS via Caddy (default DNS-01 wildcard; or --type edge-http)
   pair             Print a copy/paste join command (and optional UFW allow rule) for a worker node
   help             Show this help
 
 Examples:
   sudo $(basename "$0") bootstrap
   MODE=join SERVER_URL=https://x.x.x.x:6443 TOKEN=... sudo $(basename "$0") join
-  # Switch edge TLS to HTTP-01 for the dashboard host (defaults to kube.<BASE_DOMAIN>)
-  BASE_DOMAIN=example.com sudo $(basename "$0") edge-http01
-  # Switch edge TLS to HTTP-01 for multiple hostnames
-  BASE_DOMAIN=example.com sudo $(basename "$0") edge-http01 kube.example.com demo.example.com
+  # Edge TLS via DNS-01 wildcard (Netcup DNS API)
+  BASE_DOMAIN=example.com sudo $(basename "$0") dns
+  # Edge TLS via HTTP-01 for explicit hostnames
+  BASE_DOMAIN=example.com sudo $(basename "$0") dns --type edge-http --domains "kube.example.com|demo.example.com"
 EOF
 }
 
@@ -433,9 +743,9 @@ main() {
       MODE="join"
       cmd_bootstrap
       ;;
-    edge-http01)
+    dns)
       shift || true
-      cmd_edge_http01 "$@"
+      cmd_dns "$@"
       ;;
     pair)
       shift || true

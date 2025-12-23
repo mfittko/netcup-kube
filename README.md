@@ -43,8 +43,10 @@ Commands
 - `pair`: print a copy/paste worker join command (and optionally open UFW 6443 from a source IP/CIDR)
   - Run on the management node after bootstrap: `sudo ./bin/netcup-kube pair`
   - Optional: `sudo ./bin/netcup-kube pair --allow-from <worker-ip-or-cidr>`
-- `edge-http01`: switch Caddy to HTTP-01 cert mode for explicit hostnames (no wildcard)
-  - Example: `sudo BASE_DOMAIN=example.com ./bin/netcup-kube edge-http01 kube.example.com demo.example.com`
+- `dns`: configure edge TLS via Caddy (default DNS-01 wildcard via Netcup DNS API)
+  - DNS-01 wildcard (default): `sudo BASE_DOMAIN=example.com ./bin/netcup-kube dns`
+  - HTTP-01 explicit hosts (can span multiple base domains): `sudo ./bin/netcup-kube dns --type edge-http --domains "abc.com,abc.org"`
+  - Optional dashboard host in HTTP-01 mode: `sudo ./bin/netcup-kube dns --type edge-http --domains "abc.com,abc.org" --dash-host "kube.abc.com"`
   - Safety: this overwrites `/etc/caddy/Caddyfile` and restarts Caddy (requires TTY confirmation or `CONFIRM=true`)
 
 Environment variables (selected)
