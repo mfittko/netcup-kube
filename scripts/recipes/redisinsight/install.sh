@@ -78,19 +78,65 @@ log "Installing RedisInsight into namespace: ${NAMESPACE}"
 log "Ensuring namespace exists"
 k create namespace "${NAMESPACE}" --dry-run=client -o yaml | k apply -f -
 
-# Add RedisInsight Helm repo
-log "Adding RedisInsight Helm repository"
-if ! helm repo list 2> /dev/null | grep -q "^redis"; then
-  helm repo add redis https://redis.github.io/helm-charts
-fi
-helm repo update
+# Deploy RedisInsight using official manifests
+log "Deploying RedisInsight"
+k apply -f - << EOF
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: redisinsight-pvc
+  namespace: ${NAMESPACE}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redisinsight
+  namespace: ${NAMESPACE}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redisinsight
+  template:
+    metadata:
+      labels:
+        app: redisinsight
+    spec:
+      containers:
+      - name: redisinsight
+        image: redis/redisinsight:latest
+        ports:
+        - containerPort: 5540
+        volumeMounts:
+        - name: redisinsight-data
+          mountPath: /data
+      volumes:
+      - name: redisinsight-data
+        persistentVolumeClaim:
+          claimName: redisinsight-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redisinsight
+  namespace: ${NAMESPACE}
+spec:
+  selector:
+    app: redisinsight
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 5540
+EOF
 
-# Install/Upgrade RedisInsight
-log "Installing/Upgrading RedisInsight via Helm"
-helm upgrade --install redisinsight redis/redisinsight \
-  --namespace "${NAMESPACE}" \
-  --wait \
-  --timeout 5m
+log "Waiting for RedisInsight to be ready"
+k wait --for=condition=available --timeout=300s deployment/redisinsight -n "${NAMESPACE}"
 
 log "RedisInsight installed successfully!"
 echo

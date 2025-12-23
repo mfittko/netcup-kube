@@ -73,6 +73,24 @@ if [[ ! -x "${RECIPE_SCRIPT}" ]]; then
   chmod +x "${RECIPE_SCRIPT}"
 fi
 
+# Parse --host flag for automatic domain management
+HOST_ARG=""
+for arg in "$@"; do
+  case "$arg" in
+    --host=*)
+      HOST_ARG="${arg#*=}"
+      ;;
+    --host)
+      # Next arg should be the host value, but we'll let the recipe handle validation
+      HOST_ARG="__NEXT__"
+      ;;
+  esac
+  if [[ "${HOST_ARG}" == "__NEXT__" && "$arg" != "--host" ]]; then
+    HOST_ARG="$arg"
+    break
+  fi
+done
+
 # Ensure kubeconfig is available
 if [[ -z "${KUBECONFIG:-}" ]]; then
   # If on the server, recipes will fall back to /etc/rancher/k3s/k3s.yaml
@@ -137,4 +155,26 @@ if [[ -z "${KUBECONFIG:-}" ]]; then
   fi
 fi
 
-exec "${RECIPE_SCRIPT}" "$@"
+# Run the recipe (don't use exec so we can handle post-install steps)
+"${RECIPE_SCRIPT}" "$@"
+RECIPE_EXIT_CODE=$?
+
+# If recipe succeeded and --host was specified, auto-add domain to Caddy
+if [[ ${RECIPE_EXIT_CODE} -eq 0 && -n "${HOST_ARG}" && "${HOST_ARG}" != "__NEXT__" ]]; then
+  # Only do this when running locally (not on the server)
+  if [[ ! -f "/etc/caddy/Caddyfile" ]]; then
+    REMOTE_WRAPPER="${PROJECT_ROOT}/bin/netcup-kube-remote"
+    if [[ -x "${REMOTE_WRAPPER}" ]]; then
+      echo ""
+      echo "Adding ${HOST_ARG} to Caddy edge-http domains..."
+      if "${REMOTE_WRAPPER}" run dns --type edge-http --add-domains "${HOST_ARG}"; then
+        echo "✓ Domain added successfully!"
+      else
+        echo "⚠ Failed to add domain automatically. Run manually:"
+        echo "  bin/netcup-kube-remote run dns --type edge-http --add-domains \"${HOST_ARG}\""
+      fi
+    fi
+  fi
+fi
+
+exit ${RECIPE_EXIT_CODE}
