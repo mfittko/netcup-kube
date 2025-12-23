@@ -503,13 +503,12 @@ if [[ "${DO_RUN}" == "true" ]]; then
   fi
 
   # ssh joins argv into a single remote shell string; shell-escape args to avoid interpretation (e.g. pipes in --domains).
-  remote_cmd=(sudo -E bash -s -- "${remote_env}" "${remote_bin}" "${RUN_ARGS[@]}")
-  remote_cmd_q=""
-  printf -v remote_cmd_q '%q ' "${remote_cmd[@]}"
-  remote_cmd_q="${remote_cmd_q% }"
-
-  echo "[local] Running on ${NEW_USER}@${HOST}: ${remote_cmd_q}"
-  ssh_user "${tty_flags[@]}" "${remote_cmd_q}" << 'EOS'
+  #
+  # IMPORTANT: do not stream a script over stdin here, because with a forced TTY the pty will echo
+  # the script contents and stdin may end up exhausted for follow-up prompts. Use `bash -lc` so
+  # netcup-kube inherits an interactive TTY cleanly.
+  # shellcheck disable=SC2016
+  remote_runner='
 set -euo pipefail
 env_file="${1:-}"
 bin="${2:-}"
@@ -523,7 +522,14 @@ if [[ "${env_file}" != "__NONE__" && -n "${env_file}" ]]; then
 fi
 
 exec "${bin}" "$@"
-EOS
+'
+  remote_cmd=(sudo -E bash -lc "${remote_runner}" bash "${remote_env}" "${remote_bin}" "${RUN_ARGS[@]}")
+  remote_cmd_q=""
+  printf -v remote_cmd_q '%q ' "${remote_cmd[@]}"
+  remote_cmd_q="${remote_cmd_q% }"
+
+  echo "[local] Running on ${NEW_USER}@${HOST}: ${remote_cmd_q}"
+  ssh_user "${tty_flags[@]}" "${remote_cmd_q}"
 
   if [[ "${remote_env}" != "__NONE__" ]]; then
     ssh_user "${tty_flags[@]}" "sudo rm -f '${remote_env}'" || true
