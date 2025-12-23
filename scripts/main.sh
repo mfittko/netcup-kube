@@ -151,25 +151,16 @@ resolve_inputs() {
 
     [[ -n "${CADDY_CERT_MODE}" ]] || CADDY_CERT_MODE="$(prompt "Caddy certificate mode (dns01_wildcard/http01)" "dns01_wildcard")"
     [[ "${CADDY_CERT_MODE}" == "dns01_wildcard" || "${CADDY_CERT_MODE}" == "http01" ]] || die "Bad CADDY_CERT_MODE"
+  fi
 
-    if [[ -z "${DASH_ENABLE}" ]]; then
-      DASH_ENABLE="$(is_tty && prompt "Install Kubernetes Dashboard (Helm)?" "false" || echo "false")"
-    fi
-    DASH_ENABLE="$(bool_norm "${DASH_ENABLE}")"
-    if [[ -z "${DASH_HOST}" && -n "${BASE_DOMAIN}" ]]; then
-      DASH_HOST="${DASH_SUBDOMAIN}.${BASE_DOMAIN}"
-    fi
-  else
-    # On join nodes, default dashboard install to false and avoid prompting unless
-    # the user explicitly set DASH_ENABLE.
-    if [[ -z "${DASH_ENABLE}" ]]; then
-      if [[ "${MODE}" == "join" ]]; then
-        DASH_ENABLE="false"
-      else
-        DASH_ENABLE="$(is_tty && prompt "Install Kubernetes Dashboard (Helm)?" "false" || echo "false")"
-      fi
-    fi
-    DASH_ENABLE="$(bool_norm "${DASH_ENABLE}")"
+  # Dashboard is now a separate install recipe (netcup-kube-install dashboard)
+  # Set default to false to avoid legacy prompts
+  if [[ -z "${DASH_ENABLE}" ]]; then
+    DASH_ENABLE="false"
+  fi
+  DASH_ENABLE="$(bool_norm "${DASH_ENABLE}")"
+  if [[ -z "${DASH_HOST}" && -n "${BASE_DOMAIN}" ]]; then
+    DASH_HOST="${DASH_SUBDOMAIN}.${BASE_DOMAIN}"
   fi
 }
 
@@ -627,8 +618,9 @@ EOF
     fi
   fi
 
+  # Dashboard is now a separate install recipe (netcup-kube-install dashboard)
   if [[ -z "${DASH_ENABLE}" ]]; then
-    DASH_ENABLE="$(is_tty && prompt "Install Kubernetes Dashboard (Helm)?" "false" || echo "false")"
+    DASH_ENABLE="false"
   fi
   DASH_ENABLE="$(bool_norm "${DASH_ENABLE}")"
 

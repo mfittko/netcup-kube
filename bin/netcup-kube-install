@@ -41,6 +41,7 @@ Available recipes:
   sealed-secrets           Install Sealed Secrets (encrypt secrets for Git)
   redisinsight             Install RedisInsight (Redis GUI)
   kube-prometheus-stack    Install Grafana + Prometheus + Alertmanager
+  dashboard                Install Kubernetes Dashboard (official web UI)
 
 Examples:
   netcup-kube-install argo-cd --help
