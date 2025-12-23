@@ -45,7 +45,8 @@ Commands
   - Optional: `sudo ./bin/netcup-kube pair --allow-from <worker-ip-or-cidr>`
 - `dns`: configure edge TLS via Caddy (default DNS-01 wildcard via Netcup DNS API)
   - DNS-01 wildcard (default): `sudo BASE_DOMAIN=example.com ./bin/netcup-kube dns`
-  - HTTP-01 explicit hosts: `sudo BASE_DOMAIN=example.com ./bin/netcup-kube dns --type edge-http --domains "kube.example.com,demo.example.com"`
+  - HTTP-01 explicit hosts (can span multiple base domains): `sudo ./bin/netcup-kube dns --type edge-http --domains "abc.com,abc.org"`
+  - Optional dashboard host in HTTP-01 mode: `sudo ./bin/netcup-kube dns --type edge-http --domains "abc.com,abc.org" --dash-host "kube.abc.com"`
   - Safety: this overwrites `/etc/caddy/Caddyfile` and restarts Caddy (requires TTY confirmation or `CONFIRM=true`)
 
 Environment variables (selected)

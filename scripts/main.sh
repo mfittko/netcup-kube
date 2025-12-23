@@ -140,8 +140,13 @@ resolve_inputs() {
 
   if [[ "${EDGE_PROXY}" == "caddy" ]]; then
     [[ -n "${EDGE_UPSTREAM}" ]] || EDGE_UPSTREAM="$(prompt "Edge upstream (Caddy forwards HTTP to this)" "http://127.0.0.1:${TRAEFIK_NODEPORT_HTTP}")"
-    [[ -n "${BASE_DOMAIN}" ]] || BASE_DOMAIN="$(prompt "Base domain (e.g. example.com)" "")"
-    [[ -n "${BASE_DOMAIN}" ]] || die "BASE_DOMAIN required for EDGE_PROXY=caddy"
+    if [[ "${CADDY_CERT_MODE}" == "dns01_wildcard" ]]; then
+      [[ -n "${BASE_DOMAIN}" ]] || BASE_DOMAIN="$(prompt "Base domain (e.g. example.com)" "")"
+      [[ -n "${BASE_DOMAIN}" ]] || die "BASE_DOMAIN required for EDGE_PROXY=caddy with dns01_wildcard"
+    else
+      # http01 can serve arbitrary explicit hostnames; BASE_DOMAIN is optional unless you want kube.<BASE_DOMAIN> defaults.
+      true
+    fi
     [[ -n "${ACME_EMAIL}" ]] || ACME_EMAIL="$(prompt "ACME email (recommended)" "")"
 
     [[ -n "${CADDY_CERT_MODE}" ]] || CADDY_CERT_MODE="$(prompt "Caddy certificate mode (dns01_wildcard/http01)" "dns01_wildcard")"
@@ -151,7 +156,9 @@ resolve_inputs() {
       DASH_ENABLE="$(is_tty && prompt "Install Kubernetes Dashboard (Helm)?" "true" || echo "false")"
     fi
     DASH_ENABLE="$(bool_norm "${DASH_ENABLE}")"
-    [[ -n "${DASH_HOST}" ]] || DASH_HOST="${DASH_SUBDOMAIN}.${BASE_DOMAIN}"
+    if [[ -z "${DASH_HOST}" && -n "${BASE_DOMAIN}" ]]; then
+      DASH_HOST="${DASH_SUBDOMAIN}.${BASE_DOMAIN}"
+    fi
   else
     # On join nodes, default dashboard install to false and avoid prompting unless
     # the user explicitly set DASH_ENABLE.
@@ -338,8 +345,10 @@ EOF
   [[ -n "${CADDY_HTTP01_HOSTS:-}" ]] || CADDY_HTTP01_HOSTS="${DASH_HOST}"
 
   # Keep the existing dashboard auth UX if Dashboard is enabled (or defaults to enabled on TTY).
+  # This command is "configure edge TLS via Caddy". Do not auto-enable the dashboard here;
+  # users who want it can set DASH_ENABLE=true (and optionally --dash-host).
   if [[ -z "${DASH_ENABLE}" ]]; then
-    DASH_ENABLE="$(is_tty && prompt "Install Kubernetes Dashboard (Helm)?" "true" || echo "false")"
+    DASH_ENABLE="false"
   fi
   DASH_ENABLE="$(bool_norm "${DASH_ENABLE}")"
 
@@ -354,6 +363,8 @@ cmd_dns() {
   local type="wildcard"
   local domains=""
   local plan_hosts=""
+  local base_domain_arg=""
+  local dash_host_arg=""
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -370,6 +381,8 @@ Configure edge TLS via Caddy using either:
 Options:
   --type <wildcard|edge-http>   Certificate mode (default: wildcard)
   --domains "<a,b,c>"           Required when --type edge-http (comma-separated hostnames; '|' also accepted)
+  --base-domain <domain>        Base domain (required for wildcard; optional for edge-http)
+  --dash-host <host>            Dashboard host (optional; for edge-http default is first host)
 
 Notes:
   - This overwrites /etc/caddy/Caddyfile and restarts Caddy.
@@ -392,6 +405,20 @@ EOF
       --domains=*)
         domains="${1#*=}"
         ;;
+      --base-domain)
+        shift
+        base_domain_arg="${1:-}"
+        ;;
+      --base-domain=*)
+        base_domain_arg="${1#*=}"
+        ;;
+      --dash-host)
+        shift
+        dash_host_arg="${1:-}"
+        ;;
+      --dash-host=*)
+        dash_host_arg="${1#*=}"
+        ;;
       *)
         die "Unknown argument for dns: $1"
         ;;
@@ -400,6 +427,8 @@ EOF
   done
 
   EDGE_PROXY="caddy"
+  [[ -n "${base_domain_arg}" ]] && BASE_DOMAIN="${base_domain_arg}"
+  [[ -n "${dash_host_arg}" ]] && DASH_HOST="${dash_host_arg}"
   case "${type}" in
     "" | wildcard)
       CADDY_CERT_MODE="dns01_wildcard"
@@ -424,40 +453,38 @@ Will configure edge TLS via Caddy:
 EOF
   if [[ "${CADDY_CERT_MODE}" == "http01" ]]; then
     echo "  - hosts: ${CADDY_HTTP01_HOSTS}"
+    [[ -n "${DASH_HOST:-}" ]] && echo "  - dash host: ${DASH_HOST}"
   else
     echo "  - hosts: wildcard for BASE_DOMAIN (apex + *)"
+    [[ -n "${BASE_DOMAIN:-}" ]] && echo "  - base domain: ${BASE_DOMAIN}"
   fi
   echo
 
   confirm_dangerous_or_die "This will overwrite /etc/caddy/Caddyfile and restart Caddy"
 
-  # For http01 we can infer BASE_DOMAIN from the first provided hostname to avoid an extra prompt.
-  # Heuristic:
-  # - if host has 3+ labels (a.b.c), assume base is everything after the first label (b.c)
-  # - if host has 2 labels (b.c), assume it is the base domain
-  # This is not perfect for public suffixes (e.g. co.uk), so BASE_DOMAIN can always be overridden.
-  if [[ -z "${BASE_DOMAIN:-}" && "${CADDY_CERT_MODE}" == "http01" && -n "${CADDY_HTTP01_HOSTS:-}" ]]; then
-    local first_host
-    first_host="${CADDY_HTTP01_HOSTS%% *}"
-    if [[ -n "${first_host}" ]]; then
-      if [[ "${first_host}" == *.*.* ]]; then
-        BASE_DOMAIN="${first_host#*.}"
-      elif [[ "${first_host}" == *.* ]]; then
-        BASE_DOMAIN="${first_host}"
-      fi
-    fi
-  fi
-
   [[ -n "${NODE_IP}" ]] || NODE_IP="$(infer_node_ip)"
   [[ -n "${EDGE_UPSTREAM}" ]] || EDGE_UPSTREAM="http://127.0.0.1:${TRAEFIK_NODEPORT_HTTP}"
-  [[ -n "${BASE_DOMAIN}" ]] || BASE_DOMAIN="$(prompt "Base domain (e.g. example.com)" "")"
-  [[ -n "${BASE_DOMAIN}" ]] || die "BASE_DOMAIN required"
-  [[ -n "${DASH_HOST}" ]] || DASH_HOST="${DASH_SUBDOMAIN}.${BASE_DOMAIN}"
+  if [[ "${CADDY_CERT_MODE}" == "dns01_wildcard" ]]; then
+    [[ -n "${BASE_DOMAIN}" ]] || BASE_DOMAIN="$(prompt "Base domain (e.g. example.com)" "")"
+    [[ -n "${BASE_DOMAIN}" ]] || die "BASE_DOMAIN required"
+    [[ -n "${DASH_HOST}" ]] || DASH_HOST="${DASH_SUBDOMAIN}.${BASE_DOMAIN}"
+  else
+    # For http01, BASE_DOMAIN is optional (multiple unrelated domains are supported).
+    # If the user wants the dashboard on a specific host, they can pass --dash-host.
+    # Otherwise, if dashboard is enabled, we will default to the first http01 host later.
+    if [[ -z "${DASH_HOST:-}" && -n "${BASE_DOMAIN:-}" ]]; then
+      DASH_HOST="${DASH_SUBDOMAIN}.${BASE_DOMAIN}"
+    fi
+  fi
 
   if [[ -z "${DASH_ENABLE}" ]]; then
     DASH_ENABLE="$(is_tty && prompt "Install Kubernetes Dashboard (Helm)?" "true" || echo "false")"
   fi
   DASH_ENABLE="$(bool_norm "${DASH_ENABLE}")"
+
+  if [[ "${DASH_ENABLE}" == "true" && -z "${DASH_HOST:-}" && "${CADDY_CERT_MODE}" == "http01" ]]; then
+    DASH_HOST="${CADDY_HTTP01_HOSTS%% *}"
+  fi
 
   caddy_setup
 }
