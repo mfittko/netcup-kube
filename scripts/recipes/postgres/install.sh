@@ -110,7 +110,9 @@ primary:
     size: ${STORAGE}
 
 metrics:
-  enabled: false
+  enabled: true
+  serviceMonitor:
+    enabled: true
 EOF
 fi
 
