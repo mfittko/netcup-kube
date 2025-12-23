@@ -65,6 +65,47 @@ k() {
 
 log "Installing Metrics Server into namespace: ${NAMESPACE}"
 
+# Check if metrics-server is already running (k3s built-in)
+if k get apiservice v1beta1.metrics.k8s.io > /dev/null 2>&1; then
+  log "Detected existing metrics-server (likely k3s built-in)"
+
+  # Check if it's already working
+  if k top nodes > /dev/null 2>&1; then
+    echo
+    echo "✓ Metrics Server is already installed and working!"
+    echo
+    echo "k3s includes a built-in metrics-server. Test it:"
+    echo "  kubectl top nodes"
+    echo "  kubectl top pods -A"
+    echo
+    echo "If you need a custom deployment, first delete the existing one:"
+    echo "  kubectl delete apiservice v1beta1.metrics.k8s.io"
+    echo "  kubectl delete deploy metrics-server -n kube-system"
+    echo
+    exit 0
+  fi
+
+  echo
+  echo "WARNING: Existing metrics-server APIService found, but metrics are not available."
+  echo "This may be k3s built-in metrics-server. To replace it:"
+  echo "  kubectl delete apiservice v1beta1.metrics.k8s.io"
+  echo "  kubectl delete deploy metrics-server -n kube-system 2>/dev/null || true"
+  echo
+  read -r -p "Delete existing and continue? [y/N]: " response
+  if [[ ! "${response}" =~ ^[Yy]$ ]]; then
+    echo "Aborted."
+    exit 1
+  fi
+
+  log "Removing existing metrics-server components"
+  k delete apiservice v1beta1.metrics.k8s.io || true
+  k delete deploy metrics-server -n kube-system 2> /dev/null || true
+  k delete service metrics-server -n kube-system 2> /dev/null || true
+
+  # Wait a moment for cleanup
+  sleep 3
+fi
+
 # Ensure namespace exists
 log "Ensuring namespace exists"
 k create namespace "${NAMESPACE}" --dry-run=client -o yaml | k apply -f -
