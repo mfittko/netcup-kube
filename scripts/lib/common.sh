@@ -12,7 +12,11 @@ die() {
 is_tty() {
   [[ -t 0 && -t 1 ]] && return 0
   # Some SSH contexts have no stdio TTY, but still provide /dev/tty for interactive input.
-  [[ -r /dev/tty ]] && return 0
+  # Only treat /dev/tty as interactive if it can actually be opened (a controlling tty exists).
+  if [[ -e /dev/tty ]] && { exec 3<> /dev/tty; } 2> /dev/null; then
+    exec 3>&- 3<&-
+    return 0
+  fi
   return 1
 }
 
