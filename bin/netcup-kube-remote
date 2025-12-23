@@ -26,40 +26,47 @@ PROJECT_ROOT="${SCRIPT_DIR%/bin}"
 DEFAULT_CONFIG="${PROJECT_ROOT}/config/netcup-kube.env"
 LOCAL_CMD="$(basename "$0")"
 
+usage() {
+  local exit_code="${1:-0}"
+  cat >&2 << 'EOF'
+Usage:
+  netcup-kube-remote [<host-or-ip>] [--user <name>] [--pubkey <path>] [--repo <url>] [--config <path>] <command> [command options]
+
+Commands:
+  provision   Prepare the target host (sudo user + repo clone/update). Does not run netcup-kube.
+  git         Remote git control for the repo (checkout/pull branch/ref).
+  run         Run a netcup-kube command on the target host (forces TTY by default).
+
+Common host selection:
+  - If <host-or-ip> is omitted, defaults to MGMT_HOST/MGMT_IP from ./config/netcup-kube.env (if present).
+
+Examples:
+  netcup-kube-remote provision
+  netcup-kube-remote mfittko.com --user ops provision
+  netcup-kube-remote git --branch main --pull
+  netcup-kube-remote run bootstrap
+  netcup-kube-remote run --env-file ./env/bootstrap.env bootstrap
+  netcup-kube-remote run --branch main --pull bootstrap
+
+Command options:
+  git [--branch <name>] [--ref <ref>] [--pull|--no-pull]
+  run [--no-tty] [--env-file <path>] [--branch <name>] [--ref <ref>] [--pull|--no-pull] [--] <netcup-kube args...>
+
+Notes:
+  - `run` uses SSH with a forced TTY (unless --no-tty) so prompts can read from /dev/tty.
+  - `--env-file` is copied to the remote host and bash-sourced before running netcup-kube.
+EOF
+  exit "${exit_code}"
+}
+
 HOST=""
 if [[ $# -gt 0 && "${1:-}" != -* && "${1:-}" != "run" && "${1:-}" != "git" ]]; then
   HOST="$1"
   shift || true
 fi
 
-if [[ -z "$HOST" && ! -f "${DEFAULT_CONFIG}" ]]; then
-  cat >&2 << 'EOF'
-Usage:
-  netcup-kube-remote <host-or-ip> [--user <name>] [--pubkey <path>] [--repo <url>]
-  netcup-kube-remote [--user <name>] [--pubkey <path>] [--repo <url>]
-    # defaults to MGMT_HOST/MGMT_IP from ./config/netcup-kube.env (if present)
-  netcup-kube-remote <host-or-ip> [--user <name>] [--pubkey <path>] [--repo <url>] git [--branch <name>] [--ref <ref>] [--pull|--no-pull]
-  netcup-kube-remote git [--branch <name>] [--ref <ref>] [--pull|--no-pull]
-  netcup-kube-remote <host-or-ip> [--user <name>] [--pubkey <path>] [--repo <url>] run [--no-tty] [--env-file <path>] [--branch <name>] [--ref <ref>] [--pull|--no-pull] [--] <netcup-kube args...>
-  netcup-kube-remote run [--no-tty] [--env-file <path>] [--branch <name>] [--ref <ref>] [--pull|--no-pull] [--] <netcup-kube args...>
-
-Examples:
-  netcup-kube-remote 203.0.113.10 --user ops
-  netcup-kube-remote --user ops                      # uses config/netcup-kube.env MGMT_*
-  netcup-kube-remote --user ops git --branch main
-  netcup-kube-remote 203.0.113.10 --user ops run bootstrap
-  netcup-kube-remote 203.0.113.10 --user ops run pair
-  netcup-kube-remote 203.0.113.10 --user ops run edge-http01 kube.example.com demo.example.com
-  netcup-kube-remote --user ops run --env-file ./env/bootstrap.env bootstrap
-
-Notes:
-  - The `run` subcommand SSHes with a forced TTY (unless --no-tty) so interactive prompts on the
-    remote host can read from /dev/tty.
-  - `--env-file` is copied to the remote host and bash-sourced before running netcup-kube.
-  - `git` defaults to `--pull`; `run` defaults to `--no-pull` unless you pass `--pull`.
-  - `git` / `--branch` / `--ref` allow switching the remote repo to a branch/ref and fast-forwarding it.
-EOF
-  exit 1
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" || "${1:-}" == "help" ]]; then
+  usage 0
 fi
 
 NEW_USER="cubeadmin"
@@ -68,6 +75,7 @@ REPO_URL="https://github.com/mfittko/netcup-kube.git"
 CONFIG_PATH="${DEFAULT_CONFIG}"
 DO_RUN=false
 DO_GIT=false
+DO_PROVISION=false
 FORCE_TTY=true
 RUN_ENV_FILE=""
 RUN_ARGS=()
@@ -79,6 +87,9 @@ GIT_PULL_SET=false
 # Parse flags
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    -h | --help | help)
+      usage 0
+      ;;
     --user)
       NEW_USER="${2:-}"
       shift 2 || true
@@ -94,6 +105,11 @@ while [[ $# -gt 0 ]]; do
     --config)
       CONFIG_PATH="${2:-}"
       shift 2 || true
+      ;;
+    provision)
+      DO_PROVISION=true
+      shift || true
+      break
       ;;
     run)
       DO_RUN=true
@@ -191,10 +207,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     *)
       echo "Unknown flag: $1" >&2
-      exit 1
+      usage 1
       ;;
   esac
 done
+
+if [[ "${DO_PROVISION}" != "true" && "${DO_GIT}" != "true" && "${DO_RUN}" != "true" ]]; then
+  usage 1
+fi
 
 if [[ -z "$HOST" ]]; then
   if [[ -n "${CONFIG_PATH}" && -f "${CONFIG_PATH}" ]]; then
@@ -210,7 +230,7 @@ fi
 
 [[ -n "${HOST}" ]] || {
   echo "No host provided and no MGMT_HOST/MGMT_IP found in ${CONFIG_PATH}." >&2
-  exit 1
+  usage 1
 }
 
 # Pick a public key (prefer ed25519)
@@ -372,6 +392,10 @@ REMOTE_SCRIPT="${REMOTE_SCRIPT//__HOST__/$HOST}"
 REMOTE_SCRIPT="${REMOTE_SCRIPT//__LOCAL_CMD__/$LOCAL_CMD}"
 
 ssh_root "bash -s" <<< "$REMOTE_SCRIPT"
+
+if [[ "${DO_PROVISION}" == "true" ]]; then
+  exit 0
+fi
 
 if [[ "${DO_GIT}" == "true" ]]; then
   remote_git_sync
