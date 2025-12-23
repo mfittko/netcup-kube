@@ -93,8 +93,14 @@ resolve_inputs() {
     NODE_EXTERNAL_IP="${NODE_IP}"
   fi
 
+  # Join nodes should not, by default, configure an edge proxy. If the user wants
+  # to configure Caddy on a join node they can set EDGE_PROXY=caddy explicitly.
   if [[ -z "${EDGE_PROXY}" ]]; then
-    EDGE_PROXY="$(is_tty && prompt "Configure host TLS reverse proxy now? (none/caddy)" "caddy" || echo "none")"
+    if [[ "${MODE}" == "join" ]]; then
+      EDGE_PROXY="none"
+    else
+      EDGE_PROXY="$(is_tty && prompt "Configure host TLS reverse proxy now? (none/caddy)" "caddy" || echo "none")"
+    fi
   fi
   [[ "${EDGE_PROXY}" == "none" || "${EDGE_PROXY}" == "caddy" ]] || die "EDGE_PROXY must be none|caddy"
 
@@ -132,8 +138,14 @@ resolve_inputs() {
     DASH_ENABLE="$(bool_norm "${DASH_ENABLE}")"
     [[ -n "${DASH_HOST}" ]] || DASH_HOST="${DASH_SUBDOMAIN}.${BASE_DOMAIN}"
   else
+    # On join nodes, default dashboard install to false and avoid prompting unless
+    # the user explicitly set DASH_ENABLE.
     if [[ -z "${DASH_ENABLE}" ]]; then
-      DASH_ENABLE="$(is_tty && prompt "Install Kubernetes Dashboard (Helm)?" "false" || echo "false")"
+      if [[ "${MODE}" == "join" ]]; then
+        DASH_ENABLE="false"
+      else
+        DASH_ENABLE="$(is_tty && prompt "Install Kubernetes Dashboard (Helm)?" "false" || echo "false")"
+      fi
     fi
     DASH_ENABLE="$(bool_norm "${DASH_ENABLE}")"
   fi
