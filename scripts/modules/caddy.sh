@@ -38,16 +38,23 @@ dns_warn_if_netcup_not_authoritative() {
   fi
 }
 
+escape_env_value() {
+  # Escape a value so it is safe for use in a systemd EnvironmentFile inside double quotes.
+  # We escape backslashes, double quotes, and dollar signs to avoid parsing issues and expansion.
+  local v="$1"
+  v="${v//\\/\\\\}" # backslash
+  v="${v//\"/\\\"}" # double quote
+  v="${v//\$/\\$}"  # dollar (prevents variable expansion)
+  printf '%s' "$v"
+}
+
 netcup_write_envfile() {
   # systemd EnvironmentFile parsing is sensitive to special characters (e.g. '#' starts a comment unless quoted).
   # Quote/escape values so secrets survive round-trips.
   local esc_cn esc_key esc_pw
-  esc_cn="${NETCUP_CUSTOMER_NUMBER//\\/\\\\}"
-  esc_cn="${esc_cn//\"/\\\"}"
-  esc_key="${NETCUP_DNS_API_KEY//\\/\\\\}"
-  esc_key="${esc_key//\"/\\\"}"
-  esc_pw="${NETCUP_DNS_API_PASSWORD//\\/\\\\}"
-  esc_pw="${esc_pw//\"/\\\"}"
+  esc_cn="$(escape_env_value "${NETCUP_CUSTOMER_NUMBER}")"
+  esc_key="$(escape_env_value "${NETCUP_DNS_API_KEY}")"
+  esc_pw="$(escape_env_value "${NETCUP_DNS_API_PASSWORD}")"
 
   write_file "${NETCUP_ENVFILE}" "0600" "$(
     cat << EOF
@@ -240,7 +247,7 @@ $(if [[ "${DASH_ENABLE:-false}" == "true" && "${DASH_BASICAUTH:-false}" == "true
         cat << EOR
   @kube host ${DASH_HOST}
   handle @kube {
-    basic_auth {
+    basicauth {
       ${DASH_AUTH_USER} ${DASH_AUTH_HASH}
     }
     reverse_proxy ${EDGE_UPSTREAM}
@@ -265,7 +272,7 @@ $(if [[ "${DASH_ENABLE:-false}" == "true" && "${DASH_BASICAUTH:-false}" == "true
         cat << EOR
   @kube host ${DASH_HOST}
   handle @kube {
-    basic_auth {
+    basicauth {
       ${DASH_AUTH_USER} ${DASH_AUTH_HASH}
     }
     reverse_proxy ${EDGE_UPSTREAM}

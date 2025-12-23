@@ -335,6 +335,8 @@ cmd_pair() {
 
   local allow_from=""
   local server_url="${SERVER_URL:-}"
+  local self_bin
+  self_bin="$(basename "$0")"
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -389,9 +391,10 @@ SERVER_URL=${server_url}
 On the WORKER node, run:
 
   sudo env SERVER_URL="${server_url}" TOKEN="${token}" ENABLE_UFW=false EDGE_PROXY=none DASH_ENABLE=false \\
-    /home/ops/netcup-kube/bin/netcup-kube join
+    ${self_bin} join
 
 Notes:
+- If ${self_bin} is not in PATH on the worker, use the full path (example: ~/netcup-kube/bin/netcup-kube join).
 - If your worker uses a different route to reach the management node (vLAN/VPN vs public),
   pass --server-url accordingly.
 - If 6443 is firewalled, rerun this command with: --allow-from <worker-ip-or-cidr>

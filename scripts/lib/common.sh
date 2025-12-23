@@ -11,7 +11,8 @@ die() {
 # TTY detection
 is_tty() {
   [[ -t 0 && -t 1 ]] && return 0
-  [[ -r /dev/tty && -w /dev/tty ]] && return 0
+  # Some SSH contexts have no stdio TTY, but still provide /dev/tty for interactive input.
+  [[ -r /dev/tty ]] && return 0
   return 1
 }
 
