@@ -307,6 +307,74 @@ cmd_edge_http01() {
   caddy_setup
 }
 
+cmd_pair() {
+  require_root
+
+  local allow_from=""
+  local server_url="${SERVER_URL:-}"
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --allow-from)
+        shift
+        allow_from="${1:-}"
+        [[ -n "${allow_from}" ]] || die "--allow-from requires an argument (IP/CIDR)"
+        ;;
+      --server-url)
+        shift
+        server_url="${1:-}"
+        [[ -n "${server_url}" ]] || die "--server-url requires an argument"
+        ;;
+      -h | --help)
+        cat << EOF
+Usage: $(basename "$0") pair [--server-url URL] [--allow-from IP/CIDR]
+
+Print a copy/paste join command for a worker node (and optionally open UFW 6443 on the
+management node for the provided source IP/CIDR).
+
+Examples:
+  sudo $(basename "$0") pair
+  sudo $(basename "$0") pair --server-url https://152.53.136.34:6443
+  sudo $(basename "$0") pair --allow-from 159.195.64.217
+EOF
+        return 0
+        ;;
+      *)
+        die "Unknown argument for pair: $1"
+        ;;
+    esac
+    shift
+  done
+
+  [[ -n "${server_url}" ]] || server_url="https://$(infer_node_ip):6443"
+
+  local token
+  token="$(tr -d ' \n\r\t' < /var/lib/rancher/k3s/server/node-token)"
+  [[ -n "${token}" ]] || die "Could not read join token from /var/lib/rancher/k3s/server/node-token"
+
+  if [[ -n "${allow_from}" ]]; then
+    confirm_dangerous_or_die "Open k3s API (6443/tcp) in UFW from ${allow_from}"
+    run ufw allow from "${allow_from}" to any port 6443 proto tcp
+    run ufw reload
+  fi
+
+  cat << EOF
+Join pairing info
+-----------------
+SERVER_URL=${server_url}
+
+On the WORKER node, run:
+
+  sudo env SERVER_URL="${server_url}" TOKEN="${token}" ENABLE_UFW=false EDGE_PROXY=none DASH_ENABLE=false \\
+    /home/ops/netcup-kube/bin/netcup-kube join
+
+Notes:
+- If your worker uses a different route to reach the management node (vLAN/VPN vs public),
+  pass --server-url accordingly.
+- If 6443 is firewalled, rerun this command with: --allow-from <worker-ip-or-cidr>
+EOF
+}
+
 usage() {
   cat << EOF
 Usage: $(basename "$0") <command>
@@ -315,6 +383,7 @@ Commands:
   bootstrap        Install and configure k3s + Traefik NodePort + optional Caddy & Dashboard
   join             Same as bootstrap but MODE=join (set SERVER_URL and TOKEN/TOKEN_FILE)
   edge-http01      Configure Caddy for HTTP-01 certificates for explicit hostnames (no wildcard)
+  pair             Print a copy/paste join command (and optional UFW allow rule) for a worker node
   help             Show this help
 
 Examples:
@@ -341,6 +410,10 @@ main() {
     edge-http01)
       shift || true
       cmd_edge_http01 "$@"
+      ;;
+    pair)
+      shift || true
+      cmd_pair "$@"
       ;;
     help | -h | --help)
       usage
