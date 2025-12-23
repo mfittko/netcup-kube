@@ -7,6 +7,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="${SCRIPT_DIR%/bin}"
 RECIPES_DIR="${PROJECT_ROOT}/scripts/recipes"
+CONFIG_DIR="${PROJECT_ROOT}/config"
+LOCAL_KUBECONFIG="${CONFIG_DIR}/k3s.yaml"
 
 usage() {
   cat << 'EOF'
@@ -24,7 +26,8 @@ Examples:
 
 Notes:
   - Recipes are installed on the cluster, not the host OS.
-  - Most recipes require KUBECONFIG to be set or /etc/rancher/k3s/k3s.yaml to exist.
+  - If KUBECONFIG is not set and you are not on the server, this will fetch
+    /etc/rancher/k3s/k3s.yaml from the management node via scp.
 EOF
 }
 
@@ -46,6 +49,53 @@ fi
 
 if [[ ! -x "${RECIPE_SCRIPT}" ]]; then
   chmod +x "${RECIPE_SCRIPT}"
+fi
+
+# Ensure kubeconfig is available
+if [[ -z "${KUBECONFIG:-}" ]]; then
+  # If on the server, recipes will fall back to /etc/rancher/k3s/k3s.yaml
+  if [[ ! -f "/etc/rancher/k3s/k3s.yaml" ]]; then
+    # Not on server; fetch from remote if not already cached locally
+    if [[ ! -f "${LOCAL_KUBECONFIG}" ]]; then
+      echo "KUBECONFIG not set and local kubeconfig not found. Fetching from remote..."
+
+      # Source env to get MGMT_HOST/MGMT_USER
+      ENV_FILE="${CONFIG_DIR}/netcup-kube.env"
+      if [[ ! -f "${ENV_FILE}" ]]; then
+        echo "ERROR: ${ENV_FILE} not found. Please create it from the example." >&2
+        exit 1
+      fi
+
+      # shellcheck disable=SC1090
+      source "${ENV_FILE}"
+
+      REMOTE_HOST="${MGMT_HOST:-}"
+      REMOTE_USER="${MGMT_USER:-ops}"
+
+      if [[ -z "${REMOTE_HOST}" ]]; then
+        echo "ERROR: MGMT_HOST not set in ${ENV_FILE}" >&2
+        exit 1
+      fi
+
+      mkdir -p "${CONFIG_DIR}"
+      echo "Fetching kubeconfig from ${REMOTE_USER}@${REMOTE_HOST}:/etc/rancher/k3s/k3s.yaml"
+      scp "${REMOTE_USER}@${REMOTE_HOST}:/etc/rancher/k3s/k3s.yaml" "${LOCAL_KUBECONFIG}"
+
+      # Replace server: https://127.0.0.1:6443 with the actual host
+      if command -v sed > /dev/null 2>&1; then
+        # macOS sed requires -i '' for in-place edit
+        if [[ "$(uname)" == "Darwin" ]]; then
+          sed -i '' "s|server: https://127.0.0.1:6443|server: https://${REMOTE_HOST}:6443|g" "${LOCAL_KUBECONFIG}"
+        else
+          sed -i "s|server: https://127.0.0.1:6443|server: https://${REMOTE_HOST}:6443|g" "${LOCAL_KUBECONFIG}"
+        fi
+      fi
+
+      echo "Kubeconfig saved to ${LOCAL_KUBECONFIG}"
+    fi
+
+    export KUBECONFIG="${LOCAL_KUBECONFIG}"
+  fi
 fi
 
 exec "${RECIPE_SCRIPT}" "$@"
