@@ -126,7 +126,7 @@ HELM_ARGS=(
   --set master.persistence.size="${STORAGE}"
   --set metrics.enabled=true
   --set metrics.serviceMonitor.enabled=true
-  --set metrics.serviceMonitor.labels.release=kube-prometheus-stack
+  --set-string 'metrics.serviceMonitor.labels.release=kube-prometheus-stack'
   --wait
   --timeout 5m
 )
@@ -138,6 +138,15 @@ fi
 helm "${HELM_ARGS[@]}"
 
 log "Redis installed successfully!"
+
+# Ensure ServiceMonitor has the correct label for Prometheus discovery
+if k get servicemonitor redis -n "${NAMESPACE}" > /dev/null 2>&1; then
+  if ! k get servicemonitor redis -n "${NAMESPACE}" -o jsonpath='{.metadata.labels.release}' 2>/dev/null | grep -q "kube-prometheus-stack"; then
+    log "Adding Prometheus discovery label to Redis ServiceMonitor"
+    k label servicemonitor redis -n "${NAMESPACE}" release=kube-prometheus-stack --overwrite
+  fi
+fi
+
 echo
 
 # Fetch password
@@ -172,3 +181,4 @@ fi
 echo
 echo "To connect from your laptop (via kubectl port-forward):"
 echo "  kubectl port-forward -n ${NAMESPACE} svc/redis-master 6379:6379"
+
