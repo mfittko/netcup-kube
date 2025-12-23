@@ -10,4 +10,8 @@ master:
     size: 8Gi
 
 metrics:
-  enabled: false
+  enabled: true
+  serviceMonitor:
+    enabled: true
+    labels:
+      release: kube-prometheus-stack
