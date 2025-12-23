@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# netcup-kube-install: dispatcher for recipe install scripts
+# Usage: netcup-kube-install <recipe> [options]
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="${SCRIPT_DIR%/bin}"
+RECIPES_DIR="${PROJECT_ROOT}/scripts/recipes"
+
+usage() {
+  cat << 'EOF'
+Install optional components and tools onto the k3s cluster.
+
+Usage:
+  netcup-kube-install <recipe> [recipe-options]
+
+Available recipes:
+  argo-cd    Install Argo CD (GitOps continuous delivery tool)
+
+Examples:
+  netcup-kube-install argo-cd --help
+  netcup-kube-install argo-cd --host cd.example.com
+
+Notes:
+  - Recipes are installed on the cluster, not the host OS.
+  - Most recipes require KUBECONFIG to be set or /etc/rancher/k3s/k3s.yaml to exist.
+EOF
+}
+
+if [[ $# -lt 1 || "${1:-}" == "-h" || "${1:-}" == "--help" || "${1:-}" == "help" ]]; then
+  usage
+  exit 0
+fi
+
+RECIPE="$1"
+shift || true
+
+RECIPE_SCRIPT="${RECIPES_DIR}/${RECIPE}/install.sh"
+
+if [[ ! -f "${RECIPE_SCRIPT}" ]]; then
+  echo "Unknown recipe: ${RECIPE}" >&2
+  echo "Run 'netcup-kube-install --help' to see available recipes." >&2
+  exit 1
+fi
+
+if [[ ! -x "${RECIPE_SCRIPT}" ]]; then
+  chmod +x "${RECIPE_SCRIPT}"
+fi
+
+exec "${RECIPE_SCRIPT}" "$@"

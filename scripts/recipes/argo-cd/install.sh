@@ -11,7 +11,7 @@ usage() {
 Install Argo CD on the cluster (and optionally expose it via Traefik).
 
 Usage:
-  scripts/recipes/argo-cd/install.sh [--host cd.example.com] [--namespace argocd]
+  netcup-kube-install argo-cd [--host cd.example.com] [--namespace argocd]
 
 Options:
   --host <fqdn>        Create a Traefik Ingress for this host (entrypoint: web).
@@ -24,7 +24,7 @@ Environment:
 Notes:
   - This installs Argo CD from the upstream "stable" install.yaml.
   - If you terminate TLS at Caddy (recommended in this repo), Argo CD is configured with server.insecure=true.
-  - If you pass --host, first ensure the domain is included in your edge-http domains list.
+  - If you pass --host and are running on the server, it will auto-append to Caddy edge-http domains.
 EOF
 }
 
@@ -170,6 +170,6 @@ Next steps
     KUBECONFIG="${KUBECONFIG}" ${kubectl_bin} -n ${ARGO_NS} port-forward svc/argocd-server 8080:443
     Then open: https://localhost:8080  (accept self-signed cert)
 
-- If you exposed it via DNS/Caddy, ensure ${ARGO_HOST:-<your-host>} resolves to the node IP and is included in your Caddy HTTP-01 hosts:
-    sudo ./bin/netcup-kube dns --type edge-http --domains "…,${ARGO_HOST:-cd.example.com}"
+- If you exposed via --host, ensure the domain resolves to the node IP and is in your Caddy edge-http list.
+    From laptop: bin/netcup-kube-remote run dns --type edge-http --domains "existing,${ARGO_HOST:-cd.example.com}"
 EOF
