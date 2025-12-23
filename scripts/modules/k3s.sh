@@ -26,12 +26,14 @@ k3s_write_config() {
   local node_ip="$1"
   local flannel_iface_line=""
   [[ -n "${PRIVATE_IFACE:-}" ]] && flannel_iface_line=$'flannel-iface: '"${PRIVATE_IFACE}"
-  local tls_sans
-  tls_sans="$(k3s_build_tls_sans_yaml "${node_ip}")"
 
   local cfg
-  cfg="$(
-    cat << EOF
+  case "${MODE}" in
+    bootstrap)
+      local tls_sans
+      tls_sans="$(k3s_build_tls_sans_yaml "${node_ip}")"
+      cfg="$(
+        cat << EOF
 write-kubeconfig-mode: "${KUBECONFIG_MODE}"
 node-ip: "${node_ip}"
 ${flannel_iface_line}
@@ -44,7 +46,21 @@ etcd-snapshot-retention: 12
 tls-san:
 ${tls_sans}
 EOF
-  )"
+      )"
+      ;;
+    join)
+      # Join nodes run k3s in agent mode. Keep the config minimal and avoid server-only flags
+      # (e.g. etcd/tls-san/cluster-init), otherwise k3s-agent will fail to start with "flag provided but not defined".
+      cfg="$(
+        cat << EOF
+node-ip: "${node_ip}"
+${flannel_iface_line}
+EOF
+      )"
+      ;;
+    *) die "Unknown MODE: ${MODE}" ;;
+  esac
+
   [[ -n "${NODE_EXTERNAL_IP:-}" ]] && cfg+=$'\n'"node-external-ip: \"${NODE_EXTERNAL_IP}\""$'\n'
 
   case "${MODE}" in
@@ -140,7 +156,20 @@ k3s_post_install_checks() {
   log "Ensuring ${svc} service is enabled and (re)started"
   run systemctl daemon-reload || true
   run systemctl enable --now "${svc}" || true
-  k3s_wait_for_api
+  if [[ "${svc}" == "k3s" ]]; then
+    k3s_wait_for_api
+  else
+    # On agents, the API is remote. Just wait for the agent service to become active.
+    [[ "${DRY_RUN:-false}" == "true" ]] && return 0
+    log "Waiting for k3s-agent service to become active"
+    for _ in {1..60}; do
+      if systemctl is-active --quiet k3s-agent; then
+        return 0
+      fi
+      sleep 1
+    done
+    die "k3s-agent did not become active"
+  fi
 }
 
 traefik_write_nodeport_manifest() {
