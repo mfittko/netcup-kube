@@ -126,17 +126,19 @@ if [[ -z "${KUBECONFIG:-}" ]]; then
     fi
 
     export KUBECONFIG="${LOCAL_KUBECONFIG}"
+  fi
+fi
 
-    # Check if tunnel is needed and running
-    # The kubeconfig uses 127.0.0.1:6443, which requires an active SSH tunnel
-    # Source env to get REMOTE_HOST if not already sourced
-    if [[ -z "${REMOTE_HOST:-}" ]]; then
-      ENV_FILE="${CONFIG_DIR}/netcup-kube.env"
-      # shellcheck disable=SC1090
-      source "${ENV_FILE}"
-      REMOTE_HOST="${MGMT_HOST:-}"
-      REMOTE_USER="${MGMT_USER:-ops}"
-    fi
+# Check if tunnel is needed and running (when using local kubeconfig)
+# The kubeconfig uses 127.0.0.1:6443, which requires an active SSH tunnel
+if [[ -n "${KUBECONFIG:-}" && "${KUBECONFIG}" == "${LOCAL_KUBECONFIG}" ]]; then
+  # Source env to get REMOTE_HOST
+  ENV_FILE="${CONFIG_DIR}/netcup-kube.env"
+  if [[ -f "${ENV_FILE}" ]]; then
+    # shellcheck disable=SC1090
+    source "${ENV_FILE}"
+    REMOTE_HOST="${MGMT_HOST:-}"
+    REMOTE_USER="${MGMT_USER:-ops}"
 
     if [[ -n "${REMOTE_HOST:-}" && -n "${REMOTE_USER:-}" ]]; then
       TUNNEL_PORT="${TUNNEL_LOCAL_PORT:-6443}"
