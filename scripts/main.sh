@@ -153,7 +153,7 @@ resolve_inputs() {
     [[ "${CADDY_CERT_MODE}" == "dns01_wildcard" || "${CADDY_CERT_MODE}" == "http01" ]] || die "Bad CADDY_CERT_MODE"
 
     if [[ -z "${DASH_ENABLE}" ]]; then
-      DASH_ENABLE="$(is_tty && prompt "Install Kubernetes Dashboard (Helm)?" "true" || echo "false")"
+      DASH_ENABLE="$(is_tty && prompt "Install Kubernetes Dashboard (Helm)?" "false" || echo "false")"
     fi
     DASH_ENABLE="$(bool_norm "${DASH_ENABLE}")"
     if [[ -z "${DASH_HOST}" && -n "${BASE_DOMAIN}" ]]; then
@@ -478,7 +478,7 @@ EOF
   fi
 
   if [[ -z "${DASH_ENABLE}" ]]; then
-    DASH_ENABLE="$(is_tty && prompt "Install Kubernetes Dashboard (Helm)?" "true" || echo "false")"
+    DASH_ENABLE="$(is_tty && prompt "Install Kubernetes Dashboard (Helm)?" "false" || echo "false")"
   fi
   DASH_ENABLE="$(bool_norm "${DASH_ENABLE}")"
 
