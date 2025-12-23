@@ -36,6 +36,7 @@ Usage:
 Commands:
   provision   Prepare the target host (sudo user + repo clone/update). Does not run netcup-kube.
   git         Remote git control for the repo (checkout/pull branch/ref).
+  domains     Print currently configured edge-http domains (comma-separated).
   run         Run a netcup-kube command on the target host (forces TTY by default).
 
 Common host selection:
@@ -45,6 +46,7 @@ Examples:
   netcup-kube-remote provision
   netcup-kube-remote mfittko.com --user ops provision
   netcup-kube-remote git --branch main --pull
+  netcup-kube-remote domains
   netcup-kube-remote run bootstrap
   netcup-kube-remote run --env-file ./env/bootstrap.env bootstrap
   netcup-kube-remote run --branch main --pull bootstrap
@@ -96,6 +98,7 @@ CONFIG_PATH="${DEFAULT_CONFIG}"
 DO_RUN=false
 DO_GIT=false
 DO_PROVISION=false
+DO_DOMAINS=false
 FORCE_TTY=true
 RUN_ENV_FILE=""
 RUN_ARGS=()
@@ -128,6 +131,11 @@ while [[ $# -gt 0 ]]; do
       ;;
     provision)
       DO_PROVISION=true
+      shift || true
+      break
+      ;;
+    domains)
+      DO_DOMAINS=true
       shift || true
       break
       ;;
@@ -236,7 +244,7 @@ if [[ "${DO_RUN}" == "true" && "${#RUN_ARGS[@]}" -lt 1 ]]; then
   usage_run 1
 fi
 
-if [[ "${DO_PROVISION}" != "true" && "${DO_GIT}" != "true" && "${DO_RUN}" != "true" ]]; then
+if [[ "${DO_PROVISION}" != "true" && "${DO_GIT}" != "true" && "${DO_RUN}" != "true" && "${DO_DOMAINS}" != "true" ]]; then
   usage 1
 fi
 
@@ -454,13 +462,21 @@ if [[ "${DO_PROVISION}" == "true" ]]; then
   exit 0
 fi
 
-if [[ "${DO_GIT}" == "true" || "${DO_RUN}" == "true" ]]; then
+if [[ "${DO_GIT}" == "true" || "${DO_RUN}" == "true" || "${DO_DOMAINS}" == "true" ]]; then
   ensure_user_access_or_die
   ensure_remote_repo_or_die
 fi
 
 if [[ "${DO_GIT}" == "true" ]]; then
   remote_git_sync
+fi
+
+if [[ "${DO_DOMAINS}" == "true" ]]; then
+  remote_bin="$(remote_bin_path)"
+  # Print comma-separated edge-http domains from the current Caddyfile (if in http01 mode).
+  # If not in edge-http mode, exit non-zero with a message.
+  ssh_user "sudo -E ${remote_bin} dns --show --type edge-http --format csv"
+  exit 0
 fi
 
 if [[ "${DO_RUN}" == "true" ]]; then

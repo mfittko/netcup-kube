@@ -365,6 +365,8 @@ cmd_dns() {
   local plan_hosts=""
   local base_domain_arg=""
   local dash_host_arg=""
+  local do_show="false"
+  local show_format="human" # human|csv
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -373,6 +375,7 @@ cmd_dns() {
 Usage: $(basename "$0") dns
        $(basename "$0") dns --type wildcard
        $(basename "$0") dns --type edge-http --domains "kube.example.com,demo.example.com"
+       $(basename "$0") dns --show --type edge-http --format csv
 
 Configure edge TLS via Caddy using either:
 - DNS-01 wildcard (default) via Netcup DNS API (apex + wildcard), or
@@ -383,6 +386,8 @@ Options:
   --domains "<a,b,c>"           Required when --type edge-http (comma-separated hostnames; '|' also accepted)
   --base-domain <domain>        Base domain (required for wildcard; optional for edge-http)
   --dash-host <host>            Dashboard host (optional; for edge-http default is first host)
+  --show                       Print the currently configured domains from /etc/caddy/Caddyfile and exit
+  --format <human|csv>          Output format for --show (default: human)
 
 Notes:
   - This overwrites /etc/caddy/Caddyfile and restarts Caddy.
@@ -419,12 +424,76 @@ EOF
       --dash-host=*)
         dash_host_arg="${1#*=}"
         ;;
+      --show)
+        do_show="true"
+        ;;
+      --format)
+        shift
+        show_format="${1:-}"
+        ;;
+      --format=*)
+        show_format="${1#*=}"
+        ;;
       *)
         die "Unknown argument for dns: $1"
         ;;
     esac
     shift || true
   done
+
+  if [[ "${do_show}" == "true" ]]; then
+    [[ "${show_format}" == "human" || "${show_format}" == "csv" ]] || die "--format must be human or csv"
+    [[ -f "/etc/caddy/Caddyfile" ]] || die "Caddyfile not found at /etc/caddy/Caddyfile"
+
+    local site_label
+    site_label="$(
+      awk '
+        BEGIN { in_global=0 }
+        /^[[:space:]]*$/ { next }
+        /^[[:space:]]*\{/ { in_global=1; next }
+        in_global && /^[[:space:]]*\}/ { in_global=0; next }
+        in_global { next }
+        /\{$/ {
+          sub(/[[:space:]]*\{$/, "", $0)
+          print $0
+          exit
+        }
+      ' /etc/caddy/Caddyfile
+    )"
+    [[ -n "${site_label}" ]] || die "Could not parse Caddyfile site label"
+
+    local is_wildcard="false"
+    if grep -q "dns netcup" /etc/caddy/Caddyfile 2> /dev/null; then
+      is_wildcard="true"
+    fi
+
+    if [[ "${type}" == "edge-http" ]]; then
+      [[ "${is_wildcard}" != "true" ]] || die "Caddy is currently configured for wildcard DNS-01, not edge-http"
+      # Convert "a, b, c" to "a,b,c"
+      local csv
+      csv="$(sed -e 's/[[:space:]]*,[[:space:]]*/,/g' -e 's/[[:space:]]\+//g' <<< "${site_label}")"
+      if [[ "${show_format}" == "csv" ]]; then
+        echo "${csv}"
+      else
+        echo "cert_mode=http01"
+        echo "domains=${csv}"
+      fi
+      return 0
+    fi
+
+    # default/wildcard
+    [[ "${is_wildcard}" == "true" ]] || die "Caddy is currently configured for HTTP-01, not wildcard DNS-01"
+    local base
+    base="$(sed -e 's/,.*$//' -e 's/[[:space:]]//g' <<< "${site_label}")"
+    [[ -n "${base}" ]] || die "Could not parse base domain from site label"
+    if [[ "${show_format}" == "csv" ]]; then
+      echo "${base}"
+    else
+      echo "cert_mode=dns01_wildcard"
+      echo "base_domain=${base}"
+    fi
+    return 0
+  fi
 
   EDGE_PROXY="caddy"
   [[ -n "${base_domain_arg}" ]] && BASE_DOMAIN="${base_domain_arg}"
