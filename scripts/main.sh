@@ -140,10 +140,10 @@ resolve_inputs() {
 
   if [[ "${EDGE_PROXY}" == "caddy" ]]; then
     [[ -n "${EDGE_UPSTREAM}" ]] || EDGE_UPSTREAM="$(prompt "Edge upstream (Caddy forwards HTTP to this)" "http://127.0.0.1:${TRAEFIK_NODEPORT_HTTP}")"
-    
+
     [[ -n "${CADDY_CERT_MODE}" ]] || CADDY_CERT_MODE="$(prompt "Caddy certificate mode (dns01_wildcard/http01)" "dns01_wildcard")"
     [[ "${CADDY_CERT_MODE}" == "dns01_wildcard" || "${CADDY_CERT_MODE}" == "http01" ]] || die "Bad CADDY_CERT_MODE"
-    
+
     if [[ "${CADDY_CERT_MODE}" == "dns01_wildcard" ]]; then
       [[ -n "${BASE_DOMAIN}" ]] || BASE_DOMAIN="$(prompt "Base domain (e.g. example.com)" "")"
       [[ -n "${BASE_DOMAIN}" ]] || die "BASE_DOMAIN required for EDGE_PROXY=caddy with dns01_wildcard"
@@ -162,7 +162,7 @@ resolve_inputs() {
       [[ -n "${CADDY_HTTP01_HOSTS}" ]] || die "CADDY_CERT_MODE=http01 requires CADDY_HTTP01_HOSTS"
       # BASE_DOMAIN is optional for http01 (can serve unrelated domains)
     fi
-    
+
     [[ -n "${ACME_EMAIL}" ]] || ACME_EMAIL="$(prompt "ACME email (recommended)" "")"
 
     if [[ -z "${DASH_ENABLE}" ]]; then
