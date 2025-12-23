@@ -408,10 +408,10 @@ if [[ "${DO_RUN}" == "true" ]]; then
   fi
 
   case "${RUN_ARGS[0]}" in
-    bootstrap | join | pair | edge-http01 | help | -h | --help) ;;
+    bootstrap | join | pair | dns | help | -h | --help) ;;
     *)
       echo "Unsupported netcup-kube command for remote run: ${RUN_ARGS[0]}" >&2
-      echo "Supported: bootstrap|join|pair|edge-http01|help" >&2
+      echo "Supported: bootstrap|join|pair|dns|help" >&2
       exit 1
       ;;
   esac

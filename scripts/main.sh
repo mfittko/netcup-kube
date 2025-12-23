@@ -292,11 +292,28 @@ confirm_dangerous_or_die() {
   [[ "${CONFIRM:-false}" == "true" ]] || die "Non-interactive run requires CONFIRM=true. Refusing: ${msg}"
 }
 
-cmd_edge_http01() {
+cmd_edge_http() {
   require_root
   # This command only (re)configures Caddy. Force MODE to avoid accidentally
   # inheriting MODE=join from the environment and confusing follow-up output.
   MODE="bootstrap"
+
+  if [[ "${1:-}" == "-h" || "${1:-}" == "--help" || "${1:-}" == "help" ]]; then
+    cat << EOF
+Usage: $(basename "$0") http [HOST...]
+
+Configure Caddy for HTTP-01 certificates for explicit hostnames (no wildcard).
+
+Arguments:
+  HOST...   Space-separated hostnames to serve. If omitted, defaults to the dashboard host
+           (kube.<BASE_DOMAIN> by default).
+
+Notes:
+  - This overwrites /etc/caddy/Caddyfile and restarts Caddy.
+  - Use CONFIRM=true for non-interactive runs.
+EOF
+    return 0
+  fi
 
   # Safe guard: this command rewrites the host Caddy config.
   confirm_dangerous_or_die "This will overwrite /etc/caddy/Caddyfile and restart Caddy"
@@ -327,6 +344,89 @@ cmd_edge_http01() {
   DASH_ENABLE="$(bool_norm "${DASH_ENABLE}")"
 
   # Configure Caddy only (no k3s changes).
+  caddy_setup
+}
+
+cmd_dns() {
+  require_root
+  MODE="bootstrap"
+
+  local type="wildcard"
+  local domains=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -h | --help | help)
+        cat << EOF
+Usage: $(basename "$0") dns
+       $(basename "$0") dns --type wildcard
+       $(basename "$0") dns --type edge-http --domains "kube.example.com|demo.example.com"
+
+Configure edge TLS via Caddy using either:
+- DNS-01 wildcard (default) via Netcup DNS API (apex + wildcard), or
+- HTTP-01 for explicit hostnames.
+
+Options:
+  --type <wildcard|edge-http>   Certificate mode (default: wildcard)
+  --domains "<a|b|c>"           Required when --type edge-http (pipe-separated hostnames)
+
+Notes:
+  - This overwrites /etc/caddy/Caddyfile and restarts Caddy.
+  - wildcard requires Netcup DNS API credentials (NETCUP_CUSTOMER_NUMBER / NETCUP_DNS_API_KEY / NETCUP_DNS_API_PASSWORD).
+  - Use CONFIRM=true for non-interactive runs.
+EOF
+        return 0
+        ;;
+      --type)
+        shift
+        type="${1:-}"
+        ;;
+      --type=*)
+        type="${1#*=}"
+        ;;
+      --domains)
+        shift
+        domains="${1:-}"
+        ;;
+      --domains=*)
+        domains="${1#*=}"
+        ;;
+      *)
+        die "Unknown argument for dns: $1"
+        ;;
+    esac
+    shift || true
+  done
+
+  confirm_dangerous_or_die "This will overwrite /etc/caddy/Caddyfile and restart Caddy"
+
+  EDGE_PROXY="caddy"
+  case "${type}" in
+    "" | wildcard)
+      CADDY_CERT_MODE="dns01_wildcard"
+      unset CADDY_HTTP01_HOSTS || true
+      ;;
+    edge-http)
+      [[ -n "${domains}" ]] || die "--domains is required for --type edge-http (format: a|b|c)"
+      CADDY_CERT_MODE="http01"
+      CADDY_HTTP01_HOSTS="${domains//|/ }"
+      ;;
+    *)
+      die "Unknown --type for dns: ${type} (use wildcard or edge-http)"
+      ;;
+  esac
+
+  [[ -n "${NODE_IP}" ]] || NODE_IP="$(infer_node_ip)"
+  [[ -n "${EDGE_UPSTREAM}" ]] || EDGE_UPSTREAM="http://127.0.0.1:${TRAEFIK_NODEPORT_HTTP}"
+  [[ -n "${BASE_DOMAIN}" ]] || BASE_DOMAIN="$(prompt "Base domain (e.g. example.com)" "")"
+  [[ -n "${BASE_DOMAIN}" ]] || die "BASE_DOMAIN required"
+  [[ -n "${DASH_HOST}" ]] || DASH_HOST="${DASH_SUBDOMAIN}.${BASE_DOMAIN}"
+
+  if [[ -z "${DASH_ENABLE}" ]]; then
+    DASH_ENABLE="$(is_tty && prompt "Install Kubernetes Dashboard (Helm)?" "true" || echo "false")"
+  fi
+  DASH_ENABLE="$(bool_norm "${DASH_ENABLE}")"
+
   caddy_setup
 }
 
@@ -408,17 +508,17 @@ Usage: $(basename "$0") <command>
 Commands:
   bootstrap        Install and configure k3s + Traefik NodePort + optional Caddy & Dashboard
   join             Same as bootstrap but MODE=join (set SERVER_URL and TOKEN/TOKEN_FILE)
-  edge-http01      Configure Caddy for HTTP-01 certificates for explicit hostnames (no wildcard)
+  dns              Configure edge TLS via Caddy (default DNS-01 wildcard; or --type edge-http)
   pair             Print a copy/paste join command (and optional UFW allow rule) for a worker node
   help             Show this help
 
 Examples:
   sudo $(basename "$0") bootstrap
   MODE=join SERVER_URL=https://x.x.x.x:6443 TOKEN=... sudo $(basename "$0") join
-  # Switch edge TLS to HTTP-01 for the dashboard host (defaults to kube.<BASE_DOMAIN>)
-  BASE_DOMAIN=example.com sudo $(basename "$0") edge-http01
-  # Switch edge TLS to HTTP-01 for multiple hostnames
-  BASE_DOMAIN=example.com sudo $(basename "$0") edge-http01 kube.example.com demo.example.com
+  # Edge TLS via DNS-01 wildcard (Netcup DNS API)
+  BASE_DOMAIN=example.com sudo $(basename "$0") dns
+  # Edge TLS via HTTP-01 for explicit hostnames
+  BASE_DOMAIN=example.com sudo $(basename "$0") dns --type edge-http --domains "kube.example.com|demo.example.com"
 EOF
 }
 
@@ -433,9 +533,9 @@ main() {
       MODE="join"
       cmd_bootstrap
       ;;
-    edge-http01)
+    dns)
       shift || true
-      cmd_edge_http01 "$@"
+      cmd_dns "$@"
       ;;
     pair)
       shift || true
