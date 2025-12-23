@@ -98,7 +98,13 @@ helm repo update
 # Generate secure password if not provided
 if [[ -z "${PASSWORD}" ]]; then
   log "Generating secure Grafana admin password"
-  PASSWORD=$(LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 16)
+  if command -v openssl > /dev/null 2>&1; then
+    PASSWORD=$(openssl rand -base64 12 | tr -dc 'A-Za-z0-9' | head -c 16)
+  else
+    # Fallback to /dev/urandom or date-based hash
+    PASSWORD=$(LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 16 2> /dev/null || date +%s | sha256sum | base64 | head -c 16)
+  fi
+  [[ -n "${PASSWORD}" ]] || die "Failed to generate password"
 fi
 
 # Prepare Helm values
