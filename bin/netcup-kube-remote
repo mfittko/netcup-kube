@@ -407,6 +407,15 @@ if [[ "${DO_RUN}" == "true" ]]; then
     exit 1
   fi
 
+  case "${RUN_ARGS[0]}" in
+    bootstrap | join | pair | edge-http01 | help | -h | --help) ;;
+    *)
+      echo "Unsupported netcup-kube command for remote run: ${RUN_ARGS[0]}" >&2
+      echo "Supported: bootstrap|join|pair|edge-http01|help" >&2
+      exit 1
+      ;;
+  esac
+
   if [[ -n "${RUN_ENV_FILE}" && ! -f "${RUN_ENV_FILE}" ]]; then
     echo "--env-file not found: ${RUN_ENV_FILE}" >&2
     exit 1
@@ -423,7 +432,8 @@ if [[ "${DO_RUN}" == "true" ]]; then
     tty_flags=(-tt)
   fi
 
-  remote_env=""
+  # ssh does not preserve empty args reliably; use a placeholder.
+  remote_env="__NONE__"
   if [[ -n "${RUN_ENV_FILE}" ]]; then
     remote_env="/tmp/netcup-kube-remote.env.$$"
     echo "[local] Uploading env file to ${NEW_USER}@${HOST}:${remote_env}"
@@ -437,7 +447,7 @@ env_file="${1:-}"
 bin="${2:-}"
 shift 2 || true
 
-if [[ -n "${env_file}" ]]; then
+if [[ "${env_file}" != "__NONE__" && -n "${env_file}" ]]; then
   set -a
   # shellcheck disable=SC1090
   source "${env_file}"
@@ -447,7 +457,7 @@ fi
 exec "${bin}" "$@"
 EOS
 
-  if [[ -n "${remote_env}" ]]; then
+  if [[ "${remote_env}" != "__NONE__" ]]; then
     ssh_user "${tty_flags[@]}" "sudo rm -f '${remote_env}'" || true
   fi
 fi
