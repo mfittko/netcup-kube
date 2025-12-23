@@ -36,6 +36,8 @@ Usage:
 
 Available recipes:
   argo-cd    Install Argo CD (GitOps continuous delivery tool)
+  postgres   Install PostgreSQL (Bitnami Helm chart)
+  redis      Install Redis (Bitnami Helm chart)
 
 Examples:
   netcup-kube-install argo-cd --help

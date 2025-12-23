@@ -1,0 +1,12 @@
+auth:
+  # postgresPassword will be set via --set if provided
+  database: app
+  username: app
+
+primary:
+  persistence:
+    enabled: true
+    size: 8Gi
+
+metrics:
+  enabled: false
