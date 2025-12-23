@@ -85,10 +85,10 @@ if [[ ! -f "${VALUES_FILE}" ]]; then
 apiService:
   create: true
 
-# Extra args for kubelet certificate validation
+# Extra args for kubelet certificate validation (list format)
 extraArgs:
-  kubelet-insecure-tls: true
-  kubelet-preferred-address-types: InternalIP
+  - --kubelet-insecure-tls=true
+  - --kubelet-preferred-address-types=InternalIP
 
 # Resource limits (adjust based on cluster size)
 resources:
