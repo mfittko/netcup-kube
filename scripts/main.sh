@@ -242,6 +242,59 @@ cmd_bootstrap() {
   echo "  sudo cat /var/lib/rancher/k3s/server/node-token"
 }
 
+confirm_dangerous_or_die() {
+  local msg="$1"
+  local ok="${2:-false}"
+  if [[ "${DRY_RUN:-false}" == "true" ]]; then
+    log "[DRY_RUN] Skipping confirmation: ${msg}"
+    return 0
+  fi
+  if is_tty; then
+    ok="$(prompt "${msg} (type 'yes' to continue)" "no")"
+    [[ "${ok}" == "yes" ]] || die "Aborted."
+    return 0
+  fi
+  [[ "${CONFIRM:-false}" == "true" ]] || die "Non-interactive run requires CONFIRM=true. Refusing: ${msg}"
+}
+
+cmd_edge_http01() {
+  require_root
+  # This command only (re)configures Caddy. Force MODE to avoid accidentally
+  # inheriting MODE=join from the environment and confusing follow-up output.
+  MODE="bootstrap"
+
+  # Safe guard: this command rewrites the host Caddy config.
+  confirm_dangerous_or_die "This will overwrite /etc/caddy/Caddyfile and restart Caddy"
+
+  EDGE_PROXY="caddy"
+  CADDY_CERT_MODE="http01"
+
+  # Determine hosts to serve. Arguments are treated as hostnames.
+  # If none provided, default to the dashboard host.
+  if [[ $# -gt 0 ]]; then
+    CADDY_HTTP01_HOSTS="$*"
+  fi
+
+  # Resolve minimal required inputs.
+  [[ -n "${NODE_IP}" ]] || NODE_IP="$(infer_node_ip)"
+  [[ -n "${EDGE_UPSTREAM}" ]] || EDGE_UPSTREAM="http://127.0.0.1:${TRAEFIK_NODEPORT_HTTP}"
+  [[ -n "${BASE_DOMAIN}" ]] || BASE_DOMAIN="$(prompt "Base domain (e.g. example.com)" "")"
+  [[ -n "${BASE_DOMAIN}" ]] || die "BASE_DOMAIN required"
+  [[ -n "${DASH_HOST}" ]] || DASH_HOST="${DASH_SUBDOMAIN}.${BASE_DOMAIN}"
+
+  # If no explicit hosts were provided, default to the dashboard host.
+  [[ -n "${CADDY_HTTP01_HOSTS:-}" ]] || CADDY_HTTP01_HOSTS="${DASH_HOST}"
+
+  # Keep the existing dashboard auth UX if Dashboard is enabled (or defaults to enabled on TTY).
+  if [[ -z "${DASH_ENABLE}" ]]; then
+    DASH_ENABLE="$(is_tty && prompt "Install Kubernetes Dashboard (Helm)?" "true" || echo "false")"
+  fi
+  DASH_ENABLE="$(bool_norm "${DASH_ENABLE}")"
+
+  # Configure Caddy only (no k3s changes).
+  caddy_setup
+}
+
 usage() {
   cat << EOF
 Usage: $(basename "$0") <command>
@@ -249,11 +302,16 @@ Usage: $(basename "$0") <command>
 Commands:
   bootstrap        Install and configure k3s + Traefik NodePort + optional Caddy & Dashboard
   join             Same as bootstrap but MODE=join (set SERVER_URL and TOKEN/TOKEN_FILE)
+  edge-http01      Configure Caddy for HTTP-01 certificates for explicit hostnames (no wildcard)
   help             Show this help
 
 Examples:
   sudo $(basename "$0") bootstrap
   MODE=join SERVER_URL=https://x.x.x.x:6443 TOKEN=... sudo $(basename "$0") join
+  # Switch edge TLS to HTTP-01 for the dashboard host (defaults to kube.<BASE_DOMAIN>)
+  BASE_DOMAIN=example.com sudo $(basename "$0") edge-http01
+  # Switch edge TLS to HTTP-01 for multiple hostnames
+  BASE_DOMAIN=example.com sudo $(basename "$0") edge-http01 kube.example.com demo.example.com
 EOF
 }
 
@@ -267,6 +325,10 @@ main() {
     join)
       MODE="join"
       cmd_bootstrap
+      ;;
+    edge-http01)
+      shift || true
+      cmd_edge_http01 "$@"
       ;;
     help | -h | --help)
       usage
