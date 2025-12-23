@@ -14,21 +14,69 @@ set -euo pipefail
 #   bin/netcup-kube-remote 203.0.113.10 --user ops            # prompts silently
 #   export ROOT_PASS; read -r -s ROOT_PASS; ./bin/netcup-kube-remote host --user ops  # or pre-set env var
 #   bin/netcup-kube-remote host --user ops --pubkey ~/.ssh/id_ed25519.pub
+#   # Run a netcup-kube command on the remote host (forces a TTY so prompts work)
+#   bin/netcup-kube-remote host --user ops run bootstrap
+#   bin/netcup-kube-remote host --user ops run pair
+#   bin/netcup-kube-remote host --user ops run edge-http01 kube.example.com demo.example.com
 #
 # After bootstrap you can SSH as the new user: ssh <user>@<host>
 
-HOST="${1:-}"
-if [[ -z "$HOST" ]]; then
-  echo "Usage: $(basename "$0") <host-or-ip> [--user <name>] [--pubkey <path>]" >&2
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="${SCRIPT_DIR%/bin}"
+DEFAULT_CONFIG="${PROJECT_ROOT}/config/netcup-kube.env"
+LOCAL_CMD="$(basename "$0")"
+
+HOST=""
+if [[ $# -gt 0 && "${1:-}" != -* && "${1:-}" != "run" && "${1:-}" != "git" ]]; then
+  HOST="$1"
+  shift || true
+fi
+
+if [[ -z "$HOST" && ! -f "${DEFAULT_CONFIG}" ]]; then
+  cat >&2 << 'EOF'
+Usage:
+  netcup-kube-remote <host-or-ip> [--user <name>] [--pubkey <path>] [--repo <url>]
+  netcup-kube-remote [--user <name>] [--pubkey <path>] [--repo <url>]
+    # defaults to MGMT_HOST/MGMT_IP from ./config/netcup-kube.env (if present)
+  netcup-kube-remote <host-or-ip> [--user <name>] [--pubkey <path>] [--repo <url>] git [--branch <name>] [--ref <ref>] [--pull|--no-pull]
+  netcup-kube-remote git [--branch <name>] [--ref <ref>] [--pull|--no-pull]
+  netcup-kube-remote <host-or-ip> [--user <name>] [--pubkey <path>] [--repo <url>] run [--no-tty] [--env-file <path>] [--branch <name>] [--ref <ref>] [--pull|--no-pull] [--] <netcup-kube args...>
+  netcup-kube-remote run [--no-tty] [--env-file <path>] [--branch <name>] [--ref <ref>] [--pull|--no-pull] [--] <netcup-kube args...>
+
+Examples:
+  netcup-kube-remote 203.0.113.10 --user ops
+  netcup-kube-remote --user ops                      # uses config/netcup-kube.env MGMT_*
+  netcup-kube-remote --user ops git --branch main
+  netcup-kube-remote 203.0.113.10 --user ops run bootstrap
+  netcup-kube-remote 203.0.113.10 --user ops run pair
+  netcup-kube-remote 203.0.113.10 --user ops run edge-http01 kube.example.com demo.example.com
+  netcup-kube-remote --user ops run --env-file ./env/bootstrap.env bootstrap
+
+Notes:
+  - The `run` subcommand SSHes with a forced TTY (unless --no-tty) so interactive prompts on the
+    remote host can read from /dev/tty.
+  - `--env-file` is copied to the remote host and bash-sourced before running netcup-kube.
+  - `git` defaults to `--pull`; `run` defaults to `--no-pull` unless you pass `--pull`.
+  - `git` / `--branch` / `--ref` allow switching the remote repo to a branch/ref and fast-forwarding it.
+EOF
   exit 1
 fi
 
 NEW_USER="cubeadmin"
 PUBKEY_PATH=""
 REPO_URL="https://github.com/mfittko/netcup-kube.git"
+CONFIG_PATH="${DEFAULT_CONFIG}"
+DO_RUN=false
+DO_GIT=false
+FORCE_TTY=true
+RUN_ENV_FILE=""
+RUN_ARGS=()
+GIT_BRANCH=""
+GIT_REF=""
+GIT_PULL=false
+GIT_PULL_SET=false
 
 # Parse flags
-shift || true
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --user)
@@ -43,12 +91,127 @@ while [[ $# -gt 0 ]]; do
       REPO_URL="${2:-}"
       shift 2 || true
       ;;
+    --config)
+      CONFIG_PATH="${2:-}"
+      shift 2 || true
+      ;;
+    run)
+      DO_RUN=true
+      shift || true
+      # Parse run-specific flags
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --no-tty)
+            FORCE_TTY=false
+            shift || true
+            ;;
+          --env-file)
+            RUN_ENV_FILE="${2:-}"
+            shift 2 || true
+            ;;
+          --branch)
+            GIT_BRANCH="${2:-}"
+            # If the user asked for a branch but did not specify pull behavior, default to pulling.
+            if [[ "${GIT_PULL_SET}" != "true" ]]; then
+              GIT_PULL=true
+            fi
+            shift 2 || true
+            ;;
+          --ref)
+            GIT_REF="${2:-}"
+            shift 2 || true
+            ;;
+          --no-pull)
+            GIT_PULL=false
+            GIT_PULL_SET=true
+            shift || true
+            ;;
+          --pull)
+            GIT_PULL=true
+            GIT_PULL_SET=true
+            shift || true
+            ;;
+          --)
+            shift || true
+            break
+            ;;
+          -*)
+            echo "Unknown flag for run: $1" >&2
+            exit 1
+            ;;
+          *)
+            break
+            ;;
+        esac
+      done
+      RUN_ARGS=("$@")
+      break
+      ;;
+    git)
+      DO_GIT=true
+      # For the standalone `git` subcommand, default to pulling unless the user disables it.
+      GIT_PULL=true
+      GIT_PULL_SET=true
+      shift || true
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --branch)
+            GIT_BRANCH="${2:-}"
+            shift 2 || true
+            ;;
+          --ref)
+            GIT_REF="${2:-}"
+            shift 2 || true
+            ;;
+          --no-pull)
+            GIT_PULL=false
+            GIT_PULL_SET=true
+            shift || true
+            ;;
+          --pull)
+            GIT_PULL=true
+            GIT_PULL_SET=true
+            shift || true
+            ;;
+          --)
+            shift || true
+            break
+            ;;
+          -*)
+            echo "Unknown flag for git: $1" >&2
+            exit 1
+            ;;
+          *)
+            break
+            ;;
+        esac
+      done
+      # No positional args expected for git; ignore any extras.
+      break
+      ;;
     *)
       echo "Unknown flag: $1" >&2
       exit 1
       ;;
   esac
 done
+
+if [[ -z "$HOST" ]]; then
+  if [[ -n "${CONFIG_PATH}" && -f "${CONFIG_PATH}" ]]; then
+    # shellcheck disable=SC1090
+    source "${CONFIG_PATH}"
+    HOST="${MGMT_HOST:-${MGMT_IP:-}}"
+    # If no --user was provided, prefer the configs MGMT_USER/DEFAULT_USER as the remote sudo user.
+    if [[ "${NEW_USER}" == "cubeadmin" ]]; then
+      NEW_USER="${MGMT_USER:-${DEFAULT_USER:-${NEW_USER}}}"
+    fi
+  fi
+fi
+
+[[ -n "${HOST}" ]] || {
+  echo "No host provided and no MGMT_HOST/MGMT_IP found in ${CONFIG_PATH}." >&2
+  exit 1
+}
 
 # Pick a public key (prefer ed25519)
 default_pubkey=""
@@ -64,6 +227,72 @@ if [[ -z "$default_pubkey" ]]; then
 fi
 PUBKEY_PATH="$default_pubkey"
 PUBKEY_CONTENT="$(cat "$PUBKEY_PATH")"
+
+ssh_root() { ssh -o StrictHostKeyChecking=no root@"$HOST" "$@"; }
+ssh_user() { ssh -o StrictHostKeyChecking=no "${NEW_USER}@${HOST}" "$@"; }
+scp_user() { scp -o StrictHostKeyChecking=no "$@"; }
+
+remote_repo_dir() { echo "/home/${NEW_USER}/netcup-kube"; }
+remote_bin_path() { echo "$(remote_repo_dir)/bin/netcup-kube"; }
+
+remote_git_sync() {
+  local repo
+  repo="$(remote_repo_dir)"
+  local branch="${GIT_BRANCH}"
+  local ref="${GIT_REF}"
+  local pull="${GIT_PULL}"
+
+  # shellcheck disable=SC2016
+  # NOTE: ssh executes a remote shell and does not preserve empty arguments reliably.
+  # Use explicit placeholders to keep positional args stable.
+  local branch_arg="${branch:-__NONE__}"
+  local ref_arg="${ref:-__NONE__}"
+  ssh_user "bash -s" -- "${repo}" "${branch_arg}" "${ref_arg}" "${pull}" << 'EOS'
+set -euo pipefail
+repo="${1:?repo dir required}"
+branch="${2:-__NONE__}"
+ref="${3:-__NONE__}"
+pull="${4:-true}"
+
+[[ "${branch}" == "__NONE__" ]] && branch=""
+[[ "${ref}" == "__NONE__" ]] && ref=""
+
+cd "${repo}"
+git fetch --all -p
+
+if [[ -n "${ref}" ]]; then
+  echo "[remote] checkout ref: ${ref}"
+  git checkout --detach "${ref}"
+elif [[ -n "${branch}" ]]; then
+  echo "[remote] checkout branch: ${branch}"
+  if git show-ref --verify --quiet "refs/heads/${branch}"; then
+    git checkout "${branch}"
+  else
+    if ! git show-ref --verify --quiet "refs/remotes/origin/${branch}"; then
+      echo "[remote] ERROR: origin/${branch} not found" >&2
+      exit 1
+    fi
+    git checkout -b "${branch}" --track "origin/${branch}"
+  fi
+fi
+
+if [[ -n "${branch}" && -z "${ref}" ]]; then
+  # Make sure the branch tracks the correct remote branch, to avoid stale merge config
+  # (e.g. tracking a deleted branch).
+  git branch --set-upstream-to="origin/${branch}" "${branch}" >/dev/null 2>&1 || true
+fi
+
+if [[ "${pull}" == "true" && -z "${ref}" ]]; then
+  if [[ -n "${branch}" ]]; then
+    echo "[remote] pull: origin ${branch} (ff-only)"
+    git pull --ff-only origin "${branch}"
+  else
+    # No explicit branch requested; keep behavior safe/explicit.
+    echo "[remote] NOTE: --pull requested but no --branch/--ref provided; skipping pull." >&2
+  fi
+fi
+EOS
+}
 
 # 1) Ensure our key is on root via ssh-copy-id (password auth)
 if ssh -o BatchMode=yes -o StrictHostKeyChecking=no root@"$HOST" true 2> /dev/null; then
@@ -116,13 +345,18 @@ chmod 0440 /etc/sudoers.d/90-__NEW_USER__
 if [[ ! -d /home/__NEW_USER__/netcup-kube ]]; then
   sudo -u __NEW_USER__ git clone __REPO_URL__ /home/__NEW_USER__/netcup-kube
 else
-  cd /home/__NEW_USER__/netcup-kube && sudo -u __NEW_USER__ git fetch --all -p && sudo -u __NEW_USER__ git pull --ff-only
+  # Only fetch here; pulling can fail if the repo is on a local branch that tracks a deleted remote branch.
+  # Use the local wrappers `git` subcommand (or `run --branch/--ref`) to select a branch/ref and pull.
+  cd /home/__NEW_USER__/netcup-kube && sudo -u __NEW_USER__ git fetch --all -p
 fi
 
 # Print how to continue
 cat <<EOM
 [remote] Provisioning complete.
-Now run on your local machine:
+Now run on your local machine (recommended):
+  __LOCAL_CMD__ __HOST__ --user __NEW_USER__ run bootstrap
+
+Or SSH into the server:
   ssh __NEW_USER__@__HOST__
 Then on the server:
   sudo /home/__NEW_USER__/netcup-kube/bin/netcup-kube bootstrap
@@ -135,5 +369,61 @@ REMOTE_SCRIPT="${REMOTE_SCRIPT//__NEW_USER__/$NEW_USER}"
 REMOTE_SCRIPT="${REMOTE_SCRIPT//__PUBKEY__/$PUBKEY_CONTENT}"
 REMOTE_SCRIPT="${REMOTE_SCRIPT//__REPO_URL__/$REPO_URL}"
 REMOTE_SCRIPT="${REMOTE_SCRIPT//__HOST__/$HOST}"
+REMOTE_SCRIPT="${REMOTE_SCRIPT//__LOCAL_CMD__/$LOCAL_CMD}"
 
-ssh -o StrictHostKeyChecking=no root@"$HOST" "bash -s" <<< "$REMOTE_SCRIPT"
+ssh_root "bash -s" <<< "$REMOTE_SCRIPT"
+
+if [[ "${DO_GIT}" == "true" ]]; then
+  remote_git_sync
+fi
+
+if [[ "${DO_RUN}" == "true" ]]; then
+  if [[ "${#RUN_ARGS[@]}" -lt 1 ]]; then
+    echo "Missing netcup-kube arguments. Example: $(basename "$0") ${HOST} --user ${NEW_USER} run bootstrap" >&2
+    exit 1
+  fi
+
+  if [[ -n "${RUN_ENV_FILE}" && ! -f "${RUN_ENV_FILE}" ]]; then
+    echo "--env-file not found: ${RUN_ENV_FILE}" >&2
+    exit 1
+  fi
+
+  if [[ -n "${GIT_BRANCH}" || -n "${GIT_REF}" || "${GIT_PULL}" == "true" ]]; then
+    remote_git_sync
+  fi
+
+  remote_bin="$(remote_bin_path)"
+  # Force a TTY so remote prompts can read from /dev/tty.
+  tty_flags=()
+  if [[ "${FORCE_TTY}" == "true" ]]; then
+    tty_flags=(-tt)
+  fi
+
+  remote_env=""
+  if [[ -n "${RUN_ENV_FILE}" ]]; then
+    remote_env="/tmp/netcup-kube-remote.env.$$"
+    echo "[local] Uploading env file to ${NEW_USER}@${HOST}:${remote_env}"
+    scp_user "${RUN_ENV_FILE}" "${NEW_USER}@${HOST}:${remote_env}"
+  fi
+
+  echo "[local] Running on ${NEW_USER}@${HOST}: sudo ${remote_bin} ${RUN_ARGS[*]}"
+  ssh_user "${tty_flags[@]}" "sudo -E bash -s" -- "${remote_env}" "${remote_bin}" "${RUN_ARGS[@]}" << 'EOS'
+set -euo pipefail
+env_file="${1:-}"
+bin="${2:-}"
+shift 2 || true
+
+if [[ -n "${env_file}" ]]; then
+  set -a
+  # shellcheck disable=SC1090
+  source "${env_file}"
+  set +a
+fi
+
+exec "${bin}" "$@"
+EOS
+
+  if [[ -n "${remote_env}" ]]; then
+    ssh_user "${tty_flags[@]}" "sudo rm -f '${remote_env}'" || true
+  fi
+fi
