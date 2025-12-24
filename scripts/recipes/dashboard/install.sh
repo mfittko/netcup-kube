@@ -101,6 +101,11 @@ echo
 
 if [[ -n "${HOST}" ]]; then
   log "Ensuring Traefik ServersTransport for dashboard (skip upstream TLS verification)"
+  # NOTE: insecureSkipVerify is used because the dashboard backend uses self-signed certs.
+  # This is acceptable for internal cluster traffic, but for production you should either:
+  # 1. Configure the dashboard with a trusted certificate, or
+  # 2. Use plain HTTP between Traefik and the dashboard service
+  # The external ingress (via Caddy) still uses proper TLS to end users.
   k apply -f - << EOF
 apiVersion: traefik.io/v1alpha1
 kind: ServersTransport

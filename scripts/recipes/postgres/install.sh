@@ -140,28 +140,20 @@ fi
 
 echo
 
-# Fetch passwords
-POSTGRES_ADMIN_PASSWORD=""
-POSTGRES_APP_PASSWORD=""
-if POSTGRES_ADMIN_PASSWORD=$(k get secret --namespace "${NAMESPACE}" postgres-postgresql -o jsonpath='{.data.postgres-password}' 2> /dev/null | base64 -d); then
-  POSTGRES_APP_PASSWORD=$(k get secret --namespace "${NAMESPACE}" postgres-postgresql -o jsonpath='{.data.password}' 2> /dev/null | base64 -d || echo "")
-  echo "Connection details:"
-  echo "  Host:       postgres-postgresql.${NAMESPACE}.svc.cluster.local"
-  echo "  Port:       5432"
-  echo "  Database:   app"
-  echo
-  echo "  User:       app"
-  echo "  Password:   ${POSTGRES_APP_PASSWORD}"
-  echo
-  echo "  Admin User: postgres"
-  echo "  Password:   ${POSTGRES_ADMIN_PASSWORD}"
+# Connection details (do not print passwords)
+echo "Connection details:"
+echo "  Host:     postgres-postgresql.${NAMESPACE}.svc.cluster.local"
+echo "  Port:     5432"
+echo "  Database: app"
+echo
+
+if k get secret --namespace "${NAMESPACE}" postgres-postgresql > /dev/null 2>&1; then
+  echo "To get the passwords (run as a privileged operator):"
+  echo "  App user:   kubectl get secret --namespace ${NAMESPACE} postgres-postgresql -o jsonpath='{.data.password}' | base64 -d"
+  echo "  Admin user: kubectl get secret --namespace ${NAMESPACE} postgres-postgresql -o jsonpath='{.data.postgres-password}' | base64 -d"
 else
-  echo "Connection details:"
-  echo "  Host:     postgres-postgresql.${NAMESPACE}.svc.cluster.local"
-  echo "  Port:     5432"
-  echo "  Database: app"
-  echo
-  echo "To get the passwords:"
+  echo "The Secret 'postgres-postgresql' was not found in namespace '${NAMESPACE}'."
+  echo "Once it exists, you can retrieve the passwords with:"
   echo "  App user:   kubectl get secret --namespace ${NAMESPACE} postgres-postgresql -o jsonpath='{.data.password}' | base64 -d"
   echo "  Admin user: kubectl get secret --namespace ${NAMESPACE} postgres-postgresql -o jsonpath='{.data.postgres-password}' | base64 -d"
 fi
