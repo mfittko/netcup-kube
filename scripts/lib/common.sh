@@ -27,12 +27,16 @@ die() {
   exit 1
 }
 
-# Kubectl wrapper that auto-detects KUBECONFIG
+# Kubectl wrapper that auto-detects KUBECONFIG and kubectl binary
 k() {
-  if [[ -n "${KUBECONFIG:-}" ]]; then
-    kubectl "$@"
+  local kubeconfig_val="${KUBECONFIG:-/etc/rancher/k3s/k3s.yaml}"
+  
+  if command -v kubectl > /dev/null 2>&1; then
+    KUBECONFIG="${kubeconfig_val}" kubectl "$@"
+  elif command -v k3s > /dev/null 2>&1; then
+    KUBECONFIG="${kubeconfig_val}" k3s kubectl "$@"
   else
-    KUBECONFIG="/etc/rancher/k3s/k3s.yaml" kubectl "$@"
+    die "Missing kubectl (or k3s)"
   fi
 }
 

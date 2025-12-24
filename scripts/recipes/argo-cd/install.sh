@@ -70,11 +70,6 @@ if [[ -z "${KUBECONFIG}" ]]; then
 fi
 [[ -n "${KUBECONFIG}" ]] || die "KUBECONFIG not set and /etc/rancher/k3s/k3s.yaml not found"
 
-# Ensure kubectl is available
-if ! command -v kubectl > /dev/null 2>&1 && ! command -v k3s > /dev/null 2>&1; then
-  die "Missing kubectl (or k3s)"
-fi
-
 log "Installing Argo CD into namespace: ${ARGO_NS}"
 
 log "Ensuring namespace exists"
