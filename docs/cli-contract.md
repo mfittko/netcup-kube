@@ -279,8 +279,8 @@ netcup-kube dns [options]
 
 **Options:**
 - `--type <wildcard|edge-http>` — Certificate mode (default: `wildcard`)
-- `--domains "<a,b,c>"` — Comma-separated hostnames (required for `edge-http`; also accepts `|` as separator)
-- `--add-domains "<a,b,c>"` — Append to existing domains (only for `edge-http`; also accepts `|` as separator)
+- `--domains "host1,host2,host3"` — Comma-separated hostnames (required for `edge-http`; also accepts pipe `|` as separator)
+- `--add-domains "host1,host2,host3"` — Append to existing domains (only for `edge-http`; also accepts pipe `|` as separator)
 - `--base-domain <domain>` — Base domain (required for `wildcard`; optional for `edge-http`)
 - `--dash-host <host>` — Dashboard host (optional)
 - `--show` — Print currently configured domains and exit
@@ -371,7 +371,7 @@ SERVER_URL=https://192.168.1.10:6443
 
 On the WORKER node, run:
 
-  sudo env SERVER_URL="https://192.168.1.10:6443" TOKEN="K10abc..." ENABLE_UFW=false EDGE_PROXY=none DASH_ENABLE=false \
+  sudo env SERVER_URL="https://192.168.1.10:6443" TOKEN="K10xxx...xxxxx" ENABLE_UFW=false EDGE_PROXY=none DASH_ENABLE=false \
     netcup-kube join
 ```
 
