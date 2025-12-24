@@ -73,15 +73,6 @@ done
 
 [[ -n "${NAMESPACE}" ]] || die "Namespace is required"
 
-# Detect kubectl
-k() {
-  if [[ -n "${KUBECONFIG:-}" ]]; then
-    kubectl "$@"
-  else
-    KUBECONFIG="/etc/rancher/k3s/k3s.yaml" kubectl "$@"
-  fi
-}
-
 log "Installing kube-prometheus-stack into namespace: ${NAMESPACE}"
 
 # Ensure namespace exists

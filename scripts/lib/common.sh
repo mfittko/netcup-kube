@@ -1,6 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Detect SCRIPTS_DIR for sourcing recipes.conf
+COMMON_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+COMMON_SCRIPTS_DIR="$(cd "${COMMON_SCRIPT_DIR}/.." && pwd)"
+
+# Source recipes configuration if it exists (for recipe install scripts)
+if [[ -f "${COMMON_SCRIPTS_DIR}/recipes/recipes.conf" ]]; then
+  # shellcheck disable=SC1091
+  source "${COMMON_SCRIPTS_DIR}/recipes/recipes.conf"
+fi
+
 # Logging & errors
 log() {
   # Portable timestamp (GNU date uses -Is, BSD/macOS date doesn't support -I)

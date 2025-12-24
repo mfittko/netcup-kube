@@ -72,15 +72,6 @@ done
 [[ -n "${NAMESPACE}" ]] || die "Namespace is required"
 [[ -n "${STORAGE}" ]] || die "Storage size is required"
 
-# Detect kubectl
-k() {
-  if [[ -n "${KUBECONFIG:-}" ]]; then
-    kubectl "$@"
-  else
-    KUBECONFIG="/etc/rancher/k3s/k3s.yaml" kubectl "$@"
-  fi
-}
-
 log "Installing PostgreSQL into namespace: ${NAMESPACE}"
 
 # Ensure namespace exists
