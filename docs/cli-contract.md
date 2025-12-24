@@ -115,7 +115,7 @@ netcup-kube-remote [<host-or-ip>] [--user <name>] [--pubkey <path>] [--repo <url
 - `<host-or-ip>` — Target host (defaults to `MGMT_HOST`/`MGMT_IP` from config)
 - `--user <name>` — SSH user (default: `cubeadmin`, or `MGMT_USER` from config)
 - `--pubkey <path>` — SSH public key to use (default: `~/.ssh/id_ed25519.pub` or `~/.ssh/id_rsa.pub`)
-- `--repo <url>` — Git repository URL (default: `https://github.com/mfittko/netcup-kube.git`)
+- `--repo <url>` — Git repository URL (default: `https://github.com/mfittko/netcup-kube.git` - this is the upstream repository)
 - `--config <path>` — Config file path (default: `config/netcup-kube.env`)
 
 **Command: `provision`**
@@ -168,7 +168,7 @@ netcup-kube-tunnel [start|stop|status] [options]
 - `status` — Check tunnel status
 
 **Options:**
-- `--host <host>` — Target SSH host (default: `mfittko.com` or `$TUNNEL_HOST`)
+- `--host <host>` — Target SSH host (default: `mfittko.com` or `$TUNNEL_HOST` - note: this is the upstream project's default, users should configure via env file)
 - `--user <user>` — SSH user (default: `ops` or `$TUNNEL_USER`)
 - `--local-port <port>` — Local port to bind (default: `6443` or `$TUNNEL_LOCAL_PORT`)
 - `--remote-host <host>` — Remote host to forward to (default: `127.0.0.1` or `$TUNNEL_REMOTE_HOST`)
@@ -179,7 +179,7 @@ netcup-kube-tunnel [start|stop|status] [options]
 **Behavior:**
 - Uses SSH ControlMaster for reliable start/stop/status
 - Socket location: `${XDG_RUNTIME_DIR:-/tmp}/netcup-kube-tunnel-${user}_${host}_${local_port}.ctl`
-  - Where `${user}`, `${host}`, and `${local_port}` are the actual runtime values (e.g., `ops_mfittko.com_6443`)
+  - Where `${user}`, `${host}`, and `${local_port}` are the actual runtime values (e.g., `ops_example.com_6443`)
 - Checks port availability before starting (fails if port in use)
 - SSH options: `-fN -M -S <socket> -L <local>:<remote-host>:<remote-port> -o ControlPersist=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3`
 
