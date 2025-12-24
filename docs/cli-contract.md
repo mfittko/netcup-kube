@@ -176,6 +176,7 @@ netcup-kube-tunnel [start|stop|status] [options]
 **Behavior:**
 - Uses SSH ControlMaster for reliable start/stop/status
 - Socket location: `${XDG_RUNTIME_DIR:-/tmp}/netcup-kube-tunnel-${user}_${host}_${local_port}.ctl`
+  - Where `${user}`, `${host}`, and `${local_port}` are the actual runtime values (e.g., `ops_mfittko.com_6443`)
 - Checks port availability before starting (fails if port in use)
 - SSH options: `-fN -M -S <socket> -L <local>:<remote-host>:<remote-port> -o ControlPersist=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3`
 
@@ -278,8 +279,8 @@ netcup-kube dns [options]
 
 **Options:**
 - `--type <wildcard|edge-http>` — Certificate mode (default: `wildcard`)
-- `--domains "<a,b,c>"` — Comma-separated hostnames (required for `edge-http`; accepts `|` separator)
-- `--add-domains "<a,b,c>"` — Append to existing domains (only for `edge-http`)
+- `--domains "<a,b,c>"` — Comma-separated hostnames (required for `edge-http`; also accepts `|` as separator)
+- `--add-domains "<a,b,c>"` — Append to existing domains (only for `edge-http`; also accepts `|` as separator)
 - `--base-domain <domain>` — Base domain (required for `wildcard`; optional for `edge-http`)
 - `--dash-host <host>` — Dashboard host (optional)
 - `--show` — Print currently configured domains and exit
