@@ -12,6 +12,9 @@ This document specifies the current CLI contract for `netcup-kube` to ensure com
 6. [Confirmation Gates](#confirmation-gates)
 7. [Exit Codes](#exit-codes)
 8. [Compatibility Matrix](#compatibility-matrix)
+9. [Testing Compatibility](#testing-compatibility)
+10. [Notes for Go Implementation](#notes-for-go-implementation)
+11. [Summary](#summary)
 
 ---
 
