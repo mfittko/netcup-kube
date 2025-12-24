@@ -72,15 +72,6 @@ done
 [[ -n "${NAMESPACE}" ]] || die "Namespace is required"
 [[ -n "${STORAGE}" ]] || die "Storage size is required"
 
-# Detect kubectl
-k() {
-  if [[ -n "${KUBECONFIG:-}" ]]; then
-    kubectl "$@"
-  else
-    KUBECONFIG="/etc/rancher/k3s/k3s.yaml" kubectl "$@"
-  fi
-}
-
 log "Installing Redis into namespace: ${NAMESPACE}"
 
 # Ensure namespace exists
@@ -150,21 +141,13 @@ fi
 
 echo
 
-# Fetch password
-REDIS_PASSWORD=""
-if REDIS_PASSWORD=$(k get secret --namespace "${NAMESPACE}" redis -o jsonpath='{.data.redis-password}' 2> /dev/null | base64 -d); then
-  echo "Connection details:"
-  echo "  Host:     redis-master.${NAMESPACE}.svc.cluster.local"
-  echo "  Port:     6379"
-  echo "  Password: ${REDIS_PASSWORD}"
-else
-  echo "Connection details:"
-  echo "  Host:     redis-master.${NAMESPACE}.svc.cluster.local"
-  echo "  Port:     6379"
-  echo
-  echo "To get the password:"
-  echo "  kubectl get secret --namespace ${NAMESPACE} redis -o jsonpath='{.data.redis-password}' | base64 -d"
-fi
+# Connection details (do not print password directly)
+echo "Connection details:"
+echo "  Host:     redis-master.${NAMESPACE}.svc.cluster.local"
+echo "  Port:     6379"
+echo
+echo "To get the password:"
+echo "  kubectl get secret --namespace ${NAMESPACE} redis -o jsonpath='{.data.redis-password}' | base64 -d"
 echo
 echo "Connection string (for apps in cluster):"
 echo "  redis://:<password>@redis-master.${NAMESPACE}.svc.cluster.local:6379"

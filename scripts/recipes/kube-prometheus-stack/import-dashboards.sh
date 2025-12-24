@@ -61,15 +61,6 @@ while [[ $# -gt 0 ]]; do
   shift || true
 done
 
-# Detect kubectl
-k() {
-  if [[ -n "${KUBECONFIG:-}" ]]; then
-    kubectl "$@"
-  else
-    KUBECONFIG="/etc/rancher/k3s/k3s.yaml" kubectl "$@"
-  fi
-}
-
 log "Importing Grafana dashboards into namespace: ${NAMESPACE}"
 
 # Get Grafana admin password

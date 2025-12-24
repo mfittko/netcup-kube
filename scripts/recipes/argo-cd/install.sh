@@ -70,20 +70,6 @@ if [[ -z "${KUBECONFIG}" ]]; then
 fi
 [[ -n "${KUBECONFIG}" ]] || die "KUBECONFIG not set and /etc/rancher/k3s/k3s.yaml not found"
 
-kubectl_bin=""
-if command -v kubectl > /dev/null 2>&1; then
-  kubectl_bin="kubectl"
-elif command -v k3s > /dev/null 2>&1; then
-  kubectl_bin="k3s kubectl"
-else
-  die "Missing kubectl (or k3s)"
-fi
-
-k() {
-  # shellcheck disable=SC2086
-  KUBECONFIG="${KUBECONFIG}" ${kubectl_bin} "$@"
-}
-
 log "Installing Argo CD into namespace: ${ARGO_NS}"
 
 log "Ensuring namespace exists"
@@ -150,25 +136,19 @@ if [[ -n "${ARGO_HOST}" ]]; then
   fi
 fi
 
-log "Initial admin password (if still present)"
-if k -n "${ARGO_NS}" get secret argocd-initial-admin-secret > /dev/null 2>&1; then
-  pw="$(k -n "${ARGO_NS}" get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d || true)"
-  if [[ -n "${pw}" ]]; then
-    echo "  username: admin"
-    echo "  password: ${pw}"
-  else
-    echo "  (could not read password from secret)"
-  fi
-else
-  echo "  (secret argocd-initial-admin-secret not found; it may have been deleted)"
-fi
+log "Initial admin password"
+echo "  The initial admin password is stored in the 'argocd-initial-admin-secret' Secret"
+echo "  in the '${ARGO_NS}' namespace (if it has not been rotated or the secret deleted)."
+echo "  For authorized cluster admins, you can retrieve it manually with:"
+echo "    kubectl -n ${ARGO_NS} get secret argocd-initial-admin-secret \\"
+echo "      -o jsonpath='{.data.password}' | base64 -d; echo"
 
 cat << EOF
 
 Next steps
 ----------
 - UI (port-forward):
-    KUBECONFIG="${KUBECONFIG}" ${kubectl_bin} -n ${ARGO_NS} port-forward svc/argocd-server 8080:443
+    kubectl -n ${ARGO_NS} port-forward svc/argocd-server 8080:443
     Then open: https://localhost:8080  (accept self-signed cert)
 
 - If you exposed via --host, ensure the domain resolves to the node IP and is in your Caddy edge-http list.
