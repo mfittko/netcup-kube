@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-cmd-params-cm
+  namespace: ${ARGO_NS}
+data:
+  server.insecure: "true"
+

@@ -1,11 +1,43 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Detect SCRIPTS_DIR for sourcing recipes.conf
+COMMON_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+COMMON_SCRIPTS_DIR="$(cd "${COMMON_SCRIPT_DIR}/.." && pwd)"
+
+# Source recipes configuration if it exists (for recipe install scripts)
+if [[ -f "${COMMON_SCRIPTS_DIR}/recipes/recipes.conf" ]]; then
+  # shellcheck disable=SC1091
+  source "${COMMON_SCRIPTS_DIR}/recipes/recipes.conf"
+fi
+
 # Logging & errors
-log() { printf '[%s] %s\n' "$(date -Is)" "$*"; }
+log() {
+  # Portable timestamp (GNU date uses -Is, BSD/macOS date doesn't support -I)
+  local ts
+  if date -Is > /dev/null 2>&1; then
+    ts="$(date -Is)"
+  else
+    ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  fi
+  printf '[%s] %s\n' "$ts" "$*"
+}
 die() {
   echo "ERROR: $*" >&2
   exit 1
+}
+
+# Kubectl wrapper that auto-detects KUBECONFIG and kubectl binary
+k() {
+  local kubeconfig_val="${KUBECONFIG:-/etc/rancher/k3s/k3s.yaml}"
+
+  if command -v kubectl > /dev/null 2>&1; then
+    KUBECONFIG="${kubeconfig_val}" kubectl "$@"
+  elif command -v k3s > /dev/null 2>&1; then
+    KUBECONFIG="${kubeconfig_val}" k3s kubectl "$@"
+  else
+    die "Missing kubectl (or k3s)"
+  fi
 }
 
 # TTY detection
