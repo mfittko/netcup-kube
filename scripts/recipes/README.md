@@ -75,7 +75,7 @@ recipe-name/
 
 All recipes:
 - Source `scripts/lib/common.sh` for shared functions
-- Source `scripts/recipes/versions.conf` for version management
+- Source `scripts/recipes/recipes.conf` for configuration management
 - Follow consistent argument parsing (`--namespace`, `--host`, etc.)
 - Provide clear output with connection instructions
 
