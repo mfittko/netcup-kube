@@ -29,7 +29,7 @@ Notes:
 EOF
 }
 
-NAMESPACE="platform"
+NAMESPACE="${NAMESPACE:-${NAMESPACE_PLATFORM}}"
 HOST=""
 
 while [[ $# -gt 0 ]]; do
@@ -110,7 +110,7 @@ spec:
     spec:
       containers:
       - name: redisinsight
-        image: redis/redisinsight:latest
+        image: redis/redisinsight:${IMAGE_VERSION_REDISINSIGHT}
         ports:
         - containerPort: 5540
         volumeMounts:

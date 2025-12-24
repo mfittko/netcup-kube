@@ -94,6 +94,7 @@ helm repo update kubernetes-dashboard
 log "Installing/Upgrading Kubernetes Dashboard via Helm"
 helm upgrade --install kubernetes-dashboard kubernetes-dashboard/kubernetes-dashboard \
   --namespace "${NAMESPACE}" \
+  --version "${CHART_VERSION_KUBERNETES_DASHBOARD}" \
   --set ingress.enabled=false \
   --wait \
   --timeout 5m

@@ -29,9 +29,9 @@ Notes:
 EOF
 }
 
-NAMESPACE="platform"
+NAMESPACE="${NAMESPACE_PLATFORM}"
 PASSWORD=""
-STORAGE="8Gi"
+STORAGE="${DEFAULT_STORAGE_REDIS}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -122,6 +122,7 @@ log "Installing/Upgrading Redis via Helm"
 HELM_ARGS=(
   upgrade --install redis bitnami/redis
   --namespace "${NAMESPACE}"
+  --version "${CHART_VERSION_REDIS}"
   --values "${VALUES_FILE}"
   --set master.persistence.size="${STORAGE}"
   --set metrics.enabled=true
@@ -166,18 +167,10 @@ else
 fi
 echo
 echo "Connection string (for apps in cluster):"
-if [[ -n "${REDIS_PASSWORD}" ]]; then
-  echo "  redis://:${REDIS_PASSWORD}@redis-master.${NAMESPACE}.svc.cluster.local:6379"
-else
-  echo "  redis://:<password>@redis-master.${NAMESPACE}.svc.cluster.local:6379"
-fi
+echo "  redis://:<password>@redis-master.${NAMESPACE}.svc.cluster.local:6379"
 echo
 echo "To connect from within the cluster:"
-if [[ -n "${REDIS_PASSWORD}" ]]; then
-  echo "  redis-cli -h redis-master.${NAMESPACE}.svc.cluster.local -a '${REDIS_PASSWORD}'"
-else
-  echo "  redis-cli -h redis-master.${NAMESPACE}.svc.cluster.local -a \$(kubectl get secret --namespace ${NAMESPACE} redis -o jsonpath='{.data.redis-password}' | base64 -d)"
-fi
+echo "  redis-cli -h redis-master.${NAMESPACE}.svc.cluster.local -a \$(kubectl get secret --namespace ${NAMESPACE} redis -o jsonpath='{.data.redis-password}' | base64 -d)"
 echo
 echo "To connect from your laptop (via kubectl port-forward):"
 echo "  kubectl port-forward -n ${NAMESPACE} svc/redis-master 6379:6379"

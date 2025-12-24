@@ -28,9 +28,10 @@ Notes:
 EOF
 }
 
-ARGO_NS="argocd"
+ARGO_NS="${NAMESPACE_ARGOCD}"
 ARGO_HOST=""
-INSTALL_URL="https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml"
+# Pin to specific version instead of mutable 'stable' branch for supply chain security
+INSTALL_URL="https://raw.githubusercontent.com/argoproj/argo-cd/${ARGOCD_VERSION}/manifests/install.yaml"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in

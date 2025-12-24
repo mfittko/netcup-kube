@@ -17,6 +17,15 @@ die() {
   exit 1
 }
 
+# Kubectl wrapper that auto-detects KUBECONFIG
+k() {
+  if [[ -n "${KUBECONFIG:-}" ]]; then
+    kubectl "$@"
+  else
+    KUBECONFIG="/etc/rancher/k3s/k3s.yaml" kubectl "$@"
+  fi
+}
+
 # TTY detection
 is_tty() {
   [[ -t 0 && -t 1 ]] && return 0

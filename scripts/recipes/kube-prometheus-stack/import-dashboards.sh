@@ -192,4 +192,6 @@ else
   echo "  URL: http://localhost:3000/"
 fi
 echo "  Username: admin"
-echo "  Password: ${GRAFANA_PASSWORD}"
+echo
+echo "The password was set during installation. To retrieve it:"
+echo "  kubectl get secret -n monitoring kube-prometheus-stack-grafana -o jsonpath='{.data.admin-password}' | base64 -d && echo"

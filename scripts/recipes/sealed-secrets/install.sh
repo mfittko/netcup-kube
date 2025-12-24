@@ -80,6 +80,7 @@ helm repo update
 log "Installing/Upgrading Sealed Secrets via Helm"
 helm upgrade --install sealed-secrets sealed-secrets/sealed-secrets \
   --namespace "${NAMESPACE}" \
+  --version "${CHART_VERSION_SEALED_SECRETS}" \
   --wait \
   --timeout 5m
 

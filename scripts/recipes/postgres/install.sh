@@ -29,9 +29,9 @@ Notes:
 EOF
 }
 
-NAMESPACE="platform"
+NAMESPACE="${NAMESPACE_PLATFORM}"
 PASSWORD=""
-STORAGE="8Gi"
+STORAGE="${DEFAULT_STORAGE_POSTGRES}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -121,6 +121,7 @@ log "Installing/Upgrading PostgreSQL via Helm"
 HELM_ARGS=(
   upgrade --install postgres bitnami/postgresql
   --namespace "${NAMESPACE}"
+  --version "${CHART_VERSION_POSTGRESQL}"
   --values "${VALUES_FILE}"
   --set primary.persistence.size="${STORAGE}"
   --set metrics.enabled=true
@@ -175,11 +176,7 @@ else
 fi
 echo
 echo "Connection string (for apps in cluster):"
-if [[ -n "${POSTGRES_APP_PASSWORD}" ]]; then
-  echo "  postgresql://app:${POSTGRES_APP_PASSWORD}@postgres-postgresql.${NAMESPACE}.svc.cluster.local:5432/app"
-else
-  echo "  postgresql://app:<password>@postgres-postgresql.${NAMESPACE}.svc.cluster.local:5432/app"
-fi
+echo "  postgresql://app:<password>@postgres-postgresql.${NAMESPACE}.svc.cluster.local:5432/app"
 echo
 echo "To connect from within the cluster:"
 echo "  psql -h postgres-postgresql.${NAMESPACE}.svc.cluster.local -U app -d app"

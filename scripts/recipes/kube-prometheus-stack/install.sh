@@ -100,9 +100,10 @@ if [[ -z "${PASSWORD}" ]]; then
   log "Generating secure Grafana admin password"
   if command -v openssl > /dev/null 2>&1; then
     PASSWORD=$(openssl rand -base64 12 | tr -dc 'A-Za-z0-9' | head -c 16)
+  elif [[ -r /dev/urandom ]]; then
+    PASSWORD=$(LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 16 2> /dev/null)
   else
-    # Fallback to /dev/urandom or date-based hash
-    PASSWORD=$(LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 16 2> /dev/null || date +%s | sha256sum | base64 | head -c 16)
+    die "Cannot generate secure password: openssl and /dev/urandom unavailable. Please provide PASSWORD env var."
   fi
   [[ -n "${PASSWORD}" ]] || die "Failed to generate password"
 fi
@@ -151,6 +152,7 @@ fi
 log "Installing/Upgrading kube-prometheus-stack via Helm (this may take a few minutes)"
 helm upgrade --install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
   --namespace "${NAMESPACE}" \
+  --version "${CHART_VERSION_KUBE_PROMETHEUS_STACK}" \
   --values "${VALUES_FILE}" \
   --set grafana.adminPassword="${PASSWORD}" \
   --wait \
@@ -216,9 +218,11 @@ else
   echo "  Then open: http://localhost:3000"
 fi
 echo "  Username: admin"
-echo "  Password: ${PASSWORD}"
 echo
-echo "IMPORTANT: Save this password securely!"
+echo "To retrieve the Grafana admin password:"
+echo "  kubectl get secret -n ${NAMESPACE} kube-prometheus-stack-grafana -o jsonpath='{.data.admin-password}' | base64 -d && echo"
+echo
+echo "IMPORTANT: Store the password securely. Avoid displaying it in logs or screenshots."
 echo
 echo "Prometheus UI:"
 echo "  Port-forward: kubectl port-forward -n ${NAMESPACE} svc/kube-prometheus-stack-prometheus 9090:9090"
