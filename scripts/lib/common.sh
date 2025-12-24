@@ -30,7 +30,7 @@ die() {
 # Kubectl wrapper that auto-detects KUBECONFIG and kubectl binary
 k() {
   local kubeconfig_val="${KUBECONFIG:-/etc/rancher/k3s/k3s.yaml}"
-  
+
   if command -v kubectl > /dev/null 2>&1; then
     KUBECONFIG="${kubeconfig_val}" kubectl "$@"
   elif command -v k3s > /dev/null 2>&1; then
