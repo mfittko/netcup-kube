@@ -154,6 +154,46 @@ var (
 	runEnvFile string
 )
 
+var remoteSmokeCmd = &cobra.Command{
+	Use:   "smoke",
+	Short: "Run a safe DRY_RUN smoke test on the remote management node",
+	Long: `Run smoke tests in DRY_RUN mode on the remote host.
+
+This command:
+- Builds and uploads the netcup-kube binary
+- Runs a series of non-interactive smoke tests
+- Validates that the CLI works correctly on the remote host
+
+Examples:
+  netcup-kube remote smoke
+  netcup-kube remote smoke --branch main --pull`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		cfg := buildRemoteConfig()
+		if err := cfg.LoadConfigFromEnv(remoteConfigPath); err != nil {
+			return fmt.Errorf("failed to load config: %w", err)
+		}
+
+		if cfg.Host == "" {
+			return fmt.Errorf("no host provided and no MGMT_HOST/MGMT_IP found in config")
+		}
+
+		// Determine project root
+		projectRoot, err := findProjectRoot()
+		if err != nil {
+			return fmt.Errorf("could not find project root: %w", err)
+		}
+
+		opts := remote.GitOptions{
+			Branch:    gitBranch,
+			Ref:       gitRef,
+			Pull:      gitPull,
+			PullIsSet: cmd.Flags().Changed("pull") || cmd.Flags().Changed("no-pull"),
+		}
+
+		return remote.Smoke(cfg, opts, projectRoot)
+	},
+}
+
 var remoteRunCmd = &cobra.Command{
 	Use:   "run [netcup-kube args...]",
 	Short: "Run a netcup-kube command on the target host (forces TTY by default)",
@@ -173,6 +213,13 @@ Examples:
   netcup-kube remote run --no-tty --env-file ./env/test.env bootstrap`,
 	DisableFlagParsing: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// Check for help flag first
+		for _, arg := range args {
+			if arg == "-h" || arg == "--help" || arg == "help" {
+				return cmd.Help()
+			}
+		}
+
 		// Parse flags manually since we have DisableFlagParsing
 		parsedArgs, opts := parseRunArgs(args)
 
@@ -319,7 +366,7 @@ func init() {
 	remoteCmd.PersistentFlags().StringVar(&remoteConfigPath, "config", "", "Path to config file (default: config/netcup-kube.env)")
 
 	// Add git flags to commands that need them
-	for _, cmd := range []*cobra.Command{remoteGitCmd, remoteBuildCmd} {
+	for _, cmd := range []*cobra.Command{remoteGitCmd, remoteBuildCmd, remoteSmokeCmd} {
 		cmd.Flags().StringVar(&gitBranch, "branch", "", "Git branch name")
 		cmd.Flags().StringVar(&gitRef, "ref", "", "Git ref (commit/tag)")
 		cmd.Flags().BoolVar(&gitPull, "pull", false, "Pull latest changes")
@@ -330,5 +377,6 @@ func init() {
 	remoteCmd.AddCommand(remoteProvisionCmd)
 	remoteCmd.AddCommand(remoteGitCmd)
 	remoteCmd.AddCommand(remoteBuildCmd)
+	remoteCmd.AddCommand(remoteSmokeCmd)
 	remoteCmd.AddCommand(remoteRunCmd)
 }
