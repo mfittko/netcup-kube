@@ -5,18 +5,21 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPTS_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 # shellcheck disable=SC1091
 source "${SCRIPTS_DIR}/lib/common.sh"
+# shellcheck disable=SC1091
+source "${SCRIPTS_DIR}/recipes/lib.sh"
 
 usage() {
   cat << 'EOF'
 Install PostgreSQL on the cluster using Helm (Bitnami chart).
 
 Usage:
-  netcup-kube-install postgres [--namespace platform] [--password <pass>] [--storage <size>]
+  netcup-kube-install postgres [--namespace platform] [--password <pass>] [--storage <size>] [--uninstall]
 
 Options:
   --namespace <name>   Namespace to install into (default: platform).
   --password <pass>    PostgreSQL password (default: auto-generated).
   --storage <size>     PVC size (default: 8Gi).
+  --uninstall          Uninstall PostgreSQL (Helm release 'postgres' in the namespace).
   -h, --help           Show this help.
 
 Environment:
@@ -32,6 +35,7 @@ EOF
 NAMESPACE="${NAMESPACE_PLATFORM}"
 PASSWORD=""
 STORAGE="${DEFAULT_STORAGE_POSTGRES}"
+UNINSTALL="false"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -56,6 +60,9 @@ while [[ $# -gt 0 ]]; do
     --storage=*)
       STORAGE="${1#*=}"
       ;;
+    --uninstall)
+      UNINSTALL="true"
+      ;;
     -h | --help | help)
       usage
       exit 0
@@ -72,11 +79,19 @@ done
 [[ -n "${NAMESPACE}" ]] || die "Namespace is required"
 [[ -n "${STORAGE}" ]] || die "Storage size is required"
 
+if [[ "${UNINSTALL}" == "true" ]]; then
+  recipe_confirm_or_die "Uninstall PostgreSQL (Helm release 'postgres') from namespace ${NAMESPACE}"
+  log "Uninstalling PostgreSQL from namespace: ${NAMESPACE}"
+  helm uninstall postgres --namespace "${NAMESPACE}" || true
+  echo
+  log "PostgreSQL uninstall requested. Note: PVCs may remain depending on storage class/reclaim policy."
+  exit 0
+fi
+
 log "Installing PostgreSQL into namespace: ${NAMESPACE}"
 
 # Ensure namespace exists
-log "Ensuring namespace exists"
-k create namespace "${NAMESPACE}" --dry-run=client -o yaml | k apply -f -
+recipe_ensure_namespace "${NAMESPACE}"
 
 # Add Bitnami Helm repo
 log "Adding Bitnami Helm repository"

@@ -5,17 +5,20 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPTS_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 # shellcheck disable=SC1091
 source "${SCRIPTS_DIR}/lib/common.sh"
+# shellcheck disable=SC1091
+source "${SCRIPTS_DIR}/recipes/lib.sh"
 
 usage() {
   cat << 'EOF'
 Install Kubernetes Dashboard on the cluster using Helm.
 
 Usage:
-  netcup-kube-install dashboard [--namespace kubernetes-dashboard] [--host kube.example.com]
+  netcup-kube-install dashboard [--namespace kubernetes-dashboard] [--host kube.example.com] [--uninstall]
 
 Options:
   --namespace <name>   Namespace to install into (default: kubernetes-dashboard).
   --host <fqdn>        Create a Traefik Ingress for this host (entrypoint: web).
+  --uninstall          Uninstall Kubernetes Dashboard (Helm release 'kubernetes-dashboard' in the namespace).
   -h, --help           Show this help.
 
 Environment:
@@ -31,6 +34,7 @@ EOF
 
 NAMESPACE="kubernetes-dashboard"
 HOST=""
+UNINSTALL="false"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -48,6 +52,9 @@ while [[ $# -gt 0 ]]; do
     --host=*)
       HOST="${1#*=}"
       ;;
+    --uninstall)
+      UNINSTALL="true"
+      ;;
     -h | --help | help)
       usage
       exit 0
@@ -63,6 +70,15 @@ done
 
 [[ -n "${NAMESPACE}" ]] || die "Namespace is required"
 
+if [[ "${UNINSTALL}" == "true" ]]; then
+  recipe_confirm_or_die "Uninstall Kubernetes Dashboard (Helm release 'kubernetes-dashboard') from namespace ${NAMESPACE}"
+  log "Uninstalling Kubernetes Dashboard from namespace: ${NAMESPACE}"
+  helm uninstall kubernetes-dashboard --namespace "${NAMESPACE}" || true
+  recipe_kdelete serverstransport dashboard-insecure -n "${NAMESPACE}"
+  recipe_kdelete ingress kubernetes-dashboard -n "${NAMESPACE}"
+  exit 0
+fi
+
 log "Installing Kubernetes Dashboard into namespace: ${NAMESPACE}"
 
 # Ensure Helm is available
@@ -71,8 +87,7 @@ if ! command -v helm > /dev/null 2>&1; then
 fi
 
 # Ensure namespace exists
-log "Ensuring namespace exists"
-k create namespace "${NAMESPACE}" --dry-run=client -o yaml | k apply -f -
+recipe_ensure_namespace "${NAMESPACE}"
 
 # Add Dashboard Helm repo
 log "Adding Kubernetes Dashboard Helm repository"
@@ -142,20 +157,7 @@ spec:
               number: 443
 EOF
 
-  log "NOTE: Ensure ${HOST} is in your edge-http domains before accessing the UI."
-  if [[ -f "/etc/caddy/Caddyfile" ]]; then
-    # We are on the server; append domain using the dedicated subcommand (safer than rewriting the full list).
-    if command -v "${SCRIPTS_DIR}/main.sh" > /dev/null 2>&1; then
-      log "  Appending ${HOST} to Caddy edge-http domains (if needed)."
-      "${SCRIPTS_DIR}/main.sh" dns --type edge-http --add-domains "${HOST}"
-    else
-      echo "  Run: sudo ./bin/netcup-kube dns --type edge-http --add-domains \"${HOST}\""
-    fi
-  else
-    echo "  From your laptop:"
-    echo "    bin/netcup-kube-remote run dns --show --type edge-http --format csv  # to see current list"
-    echo "    bin/netcup-kube-remote run dns --type edge-http --add-domains \"${HOST}\""
-  fi
+  recipe_maybe_add_edge_http_domain "${HOST}"
 fi
 
 echo

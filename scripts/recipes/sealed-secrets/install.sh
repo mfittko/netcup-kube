@@ -5,16 +5,19 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPTS_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 # shellcheck disable=SC1091
 source "${SCRIPTS_DIR}/lib/common.sh"
+# shellcheck disable=SC1091
+source "${SCRIPTS_DIR}/recipes/lib.sh"
 
 usage() {
   cat << 'EOF'
 Install Sealed Secrets on the cluster using Helm.
 
 Usage:
-  netcup-kube-install sealed-secrets [--namespace kube-system]
+  netcup-kube-install sealed-secrets [--namespace kube-system] [--uninstall]
 
 Options:
   --namespace <name>   Namespace to install into (default: kube-system).
+  --uninstall          Uninstall Sealed Secrets (Helm release 'sealed-secrets' in the namespace).
   -h, --help           Show this help.
 
 Environment:
@@ -29,6 +32,7 @@ EOF
 }
 
 NAMESPACE="kube-system"
+UNINSTALL="false"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -38,6 +42,9 @@ while [[ $# -gt 0 ]]; do
       ;;
     --namespace=*)
       NAMESPACE="${1#*=}"
+      ;;
+    --uninstall)
+      UNINSTALL="true"
       ;;
     -h | --help | help)
       usage
@@ -54,11 +61,17 @@ done
 
 [[ -n "${NAMESPACE}" ]] || die "Namespace is required"
 
+if [[ "${UNINSTALL}" == "true" ]]; then
+  recipe_confirm_or_die "Uninstall Sealed Secrets (Helm release 'sealed-secrets') from namespace ${NAMESPACE}"
+  log "Uninstalling Sealed Secrets from namespace: ${NAMESPACE}"
+  helm uninstall sealed-secrets --namespace "${NAMESPACE}" || true
+  exit 0
+fi
+
 log "Installing Sealed Secrets into namespace: ${NAMESPACE}"
 
 # Ensure namespace exists
-log "Ensuring namespace exists"
-k create namespace "${NAMESPACE}" --dry-run=client -o yaml | k apply -f -
+recipe_ensure_namespace "${NAMESPACE}"
 
 # Add Sealed Secrets Helm repo
 log "Adding Sealed Secrets Helm repository"

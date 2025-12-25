@@ -5,18 +5,21 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPTS_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 # shellcheck disable=SC1091
 source "${SCRIPTS_DIR}/lib/common.sh"
+# shellcheck disable=SC1091
+source "${SCRIPTS_DIR}/recipes/lib.sh"
 
 usage() {
   cat << 'EOF'
 Install Redis on the cluster using Helm (Bitnami chart).
 
 Usage:
-  netcup-kube-install redis [--namespace platform] [--password <pass>] [--storage <size>]
+  netcup-kube-install redis [--namespace platform] [--password <pass>] [--storage <size>] [--uninstall]
 
 Options:
   --namespace <name>   Namespace to install into (default: platform).
   --password <pass>    Redis password (default: auto-generated).
   --storage <size>     PVC size (default: 8Gi).
+  --uninstall          Uninstall Redis (Helm release 'redis' in the namespace).
   -h, --help           Show this help.
 
 Environment:
@@ -32,6 +35,7 @@ EOF
 NAMESPACE="${NAMESPACE_PLATFORM}"
 PASSWORD=""
 STORAGE="${DEFAULT_STORAGE_REDIS}"
+UNINSTALL="false"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -56,6 +60,9 @@ while [[ $# -gt 0 ]]; do
     --storage=*)
       STORAGE="${1#*=}"
       ;;
+    --uninstall)
+      UNINSTALL="true"
+      ;;
     -h | --help | help)
       usage
       exit 0
@@ -72,11 +79,19 @@ done
 [[ -n "${NAMESPACE}" ]] || die "Namespace is required"
 [[ -n "${STORAGE}" ]] || die "Storage size is required"
 
+if [[ "${UNINSTALL}" == "true" ]]; then
+  recipe_confirm_or_die "Uninstall Redis (Helm release 'redis') from namespace ${NAMESPACE}"
+  log "Uninstalling Redis from namespace: ${NAMESPACE}"
+  helm uninstall redis --namespace "${NAMESPACE}" || true
+  echo
+  log "Redis uninstall requested. Note: PVCs may remain depending on storage class/reclaim policy."
+  exit 0
+fi
+
 log "Installing Redis into namespace: ${NAMESPACE}"
 
 # Ensure namespace exists
-log "Ensuring namespace exists"
-k create namespace "${NAMESPACE}" --dry-run=client -o yaml | k apply -f -
+recipe_ensure_namespace "${NAMESPACE}"
 
 # Add Bitnami Helm repo
 log "Adding Bitnami Helm repository"
