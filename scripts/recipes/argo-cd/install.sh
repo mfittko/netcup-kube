@@ -154,5 +154,5 @@ Next steps
     Then open: https://localhost:8080  (accept self-signed cert)
 
 - If you exposed via --host, ensure the domain resolves to the node IP and is in your Caddy edge-http list.
-    From laptop: bin/netcup-kube remote dns --type edge-http --add-domains "${ARGO_HOST:-cd.example.com}"
+    From laptop: bin/netcup-kube remote run dns --type edge-http --add-domains "${ARGO_HOST:-cd.example.com}"
 EOF

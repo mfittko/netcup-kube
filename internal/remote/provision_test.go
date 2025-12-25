@@ -8,7 +8,7 @@ import (
 )
 
 func TestBuildProvisionScript(t *testing.T) {
-	script := buildProvisionScript("testuser", "ssh-ed25519 AAAA... test@localhost", "https://github.com/test/repo.git")
+	script := buildProvisionScript("testuser", "ssh-ed25519 AAAA... test@localhost", "https://github.com/test/repo.git", "example.com")
 
 	// Check that script contains expected placeholders replaced
 	if !contains(script, "testuser") {
@@ -19,6 +19,9 @@ func TestBuildProvisionScript(t *testing.T) {
 	}
 	if !contains(script, "https://github.com/test/repo.git") {
 		t.Error("Script should contain repo URL")
+	}
+	if !contains(script, "example.com") {
+		t.Error("Script should contain host")
 	}
 
 	// Check for essential commands

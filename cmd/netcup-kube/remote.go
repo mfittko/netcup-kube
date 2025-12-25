@@ -42,15 +42,10 @@ Examples:
   netcup-kube remote --host root.example.com --user ops provision
   ROOT_PASS=xxx netcup-kube remote --host 203.0.113.10 provision`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg := buildRemoteConfig()
-		if err := cfg.LoadConfigFromEnv(remoteConfigPath); err != nil {
-			return fmt.Errorf("failed to load config: %w", err)
+		cfg, err := loadRemoteConfig()
+		if err != nil {
+			return err
 		}
-
-		if cfg.Host == "" {
-			return fmt.Errorf("no host provided and no MGMT_HOST/MGMT_IP found in config")
-		}
-
 		return remote.Provision(cfg)
 	},
 }
@@ -65,13 +60,9 @@ Examples:
   netcup-kube remote git --ref v1.0.0
   netcup-kube remote git --branch develop`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg := buildRemoteConfig()
-		if err := cfg.LoadConfigFromEnv(remoteConfigPath); err != nil {
-			return fmt.Errorf("failed to load config: %w", err)
-		}
-
-		if cfg.Host == "" {
-			return fmt.Errorf("no host provided and no MGMT_HOST/MGMT_IP found in config")
+		cfg, err := loadRemoteConfig()
+		if err != nil {
+			return err
 		}
 
 		client := remote.NewSSHClient(cfg.Host, cfg.User)
@@ -112,13 +103,9 @@ Examples:
   netcup-kube remote build
   netcup-kube remote build --branch main --pull`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg := buildRemoteConfig()
-		if err := cfg.LoadConfigFromEnv(remoteConfigPath); err != nil {
-			return fmt.Errorf("failed to load config: %w", err)
-		}
-
-		if cfg.Host == "" {
-			return fmt.Errorf("no host provided and no MGMT_HOST/MGMT_IP found in config")
+		cfg, err := loadRemoteConfig()
+		if err != nil {
+			return err
 		}
 
 		client := remote.NewSSHClient(cfg.Host, cfg.User)
@@ -167,13 +154,9 @@ Examples:
   netcup-kube remote smoke
   netcup-kube remote smoke --branch main --pull`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg := buildRemoteConfig()
-		if err := cfg.LoadConfigFromEnv(remoteConfigPath); err != nil {
-			return fmt.Errorf("failed to load config: %w", err)
-		}
-
-		if cfg.Host == "" {
-			return fmt.Errorf("no host provided and no MGMT_HOST/MGMT_IP found in config")
+		cfg, err := loadRemoteConfig()
+		if err != nil {
+			return err
 		}
 
 		// Determine project root
@@ -225,18 +208,25 @@ Examples:
 			return err
 		}
 
-		cfg := buildRemoteConfig()
-		if err := cfg.LoadConfigFromEnv(remoteConfigPath); err != nil {
-			return fmt.Errorf("failed to load config: %w", err)
-		}
-
-		if cfg.Host == "" {
-			return fmt.Errorf("no host provided and no MGMT_HOST/MGMT_IP found in config")
+		cfg, err := loadRemoteConfig()
+		if err != nil {
+			return err
 		}
 
 		opts.Args = parsedArgs
 		return remote.Run(cfg, opts)
 	},
+}
+
+func loadRemoteConfig() (*remote.Config, error) {
+	cfg := buildRemoteConfig()
+	if err := cfg.LoadConfigFromEnv(cfg.ConfigPath); err != nil {
+		return nil, fmt.Errorf("failed to load config: %w", err)
+	}
+	if cfg.Host == "" {
+		return nil, fmt.Errorf("no host provided and no MGMT_HOST/MGMT_IP found in config")
+	}
+	return cfg, nil
 }
 
 func buildRemoteConfig() *remote.Config {

@@ -29,7 +29,7 @@ func Provision(cfg *Config) error {
 	}
 
 	// Build and run the provisioning script
-	script := buildProvisionScript(cfg.User, string(pubKeyContent), cfg.RepoURL)
+	script := buildProvisionScript(cfg.User, string(pubKeyContent), cfg.RepoURL, cfg.Host)
 	
 	fmt.Printf("[remote] Provisioning %s@%s...\n", cfg.User, cfg.Host)
 	if err := rootClient.ExecuteScript(script, nil); err != nil {
@@ -83,7 +83,7 @@ Then re-run the provision command.`, pubKeyPath, host)
 }
 
 // buildProvisionScript creates the provisioning script
-func buildProvisionScript(user, pubKey, repoURL string) string {
+func buildProvisionScript(user, pubKey, repoURL, host string) string {
 	template := `set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -y
@@ -132,7 +132,7 @@ EOM
 	script := strings.ReplaceAll(template, "__NEW_USER__", user)
 	script = strings.ReplaceAll(script, "__PUBKEY__", pubKey)
 	script = strings.ReplaceAll(script, "__REPO_URL__", repoURL)
-	script = strings.ReplaceAll(script, "__HOST__", "HOST_PLACEHOLDER")
+	script = strings.ReplaceAll(script, "__HOST__", host)
 
 	return script
 }
