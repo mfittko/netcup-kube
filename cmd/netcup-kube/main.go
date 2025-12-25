@@ -129,6 +129,7 @@ func init() {
 	rootCmd.AddCommand(joinCmd)
 	rootCmd.AddCommand(dnsCmd)
 	rootCmd.AddCommand(pairCmd)
+	rootCmd.AddCommand(remoteCmd)
 }
 
 var bootstrapCmd = &cobra.Command{
