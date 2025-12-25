@@ -102,7 +102,7 @@ func (c *Config) expandVars(value string) string {
 	
 	pos := 0
 	iterations := 0
-	maxIterations := 100 // Safety limit to prevent infinite loops
+	maxIterations := 100 // Safety limit to prevent bugs in loop logic from causing hangs
 	
 	// Simple expansion: ${VAR}
 	for pos < len(value) && iterations < maxIterations {

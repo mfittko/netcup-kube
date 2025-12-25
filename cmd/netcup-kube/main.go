@@ -29,6 +29,28 @@ func main() {
 	}
 }
 
+// parseGlobalFlagsFromArgs manually parses global flags from args for commands with DisableFlagParsing.
+// Returns the parsed values and the remaining args without the global flags.
+func parseGlobalFlagsFromArgs(args []string) (parsedEnvFile string, parsedDryRun bool, parsedDryRunWriteFiles bool, remainingArgs []string) {
+	remainingArgs = []string{}
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--dry-run" {
+			parsedDryRun = true
+		} else if arg == "--dry-run-write-files" {
+			parsedDryRunWriteFiles = true
+		} else if arg == "--env-file" && i+1 < len(args) {
+			parsedEnvFile = args[i+1]
+			i++ // Skip the value
+		} else if strings.HasPrefix(arg, "--env-file=") {
+			parsedEnvFile = strings.TrimPrefix(arg, "--env-file=")
+		} else {
+			remainingArgs = append(remainingArgs, arg)
+		}
+	}
+	return
+}
+
 var rootCmd = &cobra.Command{
 	Use:   "netcup-kube",
 	Short: "Bootstrap and manage k3s clusters on Netcup servers",
@@ -96,36 +118,6 @@ func init() {
 	rootCmd.AddCommand(pairCmd)
 }
 
-// filterGlobalFlags removes global flags from args and applies them to cfg.
-// This is used for commands with DisableFlagParsing to manually handle global flags.
-// Note: This function assumes cfg has been initialized by PersistentPreRunE.
-func filterGlobalFlags(args []string) []string {
-	if cfg == nil {
-		// This should never happen in normal flow as PersistentPreRunE runs first,
-		// but guard against it for safety
-		fmt.Fprintf(os.Stderr, "error: config not initialized\n")
-		return args
-	}
-	
-	filteredArgs := []string{}
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		if arg == "--dry-run" {
-			cfg.SetFlag("DRY_RUN", "true")
-		} else if arg == "--dry-run-write-files" {
-			cfg.SetFlag("DRY_RUN_WRITE_FILES", "true")
-		} else if arg == "--env-file" && i+1 < len(args) {
-			// Skip --env-file and its value (already handled in PreRunE)
-			i++
-		} else if strings.HasPrefix(arg, "--env-file=") {
-			// Skip --env-file=value (already handled in PreRunE)
-		} else {
-			filteredArgs = append(filteredArgs, arg)
-		}
-	}
-	return filteredArgs
-}
-
 var bootstrapCmd = &cobra.Command{
 	Use:   "bootstrap",
 	Short: "Install and configure k3s server + Traefik NodePort + optional Caddy & Dashboard",
@@ -185,6 +177,23 @@ Examples:
   # Add more domains to existing HTTP-01 config
   sudo netcup-kube dns --type edge-http --add-domains "new.example.com"`,
 	DisableFlagParsing: true,
+	PreRunE: func(cmd *cobra.Command, args []string) error {
+		// Parse global flags manually since DisableFlagParsing is true
+		parsedEnvFile, parsedDryRun, parsedDryRunWriteFiles, _ := parseGlobalFlagsFromArgs(args)
+		
+		// Set global variables so PersistentPreRunE can use them
+		if parsedEnvFile != "" {
+			envFile = parsedEnvFile
+		}
+		if parsedDryRun {
+			dryRun = parsedDryRun
+		}
+		if parsedDryRunWriteFiles {
+			dryRunWriteFiles = parsedDryRunWriteFiles
+		}
+		
+		return nil
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Check if help was requested
 		for _, arg := range args {
@@ -194,8 +203,8 @@ Examples:
 			}
 		}
 		
-		// Filter global flags and apply them to config
-		filteredArgs := filterGlobalFlags(args)
+		// Filter out global flags from args
+		_, _, _, filteredArgs := parseGlobalFlagsFromArgs(args)
 		return scriptExecutor.Execute("dns", filteredArgs, cfg.ToEnvSlice())
 	},
 }
@@ -215,6 +224,23 @@ Examples:
   sudo netcup-kube pair --allow-from 159.195.64.217
   sudo netcup-kube pair --server-url https://152.53.136.34:6443`,
 	DisableFlagParsing: true,
+	PreRunE: func(cmd *cobra.Command, args []string) error {
+		// Parse global flags manually since DisableFlagParsing is true
+		parsedEnvFile, parsedDryRun, parsedDryRunWriteFiles, _ := parseGlobalFlagsFromArgs(args)
+		
+		// Set global variables so PersistentPreRunE can use them
+		if parsedEnvFile != "" {
+			envFile = parsedEnvFile
+		}
+		if parsedDryRun {
+			dryRun = parsedDryRun
+		}
+		if parsedDryRunWriteFiles {
+			dryRunWriteFiles = parsedDryRunWriteFiles
+		}
+		
+		return nil
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Check if help was requested
 		for _, arg := range args {
@@ -224,8 +250,8 @@ Examples:
 			}
 		}
 		
-		// Filter global flags and apply them to config
-		filteredArgs := filterGlobalFlags(args)
+		// Filter out global flags from args
+		_, _, _, filteredArgs := parseGlobalFlagsFromArgs(args)
 		return scriptExecutor.Execute("pair", filteredArgs, cfg.ToEnvSlice())
 	},
 }

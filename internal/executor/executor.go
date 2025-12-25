@@ -67,8 +67,9 @@ func (e *Executor) Execute(command string, args []string, env []string) error {
 		cmd.Args = append(cmd.Args, args...)
 	}
 	
-	// Set environment
-	cmd.Env = append(os.Environ(), env...)
+	// Set environment: use the provided env slice as the full environment
+	// (cfg already includes all necessary system variables via LoadFromEnvironment)
+	cmd.Env = env
 	
 	// Connect stdio
 	cmd.Stdin = os.Stdin

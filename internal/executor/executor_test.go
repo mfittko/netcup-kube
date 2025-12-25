@@ -3,6 +3,7 @@ package executor
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -140,7 +141,7 @@ func TestExecute_ScriptNotFound(t *testing.T) {
 	if err == nil {
 		t.Error("Execute() should return error when script not found")
 	}
-	if err != nil && !contains(err.Error(), "script not found") {
+	if err != nil && !strings.Contains(err.Error(), "script not found") {
 		t.Errorf("Execute() error should mention 'script not found', got: %v", err)
 	}
 }
@@ -298,19 +299,4 @@ exit 42
 	if exec.scriptPath != scriptPath {
 		t.Errorf("scriptPath not set correctly")
 	}
-}
-
-// Helper function
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(substr) == 0 || 
-		(len(s) > 0 && len(substr) > 0 && stringContains(s, substr)))
-}
-
-func stringContains(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }
