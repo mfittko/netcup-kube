@@ -93,7 +93,9 @@ func (c *Config) SetFlag(key, value string) {
 	c.Env[key] = value
 }
 
-// expandVars performs simple variable expansion for ${VAR} syntax
+// expandVars performs simple variable expansion for ${VAR} syntax.
+// NOTE: This performs single-pass expansion only. Variables are not recursively expanded.
+// For example, if VAR1="${VAR2}" and VAR2="value", VAR1 will expand to "${VAR2}", not "value".
 func (c *Config) expandVars(value string) string {
 	var result strings.Builder
 	result.Grow(len(value)) // Pre-allocate capacity
