@@ -1,5 +1,5 @@
 # netcup-kube
-Shell scripts to bootstrap a production-ready k3s cluster on a Netcup root server (public) with up to N private vLAN nodes (Debian 13).
+Bootstrap a production-ready k3s cluster on a Netcup root server (public) with up to N private vLAN nodes (Debian 13).
 
 Features
 - k3s server bootstrap/join
@@ -10,11 +10,18 @@ Features
 - Optional UFW setup with safe defaults
 
 Project layout
-- `bin/netcup-kube` – single entrypoint
+- `bin/netcup-kube` – Go CLI binary (entrypoint)
 - `bin/netcup-kube-remote` – local helper to prepare a fresh Netcup server via root password
 - `scripts/main.sh` – orchestrator and defaults
 - `scripts/lib/*.sh` – shared helpers
 - `scripts/modules/*.sh` – logical units (system, k3s, traefik, nat, dashboard, caddy, helm)
+- `cmd/netcup-kube/` – Go CLI source code
+- `internal/` – Go internal packages
+
+Building
+- The repository includes a pre-built `bin/netcup-kube` binary for Linux x86_64
+- To rebuild from source: `make build` (requires Go 1.21+)
+- The CLI delegates to shell scripts in `scripts/` for all operations
 
 Remote bootstrap from Netcup root credentials
 - On your local machine (with ssh, ssh-copy-id; optional sshpass), run one of:
