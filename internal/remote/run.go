@@ -89,8 +89,10 @@ exec "${bin}" "$@"
 	// Build command arguments for the remote runner
 	// We need to pass this as a shell command string
 	cmdParts := []string{"sudo", "-E", "bash", "-lc", shellEscape(runnerScript), "bash", remoteEnv, remoteBin}
+	
+	// Escape each user argument for safe shell execution
 	for _, arg := range opts.Args {
-		cmdParts = append(cmdParts, arg)
+		cmdParts = append(cmdParts, shellEscape(arg))
 	}
 
 	// Build the full command string

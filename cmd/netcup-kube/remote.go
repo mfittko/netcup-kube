@@ -221,7 +221,10 @@ Examples:
 		}
 
 		// Parse flags manually since we have DisableFlagParsing
-		parsedArgs, opts := parseRunArgs(args)
+		parsedArgs, opts, err := parseRunArgs(args)
+		if err != nil {
+			return err
+		}
 
 		cfg := buildRemoteConfig()
 		if err := cfg.LoadConfigFromEnv(remoteConfigPath); err != nil {
@@ -262,7 +265,7 @@ func buildRemoteConfig() *remote.Config {
 	return cfg
 }
 
-func parseRunArgs(args []string) ([]string, remote.RunOptions) {
+func parseRunArgs(args []string) ([]string, remote.RunOptions, error) {
 	opts := remote.RunOptions{
 		ForceTTY: true, // Default to TTY
 	}
@@ -282,7 +285,7 @@ func parseRunArgs(args []string) ([]string, remote.RunOptions) {
 				opts.EnvFile = args[i+1]
 				i += 2
 			} else {
-				i++
+				return nil, opts, fmt.Errorf("--env-file requires a value")
 			}
 		case "--branch":
 			if i+1 < len(args) {
@@ -292,14 +295,14 @@ func parseRunArgs(args []string) ([]string, remote.RunOptions) {
 				}
 				i += 2
 			} else {
-				i++
+				return nil, opts, fmt.Errorf("--branch requires a value")
 			}
 		case "--ref":
 			if i+1 < len(args) {
 				opts.Git.Ref = args[i+1]
 				i += 2
 			} else {
-				i++
+				return nil, opts, fmt.Errorf("--ref requires a value")
 			}
 		case "--pull":
 			opts.Git.Pull = true
@@ -321,7 +324,7 @@ func parseRunArgs(args []string) ([]string, remote.RunOptions) {
 		}
 	}
 
-	return remainingArgs, opts
+	return remainingArgs, opts, nil
 }
 
 func findProjectRoot() (string, error) {

@@ -291,12 +291,20 @@ func RemoteBuildAndUpload(client *SSHClient, cfg *Config, projectRoot string, op
 // remoteDetectGoarch detects the remote architecture
 func remoteDetectGoarch(client *SSHClient) (string, error) {
 	// Run uname -m and capture output
-	cmd := exec.Command("ssh",
+	sshArgs := []string{
 		"-o", "StrictHostKeyChecking=no",
-		"-i", client.IdentityFile,
+	}
+	
+	if client.IdentityFile != "" {
+		sshArgs = append(sshArgs, "-i", client.IdentityFile)
+	}
+	
+	sshArgs = append(sshArgs,
 		fmt.Sprintf("%s@%s", client.User, client.Host),
 		"uname", "-m",
 	)
+	
+	cmd := exec.Command("ssh", sshArgs...)
 	
 	output, err := cmd.Output()
 	if err != nil {
