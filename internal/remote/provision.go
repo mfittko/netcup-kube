@@ -59,10 +59,13 @@ func ensureRootAccess(client Client, host string, pubKeyPath string) error {
 		}
 
 		fmt.Println("Pushing SSH key to root with sshpass+ssh-copy-id")
-		cmd := execCommand("sshpass", "-p", rootPass, "ssh-copy-id",
+		// Use SSHPASS env var instead of passing the password on the command line (-p),
+		// which could be visible to other users via process listings.
+		cmd := execCommand("sshpass", "-e", "ssh-copy-id",
 			"-o", "StrictHostKeyChecking=no",
 			"-f", "-i", pubKeyPath,
 			fmt.Sprintf("root@%s", host))
+		cmd.Env = append(os.Environ(), "SSHPASS="+rootPass)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 
