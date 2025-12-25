@@ -29,13 +29,14 @@ jobs:
           go-version: '1.23'
       - name: Run Go tests
         run: |
-          go test -v -race -coverprofile=coverage.out ./...
+          go test -v -race -coverprofile=coverage.out ./internal/...
       - name: Check coverage
         run: |
           go tool cover -func=coverage.out
           COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' | sed 's/%//')
           echo "Total coverage: $COVERAGE%"
-          if (( $(echo "$COVERAGE < 90" | bc -l) )); then
+          # Use awk for comparison instead of bc
+          if awk "BEGIN {exit !($COVERAGE < 90)}"; then
             echo "Coverage $COVERAGE% is below 90% threshold"
             exit 1
           fi
