@@ -20,7 +20,7 @@ Project layout
 
 Building
 - The repository includes a pre-built `bin/netcup-kube` binary for Linux x86_64
-- To rebuild from source: `make build` (requires Go 1.21+)
+- To rebuild from source: `make build` (requires Go 1.23+)
 - The CLI delegates to shell scripts in `scripts/` for all operations
 
 Remote bootstrap from Netcup root credentials
