@@ -195,17 +195,16 @@ Examples:
   netcup-kube remote run --no-tty --env-file ./env/test.env bootstrap`,
 	DisableFlagParsing: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// Check for help flag first
-		for _, arg := range args {
-			if arg == "-h" || arg == "--help" || arg == "help" {
-				return cmd.Help()
-			}
-		}
-
 		// Parse flags manually since we have DisableFlagParsing
 		parsedArgs, opts, err := parseRunArgs(args)
 		if err != nil {
 			return err
+		}
+
+		// Only treat help as "remote run help" if it's the first remaining arg
+		// (so that `remote run dns --help` correctly forwards `--help` to netcup-kube).
+		if len(parsedArgs) == 0 || parsedArgs[0] == "-h" || parsedArgs[0] == "--help" || parsedArgs[0] == "help" {
+			return cmd.Help()
 		}
 
 		cfg, err := loadRemoteConfig()
