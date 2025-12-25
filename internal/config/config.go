@@ -22,6 +22,7 @@ func New() *Config {
 
 // LoadEnvFile loads environment variables from a file
 // Returns nil if the file doesn't exist (not an error)
+// NOTE: Values from env files are considered trusted. Ensure env files come from trusted sources only.
 func (c *Config) LoadEnvFile(path string) error {
 	file, err := os.Open(path)
 	if err != nil {
@@ -53,16 +54,16 @@ func (c *Config) LoadEnvFile(path string) error {
 		// Simple variable expansion: ${VAR} -> value of VAR
 		value = c.expandVars(value)
 		
-		// Only set if not already set (precedence: flags > env > env-file)
-		if _, exists := c.Env[key]; !exists {
-			c.Env[key] = value
-		}
+		// Set value, overriding any existing values (env-file has higher priority than process env)
+		c.Env[key] = value
 	}
 
 	return scanner.Err()
 }
 
 // LoadFromEnvironment loads environment variables from the current process
+// This includes all system environment variables. They are passed through to scripts,
+// which may rely on variables like PATH, HOME, USER, etc.
 func (c *Config) LoadFromEnvironment() {
 	for _, env := range os.Environ() {
 		parts := strings.SplitN(env, "=", 2)
@@ -73,7 +74,7 @@ func (c *Config) LoadFromEnvironment() {
 		key := parts[0]
 		value := parts[1]
 		
-		// Only set if not already set (precedence: flags > env)
+		// Only set if not already set; allows later config sources to override
 		if _, exists := c.Env[key]; !exists {
 			c.Env[key] = value
 		}
@@ -136,6 +137,13 @@ func (c *Config) expandVars(value string) string {
 		
 		result.WriteString(varValue)
 		pos = end + 1
+	}
+	
+	// If we hit the maximum iteration limit before processing the entire value,
+	// log a warning and append the remaining text without further expansion.
+	if iterations >= maxIterations && pos < len(value) {
+		fmt.Fprintf(os.Stderr, "config: variable expansion exceeded max iterations; returning partially expanded result\n")
+		result.WriteString(value[pos:])
 	}
 	
 	return result.String()

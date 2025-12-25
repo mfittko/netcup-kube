@@ -14,8 +14,8 @@ import (
 var (
 	version = "dev"
 	
-	cfg      *config.Config
-	exec     *executor.Executor
+	cfg            *config.Config
+	scriptExecutor *executor.Executor
 	
 	// Global flags
 	envFile          string
@@ -42,12 +42,15 @@ and manage worker node joins.`,
 		// Initialize config
 		cfg = config.New()
 		
-		// Load configuration in precedence order (lowest to highest priority):
-		// 1. env-file (if exists)
-		// 2. environment variables
-		// 3. command-line flags
+		// Load configuration in correct precedence order (lowest to highest priority):
+		// 1. environment variables (lowest priority)
+		// 2. env-file
+		// 3. command-line flags (highest priority)
 		
-		// Load from env file (if specified or default exists)
+		// Load from environment first
+		cfg.LoadFromEnvironment()
+		
+		// Load from env file (if specified or default exists) - this can override env vars
 		if envFile == "" {
 			// Try default location
 			homeEnvFile := filepath.Join("config", "netcup-kube.env")
@@ -62,10 +65,7 @@ and manage worker node joins.`,
 			}
 		}
 		
-		// Load from environment
-		cfg.LoadFromEnvironment()
-		
-		// Apply dry-run flags (these override everything)
+		// Apply dry-run flags last (these override everything)
 		if dryRun {
 			cfg.SetFlag("DRY_RUN", "true")
 		}
@@ -75,7 +75,7 @@ and manage worker node joins.`,
 		
 		// Initialize executor
 		var err error
-		exec, err = executor.New()
+		scriptExecutor, err = executor.New()
 		if err != nil {
 			return fmt.Errorf("failed to initialize executor: %w", err)
 		}
@@ -96,9 +96,17 @@ func init() {
 	rootCmd.AddCommand(pairCmd)
 }
 
-// filterGlobalFlags removes global flags from args and applies them to cfg
-// This is used for commands with DisableFlagParsing to manually handle global flags
+// filterGlobalFlags removes global flags from args and applies them to cfg.
+// This is used for commands with DisableFlagParsing to manually handle global flags.
+// Note: This function assumes cfg has been initialized by PersistentPreRunE.
 func filterGlobalFlags(args []string) []string {
+	if cfg == nil {
+		// This should never happen in normal flow as PersistentPreRunE runs first,
+		// but guard against it for safety
+		fmt.Fprintf(os.Stderr, "error: config not initialized\n")
+		return args
+	}
+	
 	filteredArgs := []string{}
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
@@ -134,7 +142,7 @@ Examples:
 		// Set MODE to bootstrap (though it's already the default)
 		cfg.SetFlag("MODE", "bootstrap")
 		
-		return exec.Execute("bootstrap", args, cfg.ToEnvSlice())
+		return scriptExecutor.Execute("bootstrap", args, cfg.ToEnvSlice())
 	},
 }
 
@@ -152,7 +160,7 @@ Examples:
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg.SetFlag("MODE", "join")
 		
-		return exec.Execute("join", args, cfg.ToEnvSlice())
+		return scriptExecutor.Execute("join", args, cfg.ToEnvSlice())
 	},
 }
 
@@ -182,13 +190,13 @@ Examples:
 		for _, arg := range args {
 			if arg == "-h" || arg == "--help" || arg == "help" {
 				// Pass through to the script to show its help
-				return exec.Execute("dns", args, cfg.ToEnvSlice())
+				return scriptExecutor.Execute("dns", args, cfg.ToEnvSlice())
 			}
 		}
 		
 		// Filter global flags and apply them to config
 		filteredArgs := filterGlobalFlags(args)
-		return exec.Execute("dns", filteredArgs, cfg.ToEnvSlice())
+		return scriptExecutor.Execute("dns", filteredArgs, cfg.ToEnvSlice())
 	},
 }
 
@@ -212,12 +220,12 @@ Examples:
 		for _, arg := range args {
 			if arg == "-h" || arg == "--help" || arg == "help" {
 				// Pass through to the script to show its help
-				return exec.Execute("pair", args, cfg.ToEnvSlice())
+				return scriptExecutor.Execute("pair", args, cfg.ToEnvSlice())
 			}
 		}
 		
 		// Filter global flags and apply them to config
 		filteredArgs := filterGlobalFlags(args)
-		return exec.Execute("pair", filteredArgs, cfg.ToEnvSlice())
+		return scriptExecutor.Execute("pair", filteredArgs, cfg.ToEnvSlice())
 	},
 }

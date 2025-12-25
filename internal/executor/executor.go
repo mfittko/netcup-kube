@@ -51,6 +51,14 @@ func New() (*Executor, error) {
 
 // Execute runs a command by delegating to scripts/main.sh
 func (e *Executor) Execute(command string, args []string, env []string) error {
+	// Validate that the script exists and is accessible
+	if _, err := os.Stat(e.scriptPath); err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("script not found: %s (ensure you're running from the project directory or the binary is in the correct location)", e.scriptPath)
+		}
+		return fmt.Errorf("cannot access script %s: %w", e.scriptPath, err)
+	}
+	
 	// Build the command
 	cmd := exec.Command("bash", e.scriptPath, command)
 	
