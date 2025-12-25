@@ -24,7 +24,7 @@ The `netcup-kube` project provides four primary CLI entrypoints:
 
 1. **`netcup-kube`** — Main orchestrator for k3s cluster bootstrapping and configuration
 2. **`netcup-kube-install`** — Recipe dispatcher for installing optional components
-3. **`netcup-kube-remote`** — Remote bootstrap and command execution helper
+3. **`netcup-kube remote`** — Remote bootstrap and command execution
 4. **`netcup-kube-tunnel`** — SSH tunnel manager for local kubectl access
 
 All scripts follow bash `set -euo pipefail` semantics: they exit on any error, undefined variable access, or pipeline failure.
@@ -95,20 +95,20 @@ netcup-kube-install <recipe> [recipe-options]
 
 ---
 
-### 3. `netcup-kube-remote`
-
-**Location:** `bin/netcup-kube-remote`
+### 3. `netcup-kube remote`
 
 **Purpose:** Provision remote hosts and execute `netcup-kube` commands remotely.
 
 **Usage:**
 ```bash
-netcup-kube-remote [<host-or-ip>] [--user <name>] [--pubkey <path>] [--repo <url>] [--config <path>] <command> [command-options]
+netcup-kube remote [--host <host-or-ip>] [--user <name>] [--pubkey <path>] [--repo <url>] [--config <path>] <command> [command-options]
 ```
 
 **Commands:**
 - `provision` — Prepare target host (sudo user + repo clone/update)
 - `git` — Remote git control (checkout/pull branch/ref)
+- `build` — Cross-compile and upload `bin/netcup-kube` to the remote repo
+- `smoke` — Run DRY_RUN smoke tests remotely (builds/uploads first)
 - `run` — Run a netcup-kube command on target host (forces TTY by default)
 
 **Common Options:**
@@ -126,7 +126,7 @@ netcup-kube-remote [<host-or-ip>] [--user <name>] [--pubkey <path>] [--repo <url
 
 **Command: `git`**
 ```bash
-netcup-kube-remote git [--branch <name>] [--ref <ref>] [--pull|--no-pull]
+netcup-kube remote git [--branch <name>] [--ref <ref>] [--pull|--no-pull]
 ```
 - `--branch <name>` — Checkout branch (auto-enables `--pull` unless `--no-pull` specified)
 - `--ref <ref>` — Checkout specific ref/commit (detached HEAD)
@@ -135,7 +135,7 @@ netcup-kube-remote git [--branch <name>] [--ref <ref>] [--pull|--no-pull]
 
 **Command: `run`**
 ```bash
-netcup-kube-remote run [--no-tty] [--env-file <path>] [--branch <name>] [--ref <ref>] [--pull|--no-pull] [--] <netcup-kube-args...>
+netcup-kube remote run [--no-tty] [--env-file <path>] [--branch <name>] [--ref <ref>] [--pull|--no-pull] [--] <netcup-kube-args...>
 ```
 - `--no-tty` — Disable forced TTY (default: forces TTY so prompts work)
 - `--env-file <path>` — Copy env file to remote and source before running command
@@ -650,7 +650,7 @@ These elements define the public CLI contract and **must not change** without a 
 1. **Command Names and Hierarchy**
    - `netcup-kube bootstrap|join|dns|pair|help`
    - `netcup-kube-install <recipe>`
-   - `netcup-kube-remote provision|git|run`
+   - `netcup-kube remote provision|git|run`
    - `netcup-kube-tunnel start|stop|status`
 
 2. **Required Arguments**
@@ -692,7 +692,7 @@ These elements define the public CLI contract and **must not change** without a 
    - TTY detection mechanism (stdin/stdout or `/dev/tty`)
    - Non-TTY mode returns defaults without prompting
    - `DRY_RUN=true` logs commands without executing
-   - `netcup-kube-remote run` forces TTY by default (unless `--no-tty`)
+   - `netcup-kube remote run` forces TTY by default (unless `--no-tty`)
    - `netcup-kube-install` auto-fetches kubeconfig and starts tunnel if needed
 
 ### May Change (Non-Breaking Enhancements)
@@ -781,7 +781,7 @@ To validate compatibility between bash and Go implementations:
 5. **Flag Parsing Tests**
    - Test both `--flag value` and `--flag=value` formats
    - Test flag ordering (before and after positional args)
-   - Test `--` separator for `netcup-kube-remote run`
+   - Test `--` separator for `netcup-kube remote run`
 
 6. **Exit Code Tests**
    - Verify exit code `0` on success
@@ -824,7 +824,7 @@ To validate compatibility between bash and Go implementations:
    - Set permissions atomically when creating files
 
 8. **SSH Integration**
-   - `netcup-kube-remote`: May use `os/exec` to shell out to `ssh`/`scp` commands
+   - `netcup-kube remote`: May use `os/exec` to shell out to `ssh`/`scp` commands
    - `netcup-kube-tunnel`: Use SSH ControlMaster via `ssh` command (or native Go SSH library)
 
 ---

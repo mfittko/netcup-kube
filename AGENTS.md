@@ -12,7 +12,7 @@ Agents
 
 1) Provisioning Agent
 - Purpose: Prepare a fresh Netcup Debian 13 host from root credentials, create sudo user, set up SSH keys, and clone the repo.
-- Primary files: bin/netcup-kube-remote, scripts/modules/system.sh
+- Primary files: cmd/netcup-kube/remote.go, internal/remote/*, scripts/modules/system.sh
 - Start prompt:
   - Ensure passwordless SSH for root or instruct user to run ssh-copy-id.
   - Install sudo, git, curl; create sudo user with authorized_keys.

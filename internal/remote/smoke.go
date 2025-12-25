@@ -7,7 +7,15 @@ import (
 
 // Smoke runs a safe DRY_RUN smoke test on the remote management node
 func Smoke(cfg *Config, opts GitOptions, projectRoot string) error {
+	if cfg == nil || cfg.Host == "" {
+		return fmt.Errorf("missing host")
+	}
+
 	client := NewSSHClient(cfg.Host, cfg.User)
+	return smokeWithClient(client, cfg, opts, projectRoot)
+}
+
+func smokeWithClient(client Client, cfg *Config, opts GitOptions, projectRoot string) error {
 
 	// Ensure user access and repo exists
 	if err := client.TestConnection(); err != nil {
@@ -76,7 +84,7 @@ func Smoke(cfg *Config, opts GitOptions, projectRoot string) error {
 			Args:     test.args,
 		}
 
-		if err := Run(cfg, runOpts); err != nil {
+		if err := runWithClient(client, cfg, runOpts); err != nil {
 			return fmt.Errorf("smoke test '%s' failed: %w", test.name, err)
 		}
 	}

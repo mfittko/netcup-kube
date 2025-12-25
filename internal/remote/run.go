@@ -3,7 +3,6 @@ package remote
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 )
 
@@ -12,6 +11,10 @@ func Run(cfg *Config, opts RunOptions) error {
 	// Create user SSH client
 	client := NewSSHClient(cfg.Host, cfg.User)
 
+	return runWithClient(client, cfg, opts)
+}
+
+func runWithClient(client Client, cfg *Config, opts RunOptions) error {
 	// Ensure user access
 	if err := ensureUserAccess(client, cfg); err != nil {
 		return err
@@ -101,32 +104,11 @@ exec "${bin}" "$@"
 	fmt.Printf("[local] Running on %s@%s: netcup-kube %s\n", cfg.User, cfg.Host, 
 		joinArgs(opts.Args))
 
-	// Execute the command via SSH
-	sshArgs := []string{
-		"-o", "StrictHostKeyChecking=no",
-	}
-
-	if client.IdentityFile != "" {
-		sshArgs = append(sshArgs, "-i", client.IdentityFile)
-	}
-
-	if opts.ForceTTY {
-		sshArgs = append(sshArgs, "-tt")
-	}
-
-	target := fmt.Sprintf("%s@%s", client.User, client.Host)
-	sshArgs = append(sshArgs, target, cmdString)
-
-	cmd := exec.Command("ssh", sshArgs...)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	return cmd.Run()
+	return client.RunCommandString(cmdString, opts.ForceTTY)
 }
 
 // ensureUserAccess checks if we can SSH as the user
-func ensureUserAccess(client *SSHClient, cfg *Config) error {
+func ensureUserAccess(client Client, cfg *Config) error {
 	if err := client.TestConnection(); err == nil {
 		return nil
 	}
@@ -137,7 +119,7 @@ Run provisioning first (uses root once):
 }
 
 // ensureRemoteRepo checks if the remote repository exists
-func ensureRemoteRepo(client *SSHClient, cfg *Config) error {
+func ensureRemoteRepo(client Client, cfg *Config) error {
 	repoDir := cfg.GetRemoteRepoDir()
 	if err := client.Execute("test", []string{"-d", repoDir}, false); err == nil {
 		return nil
@@ -149,7 +131,7 @@ Run provisioning first:
 }
 
 // cleanupRemoteEnv removes the temporary env file from the remote host
-func cleanupRemoteEnv(client *SSHClient, remoteEnv string, forceTTY bool) {
+func cleanupRemoteEnv(client Client, remoteEnv string, forceTTY bool) {
 	if remoteEnv == "__NONE__" {
 		return
 	}

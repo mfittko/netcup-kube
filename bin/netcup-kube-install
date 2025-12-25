@@ -171,7 +171,7 @@ RECIPE_EXIT_CODE=$?
 if [[ ${RECIPE_EXIT_CODE} -eq 0 && -n "${HOST_ARG}" && "${HOST_ARG}" != "__NEXT__" ]]; then
   # Only do this when running locally (not on the server)
   if [[ ! -f "/etc/caddy/Caddyfile" ]]; then
-    REMOTE_WRAPPER="${PROJECT_ROOT}/bin/netcup-kube-remote"
+    REMOTE_WRAPPER="${PROJECT_ROOT}/bin/netcup-kube remote"
     if [[ -x "${REMOTE_WRAPPER}" ]]; then
       echo ""
       echo "Adding ${HOST_ARG} to Caddy edge-http domains..."
@@ -187,7 +187,7 @@ EOF
         echo "✓ Domain added successfully!"
       else
         echo "⚠ Failed to add domain automatically. Run manually:"
-        echo "  CONFIRM=true bin/netcup-kube-remote run --no-tty dns --type edge-http --add-domains \"${HOST_ARG}\""
+        echo "  CONFIRM=true bin/netcup-kube remote run --no-tty dns --type edge-http --add-domains \"${HOST_ARG}\""
       fi
     fi
   fi

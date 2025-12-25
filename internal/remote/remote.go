@@ -8,6 +8,25 @@ import (
 	"strings"
 )
 
+var (
+	execCommand = exec.Command
+	lookPath = exec.LookPath
+	mkdirTemp = os.MkdirTemp
+	removeAll = os.RemoveAll
+	localGoBuild = func(projectRoot, out, goarch string) error {
+		cmd := execCommand("go", "build", "-o", out, "./cmd/netcup-kube")
+		cmd.Dir = projectRoot
+		cmd.Env = append(os.Environ(),
+			"CGO_ENABLED=0",
+			"GOOS=linux",
+			fmt.Sprintf("GOARCH=%s", goarch),
+		)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		return cmd.Run()
+	}
+)
+
 const (
 	defaultUser     = "cubeadmin"
 	defaultRepoURL  = "https://github.com/mfittko/netcup-kube.git"
@@ -153,7 +172,7 @@ func getHostname() string {
 }
 
 // RemoteGitSync synchronizes the remote repository
-func RemoteGitSync(client *SSHClient, repoDir string, opts GitOptions) error {
+func RemoteGitSync(client Client, repoDir string, opts GitOptions) error {
 	branch := opts.Branch
 	ref := opts.Ref
 	pull := opts.Pull
@@ -221,7 +240,7 @@ fi
 }
 
 // RemoteBuildAndUpload builds the Go binary locally and uploads it to the remote host
-func RemoteBuildAndUpload(client *SSHClient, cfg *Config, projectRoot string, opts GitOptions) error {
+func RemoteBuildAndUpload(client Client, cfg *Config, projectRoot string, opts GitOptions) error {
 	// Sync git if requested
 	if opts.Branch != "" || opts.Ref != "" || opts.Pull {
 		if err := RemoteGitSync(client, cfg.GetRemoteRepoDir(), opts); err != nil {
@@ -230,7 +249,7 @@ func RemoteBuildAndUpload(client *SSHClient, cfg *Config, projectRoot string, op
 	}
 
 	// Check for local go toolchain
-	if _, err := exec.LookPath("go"); err != nil {
+	if _, err := lookPath("go"); err != nil {
 		return fmt.Errorf("missing local 'go' toolchain. Install Go 1.23+ and retry")
 	}
 
@@ -241,33 +260,23 @@ func RemoteBuildAndUpload(client *SSHClient, cfg *Config, projectRoot string, op
 	}
 
 	// Build locally
-	tmpDir, err := os.MkdirTemp("", "netcup-kube")
+	tmpDir, err := mkdirTemp("", "netcup-kube")
 	if err != nil {
 		return fmt.Errorf("failed to create temp dir: %w", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer removeAll(tmpDir)
 
 	out := filepath.Join(tmpDir, "netcup-kube")
 	fmt.Printf("[local] Building netcup-kube for linux/%s\n", goarch)
 
-	cmd := exec.Command("go", "build", "-o", out, "./cmd/netcup-kube")
-	cmd.Dir = projectRoot
-	cmd.Env = append(os.Environ(),
-		"CGO_ENABLED=0",
-		"GOOS=linux",
-		fmt.Sprintf("GOARCH=%s", goarch),
-	)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	if err := cmd.Run(); err != nil {
+	if err := localGoBuild(projectRoot, out, goarch); err != nil {
 		return fmt.Errorf("build failed: %w", err)
 	}
 
 	remoteBin := cfg.GetRemoteBinPath()
 	remoteBinDir := filepath.Dir(remoteBin)
 
-	fmt.Printf("[local] Uploading %s to %s@%s:%s\n", out, client.User, client.Host, remoteBin)
+	fmt.Printf("[local] Uploading %s to %s@%s:%s\n", out, cfg.User, cfg.Host, remoteBin)
 
 	// Create remote bin directory
 	if err := client.Execute("install", []string{"-d", "-m", "0755", remoteBinDir}, false); err != nil {
@@ -289,24 +298,8 @@ func RemoteBuildAndUpload(client *SSHClient, cfg *Config, projectRoot string, op
 }
 
 // remoteDetectGoarch detects the remote architecture
-func remoteDetectGoarch(client *SSHClient) (string, error) {
-	// Run uname -m and capture output
-	sshArgs := []string{
-		"-o", "StrictHostKeyChecking=no",
-	}
-	
-	if client.IdentityFile != "" {
-		sshArgs = append(sshArgs, "-i", client.IdentityFile)
-	}
-	
-	sshArgs = append(sshArgs,
-		fmt.Sprintf("%s@%s", client.User, client.Host),
-		"uname", "-m",
-	)
-	
-	cmd := exec.Command("ssh", sshArgs...)
-	
-	output, err := cmd.Output()
+func remoteDetectGoarch(client Client) (string, error) {
+	output, err := client.OutputCommand("uname", []string{"-m"})
 	if err != nil {
 		return "", fmt.Errorf("failed to detect remote architecture: %w", err)
 	}

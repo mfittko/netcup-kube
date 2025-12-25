@@ -22,8 +22,8 @@ func TestJoinArgs(t *testing.T) {
 		},
 		{
 			name: "args with spaces",
-			args: []string{"dns", "--domains", "kube.example.com,app.example.com"},
-			want: "dns --domains kube.example.com,app.example.com",
+			args: []string{"dns", "--domains", "kube.example.com,app.example.com", "--note", "hello world"},
+			want: "dns --domains kube.example.com,app.example.com --note \"hello world\"",
 		},
 		{
 			name: "empty args",

@@ -40,8 +40,8 @@ recipe_maybe_add_edge_http_domain() {
     fi
   else
     echo "  From your laptop:"
-    echo "    bin/netcup-kube-remote run dns --show --type edge-http --format csv  # to see current list"
-    echo "    bin/netcup-kube-remote run dns --type edge-http --add-domains \"${host}\""
+    echo "    bin/netcup-kube remote dns --show --type edge-http --format csv  # to see current list"
+    echo "    bin/netcup-kube remote dns --type edge-http --add-domains \"${host}\""
   fi
 }
 

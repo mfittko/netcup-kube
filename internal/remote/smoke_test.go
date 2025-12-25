@@ -91,4 +91,7 @@ func TestSmoke_InvalidConfig(t *testing.T) {
 	if err == nil {
 		t.Error("Smoke should fail with missing host")
 	}
+	if err != nil && !strings.Contains(err.Error(), "missing host") {
+		t.Fatalf("expected missing host error, got: %v", err)
+	}
 }

@@ -27,3 +27,6 @@ coverage.html
 
 # temp
 tmp/
+
+# cache
+.gocache

@@ -11,7 +11,6 @@ Features
 
 Project layout
 - `bin/netcup-kube` – Go CLI binary (entrypoint)
-- `bin/netcup-kube-remote` – local helper to prepare a fresh Netcup server via root password
 - `scripts/main.sh` – orchestrator and defaults
 - `scripts/lib/*.sh` – shared helpers
 - `scripts/modules/*.sh` – logical units (system, k3s, traefik, nat, dashboard, caddy, helm)
@@ -24,28 +23,19 @@ Building
 - The CLI delegates to shell scripts in `scripts/` for all operations
 
 Remote bootstrap from Netcup root credentials
-- On your local machine (with ssh, ssh-copy-id; optional sshpass), run one of:
-  1) Secure prompt (recommended, requires sshpass): `./bin/netcup-kube-remote <host-or-ip>`
-     - You will be prompted for the root password without echo.
-  2) Pre-set env var without echo:
-     - `read -r -s ROOT_PASS; export ROOT_PASS; ./bin/netcup-kube-remote <host-or-ip>`
-- Flags: `--user <name>` (default cubeadmin), `--pubkey <path>` to pick a specific public key
-- The helper will:
-  1) Push your SSH public key to root@<host> (uses sshpass if available)
-  2) Install git/sudo
-  3) Create a sudo-enabled user, set up authorized_keys
-  4) Clone this repo on the server for that user
-- Then SSH to the server as the new user and run `sudo ~/netcup-kube/bin/netcup-kube bootstrap`.
+- Use the Go CLI subcommand: `./bin/netcup-kube remote`
+- Examples:
+  - `./bin/netcup-kube remote --host <host-or-ip> provision`
+  - `./bin/netcup-kube remote --host <host-or-ip> build`
+  - `./bin/netcup-kube remote --host <host-or-ip> run bootstrap`
 
-Remote update + CLI build (recommended now that the binary is not committed)
+Remote update + CLI build
 - Update the remote repo to the latest branch/ref:
-  - `./bin/netcup-kube-remote <host-or-ip> --user <name> git --branch main --pull`
+  - `./bin/netcup-kube remote --host <host-or-ip> --user <name> git --branch main --pull`
 - Build the Go CLI for the remote host and upload it into the repo (`~/netcup-kube/bin/netcup-kube`):
-  - `./bin/netcup-kube-remote <host-or-ip> --user <name> build`
-  - This **cross-compiles locally** for the remote host (linux/amd64 or linux/arm64) and copies the binary over SSH.
-- Run a safe live smoke test on the management node before merging (non-destructive, uses `DRY_RUN=true`):
-  - `./bin/netcup-kube-remote <host-or-ip> --user <name> smoke`
-  - This will upload the binary (if needed) and then run `--help`, plus `bootstrap` and `join` in DRY_RUN mode.
+  - `./bin/netcup-kube remote --host <host-or-ip> --user <name> build`
+- Run a safe live smoke test on the management node (non-destructive, uses `DRY_RUN=true`):
+  - `./bin/netcup-kube remote --host <host-or-ip> --user <name> smoke`
 
 Quick start (on the target Debian 13 server)
 1) Copy the repo (or just `bin/netcup-kube` + `scripts/` folder) to the server

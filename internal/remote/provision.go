@@ -3,7 +3,6 @@ package remote
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 )
 
@@ -25,7 +24,7 @@ func Provision(cfg *Config) error {
 
 	// Ensure root access
 	fmt.Printf("Testing SSH access to root@%s...\n", cfg.Host)
-	if err := ensureRootAccess(rootClient, pubKeyPath); err != nil {
+	if err := ensureRootAccess(rootClient, cfg.Host, pubKeyPath); err != nil {
 		return err
 	}
 
@@ -41,29 +40,29 @@ func Provision(cfg *Config) error {
 }
 
 // ensureRootAccess ensures we can SSH to root, copying keys if needed
-func ensureRootAccess(client *SSHClient, pubKeyPath string) error {
+func ensureRootAccess(client Client, host string, pubKeyPath string) error {
 	// Test if we already have access
 	if err := client.TestConnection(); err == nil {
-		fmt.Printf("SSH key already works for root@%s\n", client.Host)
+		fmt.Printf("SSH key already works for root@%s\n", host)
 		return nil
 	}
 
 	// Check if sshpass is available for password auth
-	if _, err := exec.LookPath("sshpass"); err == nil {
+	if _, err := lookPath("sshpass"); err == nil {
 		// Try to use sshpass
 		rootPass := os.Getenv("ROOT_PASS")
 		if rootPass == "" {
-			fmt.Printf("Root password for root@%s: ", client.Host)
+			fmt.Printf("Root password for root@%s: ", host)
 			// Note: In production, use a proper password input method
 			// For now, we'll just read from environment or fail
 			return fmt.Errorf("ROOT_PASS environment variable not set")
 		}
 
 		fmt.Println("Pushing SSH key to root with sshpass+ssh-copy-id")
-		cmd := exec.Command("sshpass", "-p", rootPass, "ssh-copy-id",
+		cmd := execCommand("sshpass", "-p", rootPass, "ssh-copy-id",
 			"-o", "StrictHostKeyChecking=no",
 			"-f", "-i", pubKeyPath,
-			fmt.Sprintf("root@%s", client.Host))
+			fmt.Sprintf("root@%s", host))
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 
@@ -80,7 +79,7 @@ func ensureRootAccess(client *SSHClient, pubKeyPath string) error {
 	return fmt.Errorf(`passwordless SSH for root not set up yet.
 Install sshpass to allow password authentication, or run:
   ssh-copy-id -o StrictHostKeyChecking=no -i %s root@%s
-Then re-run the provision command.`, pubKeyPath, client.Host)
+Then re-run the provision command.`, pubKeyPath, host)
 }
 
 // buildProvisionScript creates the provisioning script

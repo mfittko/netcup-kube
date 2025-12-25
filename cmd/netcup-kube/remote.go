@@ -22,8 +22,7 @@ var remoteCmd = &cobra.Command{
 	Short: "Execute commands on remote hosts",
 	Long: `Remote execution engine for netcup-kube.
 
-Replaces the shell-based bin/netcup-kube-remote with Go implementation
-for safer, more reliable remote operations.`,
+Remote execution engine for safer, more reliable remote operations.`,
 	SilenceUsage: true,
 }
 

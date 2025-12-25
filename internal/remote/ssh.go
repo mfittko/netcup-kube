@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 )
@@ -63,7 +62,7 @@ func (c *SSHClient) ExecuteWithEnv(command string, args []string, env map[string
 	remoteCmd := c.buildRemoteCommand(command, args, env)
 	sshArgs = append(sshArgs, remoteCmd)
 
-	cmd := exec.Command("ssh", sshArgs...)
+	cmd := execCommand("ssh", sshArgs...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -86,7 +85,7 @@ func (c *SSHClient) ExecuteScript(script string, args []string) error {
 
 	sshArgs = append(sshArgs, args...)
 
-	cmd := exec.Command("ssh", sshArgs...)
+	cmd := execCommand("ssh", sshArgs...)
 	cmd.Stdin = strings.NewReader(script)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -107,7 +106,7 @@ func (c *SSHClient) Upload(localPath, remotePath string) error {
 	target := fmt.Sprintf("%s@%s:%s", c.User, c.Host, remotePath)
 	scpArgs = append(scpArgs, localPath, target)
 
-	cmd := exec.Command("scp", scpArgs...)
+	cmd := execCommand("scp", scpArgs...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
@@ -128,11 +127,53 @@ func (c *SSHClient) TestConnection() error {
 	target := fmt.Sprintf("%s@%s", c.User, c.Host)
 	sshArgs = append(sshArgs, target, "true")
 
-	cmd := exec.Command("ssh", sshArgs...)
+	cmd := execCommand("ssh", sshArgs...)
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard
 
 	return cmd.Run()
+}
+
+// RunCommandString executes a raw remote shell command string via ssh.
+func (c *SSHClient) RunCommandString(cmdString string, forceTTY bool) error {
+	sshArgs := []string{
+		"-o", "StrictHostKeyChecking=no",
+	}
+
+	if c.IdentityFile != "" {
+		sshArgs = append(sshArgs, "-i", c.IdentityFile)
+	}
+
+	if forceTTY {
+		sshArgs = append(sshArgs, "-tt")
+	}
+
+	target := fmt.Sprintf("%s@%s", c.User, c.Host)
+	sshArgs = append(sshArgs, target, cmdString)
+
+	cmd := execCommand("ssh", sshArgs...)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+// OutputCommand runs a remote command via ssh and returns stdout.
+func (c *SSHClient) OutputCommand(command string, args []string) ([]byte, error) {
+	sshArgs := []string{
+		"-o", "StrictHostKeyChecking=no",
+	}
+
+	if c.IdentityFile != "" {
+		sshArgs = append(sshArgs, "-i", c.IdentityFile)
+	}
+
+	target := fmt.Sprintf("%s@%s", c.User, c.Host)
+	sshArgs = append(sshArgs, target, command)
+	sshArgs = append(sshArgs, args...)
+
+	cmd := execCommand("ssh", sshArgs...)
+	return cmd.Output()
 }
 
 // buildRemoteCommand constructs a properly escaped remote command
