@@ -42,5 +42,5 @@ go-deps:
 	$(GO_MOD) download
 	$(GO_MOD) tidy
 
-test:
+test: build-go
 	./tests/integration/run.sh

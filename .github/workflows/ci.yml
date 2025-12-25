@@ -49,6 +49,13 @@ jobs:
     needs: [lint, go-test]
     steps:
       - uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+      - name: Build netcup-kube binary for integration tests
+        run: |
+          make build-go
       - name: Run Docker smoke test (Debian 13)
         run: |
           chmod +x tests/integration/run.sh tests/integration/smoke.sh
