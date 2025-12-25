@@ -96,6 +96,28 @@ func init() {
 	rootCmd.AddCommand(pairCmd)
 }
 
+// filterGlobalFlags removes global flags from args and applies them to cfg
+// This is used for commands with DisableFlagParsing to manually handle global flags
+func filterGlobalFlags(args []string) []string {
+	filteredArgs := []string{}
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--dry-run" {
+			cfg.SetFlag("DRY_RUN", "true")
+		} else if arg == "--dry-run-write-files" {
+			cfg.SetFlag("DRY_RUN_WRITE_FILES", "true")
+		} else if arg == "--env-file" && i+1 < len(args) {
+			// Skip --env-file and its value (already handled in PreRunE)
+			i++
+		} else if strings.HasPrefix(arg, "--env-file=") {
+			// Skip --env-file=value (already handled in PreRunE)
+		} else {
+			filteredArgs = append(filteredArgs, arg)
+		}
+	}
+	return filteredArgs
+}
+
 var bootstrapCmd = &cobra.Command{
 	Use:   "bootstrap",
 	Short: "Install and configure k3s server + Traefik NodePort + optional Caddy & Dashboard",
@@ -164,23 +186,8 @@ Examples:
 			}
 		}
 		
-		// When DisableFlagParsing is true, we need to manually handle our global flags
-		filteredArgs := []string{}
-		for i := 0; i < len(args); i++ {
-			arg := args[i]
-			if arg == "--dry-run" {
-				cfg.SetFlag("DRY_RUN", "true")
-			} else if arg == "--dry-run-write-files" {
-				cfg.SetFlag("DRY_RUN_WRITE_FILES", "true")
-			} else if arg == "--env-file" && i+1 < len(args) {
-				// Skip --env-file and its value (already handled in PreRunE)
-				i++
-			} else if strings.HasPrefix(arg, "--env-file=") {
-				// Skip --env-file=value (already handled in PreRunE)
-			} else {
-				filteredArgs = append(filteredArgs, arg)
-			}
-		}
+		// Filter global flags and apply them to config
+		filteredArgs := filterGlobalFlags(args)
 		return exec.Execute("dns", filteredArgs, cfg.ToEnvSlice())
 	},
 }
@@ -209,23 +216,8 @@ Examples:
 			}
 		}
 		
-		// When DisableFlagParsing is true, we need to manually handle our global flags
-		filteredArgs := []string{}
-		for i := 0; i < len(args); i++ {
-			arg := args[i]
-			if arg == "--dry-run" {
-				cfg.SetFlag("DRY_RUN", "true")
-			} else if arg == "--dry-run-write-files" {
-				cfg.SetFlag("DRY_RUN_WRITE_FILES", "true")
-			} else if arg == "--env-file" && i+1 < len(args) {
-				// Skip --env-file and its value (already handled in PreRunE)
-				i++
-			} else if strings.HasPrefix(arg, "--env-file=") {
-				// Skip --env-file=value (already handled in PreRunE)
-			} else {
-				filteredArgs = append(filteredArgs, arg)
-			}
-		}
+		// Filter global flags and apply them to config
+		filteredArgs := filterGlobalFlags(args)
 		return exec.Execute("pair", filteredArgs, cfg.ToEnvSlice())
 	},
 }

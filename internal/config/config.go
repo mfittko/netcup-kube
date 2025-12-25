@@ -9,10 +9,6 @@ import (
 
 // Config holds the configuration for netcup-kube commands
 type Config struct {
-	// Common flags
-	DryRun          bool
-	DryRunWriteFiles bool
-	
 	// Environment variables to pass to scripts
 	Env map[string]string
 }
@@ -98,22 +94,37 @@ func (c *Config) SetFlag(key, value string) {
 
 // expandVars performs simple variable expansion for ${VAR} syntax
 func (c *Config) expandVars(value string) string {
-	result := value
+	var result strings.Builder
+	result.Grow(len(value)) // Pre-allocate capacity
+	
+	pos := 0
+	iterations := 0
+	maxIterations := 100 // Safety limit to prevent infinite loops
 	
 	// Simple expansion: ${VAR}
-	for {
-		start := strings.Index(result, "${")
+	for pos < len(value) && iterations < maxIterations {
+		iterations++
+		
+		start := strings.Index(value[pos:], "${")
 		if start == -1 {
+			// No more variables, append the rest
+			result.WriteString(value[pos:])
 			break
 		}
+		start += pos
 		
-		end := strings.Index(result[start:], "}")
+		// Append text before the variable
+		result.WriteString(value[pos:start])
+		
+		end := strings.Index(value[start+2:], "}")
 		if end == -1 {
+			// Malformed variable reference, append as-is and continue
+			result.WriteString(value[start:])
 			break
 		}
-		end += start
+		end += start + 2
 		
-		varName := result[start+2 : end]
+		varName := value[start+2 : end]
 		
 		// Look up the variable value
 		varValue := ""
@@ -123,10 +134,11 @@ func (c *Config) expandVars(value string) string {
 			varValue = val
 		}
 		
-		result = result[:start] + varValue + result[end+1:]
+		result.WriteString(varValue)
+		pos = end + 1
 	}
 	
-	return result
+	return result.String()
 }
 
 // ToEnvSlice converts the config to a slice of "KEY=value" strings

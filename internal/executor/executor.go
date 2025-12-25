@@ -1,6 +1,7 @@
 package executor
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -68,10 +69,12 @@ func (e *Executor) Execute(command string, args []string, env []string) error {
 	
 	// Run the command
 	if err := cmd.Run(); err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
 			// Preserve the exit code from the script
 			os.Exit(exitErr.ExitCode())
 		}
+		// For other types of errors, return them
 		return fmt.Errorf("failed to execute command: %w", err)
 	}
 	
