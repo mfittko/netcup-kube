@@ -94,6 +94,28 @@ DEFAULT_USER=admin
 			}
 		})
 	}
+
+	// Covers MGMT_IP fallback and ${DEFAULT_USER} expansion (MGMT_USER=${DEFAULT_USER})
+	ipOnlyPath := filepath.Join(tmpDir, "ip-only.env")
+	ipOnlyContent := `DEFAULT_USER=ops
+MGMT_HOST=
+MGMT_IP=1.2.3.4
+MGMT_USER=${DEFAULT_USER}
+`
+	if err := os.WriteFile(ipOnlyPath, []byte(ipOnlyContent), 0644); err != nil {
+		t.Fatalf("Failed to create ip-only config: %v", err)
+	}
+
+	cfg := NewConfig()
+	if err := cfg.LoadConfigFromEnv(ipOnlyPath); err != nil {
+		t.Fatalf("LoadConfigFromEnv(ip-only) error = %v", err)
+	}
+	if cfg.Host != "1.2.3.4" {
+		t.Fatalf("Host = %s, want %s", cfg.Host, "1.2.3.4")
+	}
+	if cfg.User != "ops" {
+		t.Fatalf("User = %s, want %s", cfg.User, "ops")
+	}
 }
 
 func TestGetPubKey(t *testing.T) {
