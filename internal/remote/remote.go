@@ -6,6 +6,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/mfittko/netcup-kube/internal/config"
 )
 
 var (
@@ -73,30 +75,12 @@ func (c *Config) LoadConfigFromEnv(configPath string) error {
 		return nil
 	}
 
-	// Read the config file to extract MGMT_HOST/MGMT_IP and MGMT_USER/DEFAULT_USER
-	content, err := os.ReadFile(configPath)
-	if err != nil {
+	// Use the shared env-file parser (supports ${VAR} expansion like MGMT_USER=${DEFAULT_USER})
+	loader := config.New()
+	if err := loader.LoadEnvFile(configPath); err != nil {
 		return err
 	}
-
-	lines := strings.Split(string(content), "\n")
-	vars := make(map[string]string)
-	
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		
-		parts := strings.SplitN(line, "=", 2)
-		if len(parts) == 2 {
-			key := strings.TrimSpace(parts[0])
-			value := strings.TrimSpace(parts[1])
-			// Remove quotes if present
-			value = strings.Trim(value, "\"'")
-			vars[key] = value
-		}
-	}
+	vars := loader.Env
 
 	// Set host if not already set
 	if c.Host == "" {

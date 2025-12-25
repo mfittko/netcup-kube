@@ -138,6 +138,9 @@ var (
 	gitPull   bool
 	runNoTTY  bool
 	runEnvFile string
+	runBranch string
+	runRef    string
+	runPull   bool
 )
 
 var remoteSmokeCmd = &cobra.Command{
@@ -192,27 +195,36 @@ Examples:
   netcup-kube remote run pair
   netcup-kube remote run --env-file ./config/netcup-kube.env bootstrap
   netcup-kube remote run --branch main --pull bootstrap
-  netcup-kube remote run --no-tty --env-file ./env/test.env bootstrap`,
-	DisableFlagParsing: true,
+  netcup-kube remote run --no-tty --env-file ./env/test.env bootstrap
+  netcup-kube remote run -- dns --help`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// Parse flags manually since we have DisableFlagParsing
-		parsedArgs, opts, err := parseRunArgs(args)
-		if err != nil {
-			return err
-		}
-
-		// Only treat help as "remote run help" if it's the first remaining arg
-		// (so that `remote run dns --help` correctly forwards `--help` to netcup-kube).
-		if len(parsedArgs) == 0 || parsedArgs[0] == "-h" || parsedArgs[0] == "--help" || parsedArgs[0] == "help" {
-			return cmd.Help()
-		}
-
 		cfg, err := loadRemoteConfig()
 		if err != nil {
 			return err
 		}
 
-		opts.Args = parsedArgs
+		pullIsSet := cmd.Flags().Changed("pull") || cmd.Flags().Changed("no-pull")
+		if runBranch != "" && !pullIsSet {
+			runPull = true
+		}
+
+		opts := remote.RunOptions{
+			ForceTTY: !runNoTTY,
+			EnvFile:  runEnvFile,
+			Git: remote.GitOptions{
+				Branch:    runBranch,
+				Ref:       runRef,
+				Pull:      runPull,
+				PullIsSet: pullIsSet,
+			},
+			Args: args,
+		}
+
+		// If no args (or user asked for run help), show help for this subcommand.
+		if len(opts.Args) == 0 || opts.Args[0] == "-h" || opts.Args[0] == "--help" || opts.Args[0] == "help" {
+			return cmd.Help()
+		}
+
 		return remote.Run(cfg, opts)
 	},
 }
@@ -251,68 +263,6 @@ func buildRemoteConfig() *remote.Config {
 	cfg.ConfigPath = remoteConfigPath
 
 	return cfg
-}
-
-func parseRunArgs(args []string) ([]string, remote.RunOptions, error) {
-	opts := remote.RunOptions{
-		ForceTTY: true, // Default to TTY
-	}
-
-	remainingArgs := []string{}
-	i := 0
-
-	for i < len(args) {
-		arg := args[i]
-
-		switch arg {
-		case "--no-tty":
-			opts.ForceTTY = false
-			i++
-		case "--env-file":
-			if i+1 < len(args) {
-				opts.EnvFile = args[i+1]
-				i += 2
-			} else {
-				return nil, opts, fmt.Errorf("--env-file requires a value")
-			}
-		case "--branch":
-			if i+1 < len(args) {
-				opts.Git.Branch = args[i+1]
-				if !opts.Git.PullIsSet {
-					opts.Git.Pull = true
-				}
-				i += 2
-			} else {
-				return nil, opts, fmt.Errorf("--branch requires a value")
-			}
-		case "--ref":
-			if i+1 < len(args) {
-				opts.Git.Ref = args[i+1]
-				i += 2
-			} else {
-				return nil, opts, fmt.Errorf("--ref requires a value")
-			}
-		case "--pull":
-			opts.Git.Pull = true
-			opts.Git.PullIsSet = true
-			i++
-		case "--no-pull":
-			opts.Git.Pull = false
-			opts.Git.PullIsSet = true
-			i++
-		case "--":
-			// Stop parsing flags
-			i++
-			remainingArgs = append(remainingArgs, args[i:]...)
-			i = len(args)
-		default:
-			// All remaining args go to netcup-kube
-			remainingArgs = append(remainingArgs, args[i:]...)
-			i = len(args)
-		}
-	}
-
-	return remainingArgs, opts, nil
 }
 
 func findProjectRoot() (string, error) {
@@ -370,4 +320,12 @@ func init() {
 	remoteCmd.AddCommand(remoteBuildCmd)
 	remoteCmd.AddCommand(remoteSmokeCmd)
 	remoteCmd.AddCommand(remoteRunCmd)
+
+	// remote run flags (netcup-kube args should go after `--` if they start with `-`)
+	remoteRunCmd.Flags().BoolVar(&runNoTTY, "no-tty", false, "Disable forced TTY (default: forces a TTY for prompts)")
+	remoteRunCmd.Flags().StringVar(&runEnvFile, "env-file", "", "Upload and source an env file before running netcup-kube")
+	remoteRunCmd.Flags().StringVar(&runBranch, "branch", "", "Git branch name")
+	remoteRunCmd.Flags().StringVar(&runRef, "ref", "", "Git ref (commit/tag)")
+	remoteRunCmd.Flags().BoolVar(&runPull, "pull", false, "Pull latest changes (ff-only)")
+	remoteRunCmd.Flags().Bool("no-pull", false, "Do not pull changes")
 }
