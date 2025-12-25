@@ -19,6 +19,10 @@ set -euo pipefail
 #   bin/netcup-kube-remote host --user ops run pair
 #   bin/netcup-kube-remote host --user ops run dns
 #   bin/netcup-kube-remote host --user ops run dns --type edge-http --domains "kube.example.com,demo.example.com"
+#   # Build the Go CLI for the remote host (cross-compile locally and upload)
+#   bin/netcup-kube-remote host --user ops build
+#   # Live smoke test (DRY_RUN) on the remote management node
+#   bin/netcup-kube-remote host --user ops smoke
 #
 # After bootstrap you can SSH as the new user: ssh <user>@<host>
 
@@ -26,6 +30,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="${SCRIPT_DIR%/bin}"
 DEFAULT_CONFIG="${PROJECT_ROOT}/config/netcup-kube.env"
 LOCAL_CMD="$(basename "$0")"
+LOCAL_SELF="$0"
 
 usage() {
   local exit_code="${1:-0}"
@@ -36,6 +41,8 @@ Usage:
 Commands:
   provision   Prepare the target host (sudo user + repo clone/update). Does not run netcup-kube.
   git         Remote git control for the repo (checkout/pull branch/ref).
+  build       Build the Go CLI for the remote host (cross-compile locally) and upload to the remote repo.
+  smoke       Run a safe DRY_RUN smoke test on the remote management node (builds/uploads first if needed).
   run         Run a netcup-kube command on the target host (forces TTY by default).
 
 Common host selection:
@@ -45,12 +52,16 @@ Examples:
   netcup-kube-remote provision
   netcup-kube-remote mfittko.com --user ops provision
   netcup-kube-remote git --branch main --pull
+  netcup-kube-remote build
+  netcup-kube-remote smoke
   netcup-kube-remote run bootstrap
   netcup-kube-remote run --env-file ./env/bootstrap.env bootstrap
   netcup-kube-remote run --branch main --pull bootstrap
 
 Command options:
   git [--branch <name>] [--ref <ref>] [--pull|--no-pull]
+  build [--branch <name>] [--ref <ref>] [--pull|--no-pull]
+  smoke [--branch <name>] [--ref <ref>] [--pull|--no-pull]
   run [--no-tty] [--env-file <path>] [--branch <name>] [--ref <ref>] [--pull|--no-pull] [--] <netcup-kube args...>
 
 Notes:
@@ -80,7 +91,7 @@ EOF
 }
 
 HOST=""
-if [[ $# -gt 0 && "${1:-}" != -* && "${1:-}" != "run" && "${1:-}" != "git" ]]; then
+if [[ $# -gt 0 && "${1:-}" != -* && "${1:-}" != "run" && "${1:-}" != "git" && "${1:-}" != "build" && "${1:-}" != "smoke" ]]; then
   HOST="$1"
   shift || true
 fi
@@ -96,6 +107,8 @@ CONFIG_PATH="${DEFAULT_CONFIG}"
 DO_RUN=false
 DO_GIT=false
 DO_PROVISION=false
+DO_BUILD=false
+DO_SMOKE=false
 FORCE_TTY=true
 RUN_ENV_FILE=""
 RUN_ARGS=()
@@ -129,6 +142,52 @@ while [[ $# -gt 0 ]]; do
     provision)
       DO_PROVISION=true
       shift || true
+      break
+      ;;
+    build | smoke)
+      if [[ "$1" == "build" ]]; then
+        DO_BUILD=true
+      else
+        DO_SMOKE=true
+      fi
+      shift || true
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --branch)
+            GIT_BRANCH="${2:-}"
+            # If the user asked for a branch but did not specify pull behavior, default to pulling.
+            if [[ "${GIT_PULL_SET}" != "true" ]]; then
+              GIT_PULL=true
+            fi
+            shift 2 || true
+            ;;
+          --ref)
+            GIT_REF="${2:-}"
+            shift 2 || true
+            ;;
+          --no-pull)
+            GIT_PULL=false
+            GIT_PULL_SET=true
+            shift || true
+            ;;
+          --pull)
+            GIT_PULL=true
+            GIT_PULL_SET=true
+            shift || true
+            ;;
+          --)
+            shift || true
+            break
+            ;;
+          -*)
+            echo "Unknown flag for $1: $1" >&2
+            exit 1
+            ;;
+          *)
+            break
+            ;;
+        esac
+      done
       break
       ;;
     run)
@@ -236,7 +295,7 @@ if [[ "${DO_RUN}" == "true" && "${#RUN_ARGS[@]}" -lt 1 ]]; then
   usage_run 1
 fi
 
-if [[ "${DO_PROVISION}" != "true" && "${DO_GIT}" != "true" && "${DO_RUN}" != "true" ]]; then
+if [[ "${DO_PROVISION}" != "true" && "${DO_GIT}" != "true" && "${DO_RUN}" != "true" && "${DO_BUILD}" != "true" && "${DO_SMOKE}" != "true" ]]; then
   usage 1
 fi
 
@@ -454,13 +513,104 @@ if [[ "${DO_PROVISION}" == "true" ]]; then
   exit 0
 fi
 
-if [[ "${DO_GIT}" == "true" || "${DO_RUN}" == "true" ]]; then
+if [[ "${DO_GIT}" == "true" || "${DO_RUN}" == "true" || "${DO_BUILD}" == "true" || "${DO_SMOKE}" == "true" ]]; then
   ensure_user_access_or_die
   ensure_remote_repo_or_die
 fi
 
 if [[ "${DO_GIT}" == "true" ]]; then
   remote_git_sync
+fi
+
+remote_detect_goarch_or_die() {
+  local m
+  m="$(ssh_user "uname -m")"
+  case "${m}" in
+    x86_64 | amd64)
+      echo "amd64"
+      ;;
+    aarch64 | arm64)
+      echo "arm64"
+      ;;
+    *)
+      echo "Unsupported remote architecture: ${m}" >&2
+      exit 1
+      ;;
+  esac
+}
+
+remote_build_and_upload() {
+  if [[ -n "${GIT_BRANCH}" || -n "${GIT_REF}" || "${GIT_PULL}" == "true" ]]; then
+    remote_git_sync
+  fi
+
+  if ! command -v go > /dev/null 2>&1; then
+    echo "Missing local 'go' toolchain. Install Go 1.23+ and retry." >&2
+    exit 1
+  fi
+
+  local goarch
+  goarch="$(remote_detect_goarch_or_die)"
+
+  local tmpdir
+  tmpdir="$(mktemp -d 2> /dev/null || mktemp -d -t netcup-kube)"
+  local out="${tmpdir}/netcup-kube"
+  echo "[local] Building netcup-kube for linux/${goarch}"
+  (cd "${PROJECT_ROOT}" && CGO_ENABLED=0 GOOS=linux GOARCH="${goarch}" go build -o "${out}" ./cmd/netcup-kube)
+
+  local remote_bin
+  remote_bin="$(remote_bin_path)"
+
+  echo "[local] Uploading ${out} to ${NEW_USER}@${HOST}:${remote_bin}"
+  ssh_user "install -d -m 0755 \"$(dirname "${remote_bin}")\""
+  scp_user "${out}" "${NEW_USER}@${HOST}:${remote_bin}"
+  ssh_user "chmod +x \"${remote_bin}\""
+  echo "[local] Done. Remote CLI: ${remote_bin}"
+  rm -rf "${tmpdir}"
+}
+
+if [[ "${DO_BUILD}" == "true" ]]; then
+  remote_build_and_upload
+  exit 0
+fi
+
+if [[ "${DO_SMOKE}" == "true" ]]; then
+  # Ensure the remote repo is on the requested ref/branch, and that the Go CLI exists on the host.
+  remote_build_and_upload
+
+  tmp_env="$(mktemp 2> /dev/null || mktemp -t netcup-kube-remote.env)"
+  cat > "${tmp_env}" << 'EOF'
+DRY_RUN=true
+DRY_RUN_WRITE_FILES=false
+ENABLE_UFW=false
+EDGE_PROXY=none
+DASH_ENABLE=false
+CONFIRM=true
+EOF
+
+  tmp_env_join="$(mktemp 2> /dev/null || mktemp -t netcup-kube-remote-join.env)"
+  cat > "${tmp_env_join}" << 'EOF'
+DRY_RUN=true
+DRY_RUN_WRITE_FILES=false
+ENABLE_UFW=false
+EDGE_PROXY=none
+DASH_ENABLE=false
+CONFIRM=true
+SERVER_URL=https://1.2.3.4:6443
+TOKEN=dummytoken
+EOF
+  trap 'rm -f "${tmp_env}" "${tmp_env_join}"' EXIT
+
+  echo "[local] Running DRY_RUN smoke test on ${NEW_USER}@${HOST} (non-interactive)"
+  # Use --no-tty so the remote scripts don't block on prompts; they will pick defaults instead.
+  "${LOCAL_SELF}" "${HOST}" --user "${NEW_USER}" run --no-tty --env-file "${tmp_env}" -- --help
+  "${LOCAL_SELF}" "${HOST}" --user "${NEW_USER}" run --no-tty --env-file "${tmp_env}" dns --help
+  "${LOCAL_SELF}" "${HOST}" --user "${NEW_USER}" run --no-tty --env-file "${tmp_env}" pair --help
+  "${LOCAL_SELF}" "${HOST}" --user "${NEW_USER}" run --no-tty --env-file "${tmp_env}" bootstrap
+  "${LOCAL_SELF}" "${HOST}" --user "${NEW_USER}" run --no-tty --env-file "${tmp_env_join}" join
+
+  echo "[local] Smoke test complete (DRY_RUN)."
+  exit 0
 fi
 
 if [[ "${DO_RUN}" == "true" ]]; then
@@ -488,11 +638,15 @@ if [[ "${DO_RUN}" == "true" ]]; then
   fi
 
   remote_bin="$(remote_bin_path)"
-  # Force a TTY so remote prompts can read from /dev/tty.
-  tty_flags=()
-  if [[ "${FORCE_TTY}" == "true" ]]; then
-    tty_flags=(-tt)
+  # If the binary is missing, explain how to create it.
+  if ! ssh -o BatchMode=yes -o StrictHostKeyChecking=no "${NEW_USER}@${HOST}" "test -x '${remote_bin}'" 2> /dev/null; then
+    echo "Remote netcup-kube binary not found or not executable: ${NEW_USER}@${HOST}:${remote_bin}" >&2
+    echo "Build/upload it first:" >&2
+    echo "  ${LOCAL_CMD} ${HOST} --user ${NEW_USER} build" >&2
+    exit 1
   fi
+  # Force a TTY so remote prompts can read from /dev/tty.
+  # NOTE: avoid array expansion under `set -u` (nounset); pass -tt conditionally.
 
   # ssh does not preserve empty args reliably; use a placeholder.
   remote_env="__NONE__"
@@ -529,9 +683,17 @@ exec "${bin}" "$@"
   remote_cmd_q="${remote_cmd_q% }"
 
   echo "[local] Running on ${NEW_USER}@${HOST}: ${remote_cmd_q}"
-  ssh_user "${tty_flags[@]}" "${remote_cmd_q}"
+  if [[ "${FORCE_TTY}" == "true" ]]; then
+    ssh_user -tt "${remote_cmd_q}"
+  else
+    ssh_user "${remote_cmd_q}"
+  fi
 
   if [[ "${remote_env}" != "__NONE__" ]]; then
-    ssh_user "${tty_flags[@]}" "sudo rm -f '${remote_env}'" || true
+    if [[ "${FORCE_TTY}" == "true" ]]; then
+      ssh_user -tt "sudo rm -f '${remote_env}'" || true
+    else
+      ssh_user "sudo rm -f '${remote_env}'" || true
+    fi
   fi
 fi

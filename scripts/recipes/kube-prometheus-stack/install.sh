@@ -176,26 +176,16 @@ EOF
 
   log "NOTE: Ensure ${HOST} is in your edge-http domains before accessing the UI."
   if [[ -f "/etc/caddy/Caddyfile" ]]; then
-    # We are on the server; try to auto-append the domain if missing.
-    current_csv=""
+    # We are on the server; append domain using the dedicated subcommand (safer than rewriting the full list).
     if command -v "${SCRIPTS_DIR}/main.sh" > /dev/null 2>&1; then
-      current_csv="$("${SCRIPTS_DIR}/main.sh" dns --show --type edge-http --format csv 2> /dev/null || true)"
-    fi
-
-    if [[ -n "${current_csv}" ]]; then
-      if grep -qw "${HOST}" <<< "${current_csv//,/ }"; then
-        log "  ${HOST} is already in Caddy edge-http domains."
-      else
-        new_domains="${current_csv},${HOST}"
-        log "  Appending ${HOST} to Caddy edge-http domains."
-        "${SCRIPTS_DIR}/main.sh" dns --type edge-http --domains "${new_domains}"
-      fi
+      log "  Appending ${HOST} to Caddy edge-http domains (if needed)."
+      "${SCRIPTS_DIR}/main.sh" dns --type edge-http --add-domains "${HOST}"
     else
-      echo "  Run: sudo ./bin/netcup-kube dns --type edge-http --domains \"<current>,${HOST}\""
+      echo "  Run: sudo ./bin/netcup-kube dns --type edge-http --add-domains \"${HOST}\""
     fi
   else
     echo "  From your laptop:"
-    echo "    bin/netcup-kube-remote domains  # to see current list"
+    echo "    bin/netcup-kube-remote run dns --show --type edge-http --format csv  # to see current list"
     echo "    bin/netcup-kube-remote run dns --type edge-http --add-domains \"${HOST}\""
   fi
 fi

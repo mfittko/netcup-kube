@@ -1,0 +1,37 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redisinsight
+  namespace: __NAMESPACE__
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redisinsight
+  template:
+    metadata:
+      labels:
+        app: redisinsight
+    spec:
+      containers:
+        - name: redisinsight
+          image: redis/redisinsight:__IMAGE_VERSION_REDISINSIGHT__
+          ports:
+            - containerPort: 5540
+          env:
+            # RedisInsight stores sensitive data (DB passwords) in /data.
+            # Provide a stable encryption key so it can encrypt at rest without relying on OS keyrings.
+            - name: RI_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: redisinsight-encryption
+                  key: encryption-key
+          volumeMounts:
+            - name: redisinsight-data
+              mountPath: /data
+      volumes:
+        - name: redisinsight-data
+          persistentVolumeClaim:
+            claimName: redisinsight-pvc
+
+

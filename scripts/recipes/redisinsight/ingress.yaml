@@ -1,0 +1,24 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: redisinsight
+  namespace: __NAMESPACE__
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: web
+    # Optional: set by install.sh when basic auth is enabled:
+    # traefik.ingress.kubernetes.io/router.middlewares: __MIDDLEWARE_REF__
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: __HOST__
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: redisinsight
+                port:
+                  number: 80
+
+

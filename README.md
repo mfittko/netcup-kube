@@ -1,5 +1,5 @@
 # netcup-kube
-Shell scripts to bootstrap a production-ready k3s cluster on a Netcup root server (public) with up to N private vLAN nodes (Debian 13).
+Bootstrap a production-ready k3s cluster on a Netcup root server (public) with up to N private vLAN nodes (Debian 13).
 
 Features
 - k3s server bootstrap/join
@@ -10,11 +10,18 @@ Features
 - Optional UFW setup with safe defaults
 
 Project layout
-- `bin/netcup-kube` – single entrypoint
+- `bin/netcup-kube` – Go CLI binary (entrypoint)
 - `bin/netcup-kube-remote` – local helper to prepare a fresh Netcup server via root password
 - `scripts/main.sh` – orchestrator and defaults
 - `scripts/lib/*.sh` – shared helpers
 - `scripts/modules/*.sh` – logical units (system, k3s, traefik, nat, dashboard, caddy, helm)
+- `cmd/netcup-kube/` – Go CLI source code
+- `internal/` – Go internal packages
+
+Building
+- Build the CLI: `make build` (requires Go 1.23+)
+- This creates `bin/netcup-kube` binary (not committed to repository)
+- The CLI delegates to shell scripts in `scripts/` for all operations
 
 Remote bootstrap from Netcup root credentials
 - On your local machine (with ssh, ssh-copy-id; optional sshpass), run one of:
@@ -29,6 +36,16 @@ Remote bootstrap from Netcup root credentials
   3) Create a sudo-enabled user, set up authorized_keys
   4) Clone this repo on the server for that user
 - Then SSH to the server as the new user and run `sudo ~/netcup-kube/bin/netcup-kube bootstrap`.
+
+Remote update + CLI build (recommended now that the binary is not committed)
+- Update the remote repo to the latest branch/ref:
+  - `./bin/netcup-kube-remote <host-or-ip> --user <name> git --branch main --pull`
+- Build the Go CLI for the remote host and upload it into the repo (`~/netcup-kube/bin/netcup-kube`):
+  - `./bin/netcup-kube-remote <host-or-ip> --user <name> build`
+  - This **cross-compiles locally** for the remote host (linux/amd64 or linux/arm64) and copies the binary over SSH.
+- Run a safe live smoke test on the management node before merging (non-destructive, uses `DRY_RUN=true`):
+  - `./bin/netcup-kube-remote <host-or-ip> --user <name> smoke`
+  - This will upload the binary (if needed) and then run `--help`, plus `bootstrap` and `join` in DRY_RUN mode.
 
 Quick start (on the target Debian 13 server)
 1) Copy the repo (or just `bin/netcup-kube` + `scripts/` folder) to the server

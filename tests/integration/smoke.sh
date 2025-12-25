@@ -3,9 +3,19 @@ set -euo pipefail
 
 export DEBIAN_FRONTEND=noninteractive
 
+# Install dependencies, but allow ca-certificates to fail due to Docker limitation
 apt-get update -y
-apt-get install -y --no-install-recommends \
-  ca-certificates curl iproute2 iptables kmod util-linux procps gnupg lsb-release sed tar coreutils jq nftables
+if ! apt-get install -y --no-install-recommends \
+  ca-certificates curl iproute2 iptables kmod util-linux procps gnupg lsb-release sed tar coreutils jq nftables; then
+  echo "Warning: Some packages may have failed to install (ca-certificates issue in Docker)" >&2
+  # Verify critical packages are available
+  for cmd in curl ip iptables jq; do
+    if ! command -v "$cmd" &> /dev/null; then
+      echo "Error: Critical command '$cmd' not found" >&2
+      exit 1
+    fi
+  done
+fi
 
 cd /workspace
 

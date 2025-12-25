@@ -112,27 +112,17 @@ if [[ -n "${ARGO_HOST}" ]]; then
 
   log "NOTE: Ensure ${ARGO_HOST} is in your edge-http domains before accessing the UI."
   if [[ -f "/etc/caddy/Caddyfile" ]]; then
-    # We are on the server; try to auto-append the domain if missing.
-    current_csv=""
+    # We are on the server; append domain using the dedicated subcommand (safer than rewriting the full list).
     if command -v "${SCRIPTS_DIR}/main.sh" > /dev/null 2>&1; then
-      current_csv="$("${SCRIPTS_DIR}/main.sh" dns --show --type edge-http --format csv 2> /dev/null || true)"
-    fi
-
-    if [[ -n "${current_csv}" ]]; then
-      if grep -qw "${ARGO_HOST}" <<< "${current_csv//,/ }"; then
-        log "  ${ARGO_HOST} is already in Caddy edge-http domains."
-      else
-        new_domains="${current_csv},${ARGO_HOST}"
-        log "  Appending ${ARGO_HOST} to Caddy edge-http domains."
-        "${SCRIPTS_DIR}/main.sh" dns --type edge-http --domains "${new_domains}"
-      fi
+      log "  Appending ${ARGO_HOST} to Caddy edge-http domains (if needed)."
+      "${SCRIPTS_DIR}/main.sh" dns --type edge-http --add-domains "${ARGO_HOST}"
     else
-      echo "  Run: sudo ./bin/netcup-kube dns --type edge-http --domains \"<current>,${ARGO_HOST}\""
+      echo "  Run: sudo ./bin/netcup-kube dns --type edge-http --add-domains \"${ARGO_HOST}\""
     fi
   else
     echo "  From your laptop:"
-    echo "    bin/netcup-kube-remote domains  # to see current list"
-    echo "    bin/netcup-kube-remote run dns --type edge-http --domains \"<current>,${ARGO_HOST}\""
+    echo "    bin/netcup-kube-remote run dns --show --type edge-http --format csv  # to see current list"
+    echo "    bin/netcup-kube-remote run dns --type edge-http --add-domains \"${ARGO_HOST}\""
   fi
 fi
 
@@ -152,5 +142,5 @@ Next steps
     Then open: https://localhost:8080  (accept self-signed cert)
 
 - If you exposed via --host, ensure the domain resolves to the node IP and is in your Caddy edge-http list.
-    From laptop: bin/netcup-kube-remote run dns --type edge-http --domains "existing,${ARGO_HOST:-cd.example.com}"
+    From laptop: bin/netcup-kube-remote run dns --type edge-http --add-domains "${ARGO_HOST:-cd.example.com}"
 EOF
