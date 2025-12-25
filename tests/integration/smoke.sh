@@ -5,9 +5,24 @@ export DEBIAN_FRONTEND=noninteractive
 
 apt-get update -y
 apt-get install -y --no-install-recommends \
-  ca-certificates curl iproute2 iptables kmod util-linux procps gnupg lsb-release sed tar coreutils jq nftables
+  ca-certificates curl iproute2 iptables kmod util-linux procps gnupg lsb-release sed tar coreutils jq nftables wget
+
+# Install Go
+GO_VERSION="1.21.5"
+GO_ARCH="amd64"
+if ! command -v go &> /dev/null; then
+  echo "Installing Go ${GO_VERSION}..."
+  cd /tmp
+  wget -q "https://go.dev/dl/go${GO_VERSION}.linux-${GO_ARCH}.tar.gz"
+  tar -C /usr/local -xzf "go${GO_VERSION}.linux-${GO_ARCH}.tar.gz"
+  export PATH="/usr/local/go/bin:${PATH}"
+fi
 
 cd /workspace
+
+# Build the Go CLI binary
+echo "Building netcup-kube Go CLI..."
+make build
 
 export DRY_RUN=true
 export DRY_RUN_WRITE_FILES=true

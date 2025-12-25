@@ -17,6 +17,7 @@ config/k3s.yaml
 
 # build/artefacts
 *.log
+bin/netcup-kube
 
 # temp
 tmp/
