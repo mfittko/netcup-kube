@@ -1,0 +1,10 @@
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: redisinsight-auth
+  namespace: __NAMESPACE__
+spec:
+  basicAuth:
+    secret: redisinsight-basicauth
+
+
