@@ -1,11 +1,20 @@
 package executor
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func evalSymlinksOrOriginal(path string) string {
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return path
+	}
+	return resolved
+}
 
 func TestNew(t *testing.T) {
 	exec, err := New()
@@ -55,7 +64,8 @@ func TestNew_FindsScript(t *testing.T) {
 	}
 
 	expectedPath := filepath.Join(tmpDir, "scripts", "main.sh")
-	if exec.scriptPath != expectedPath {
+	// macOS temp dirs often involve symlinks (/var -> /private/var). Compare canonical paths.
+	if evalSymlinksOrOriginal(exec.scriptPath) != evalSymlinksOrOriginal(expectedPath) {
 		t.Errorf("New() scriptPath = %q, want %q", exec.scriptPath, expectedPath)
 	}
 }
@@ -70,7 +80,7 @@ func TestNew_FindsScriptRelativeToExecutable(t *testing.T) {
 
 	// Create a temporary directory structure that doesn't have scripts/main.sh
 	tmpDir := t.TempDir()
-	
+
 	// Change to temp directory (where script doesn't exist)
 	if err := os.Chdir(tmpDir); err != nil {
 		t.Fatalf("Failed to change directory: %v", err)
@@ -98,7 +108,7 @@ func TestNew_FromBinDirectory(t *testing.T) {
 	tmpDir := t.TempDir()
 	binDir := filepath.Join(tmpDir, "bin")
 	scriptsDir := filepath.Join(tmpDir, "scripts")
-	
+
 	if err := os.MkdirAll(binDir, 0755); err != nil {
 		t.Fatalf("Failed to create bin directory: %v", err)
 	}
@@ -123,10 +133,10 @@ func TestNew_FromBinDirectory(t *testing.T) {
 	}
 
 	expectedPath := filepath.Join(tmpDir, "scripts", "main.sh")
-	if exec.scriptPath != expectedPath {
+	if evalSymlinksOrOriginal(exec.scriptPath) != evalSymlinksOrOriginal(expectedPath) {
 		t.Errorf("New() from bin/ scriptPath = %q, want %q", exec.scriptPath, expectedPath)
 	}
-	if exec.projectRoot != tmpDir {
+	if evalSymlinksOrOriginal(exec.projectRoot) != evalSymlinksOrOriginal(tmpDir) {
 		t.Errorf("New() from bin/ projectRoot = %q, want %q", exec.projectRoot, tmpDir)
 	}
 }
@@ -241,9 +251,9 @@ func TestExecute_PassesEnvironment(t *testing.T) {
 
 	scriptPath := filepath.Join(scriptsDir, "main.sh")
 	outputFile := filepath.Join(tmpDir, "output.txt")
-	
+
 	scriptContent := `#!/bin/bash
-echo "TEST_VAR=$TEST_VAR" > ` + outputFile + `
+echo "TEST_VAR=$TEST_VAR" > "` + outputFile + `"
 exit 0
 `
 	if err := os.WriteFile(scriptPath, []byte(scriptContent), 0755); err != nil {
@@ -293,10 +303,16 @@ exit 42
 		scriptPath:  scriptPath,
 	}
 
-	// Note: This will actually call os.Exit(42) in the current implementation
-	// So we can't easily test this without forking the process
-	// The test validates the script creation works
-	if exec.scriptPath != scriptPath {
-		t.Errorf("scriptPath not set correctly")
+	err := exec.Execute("test", nil, nil)
+	if err == nil {
+		t.Fatalf("Execute() expected error, got nil")
+	}
+
+	var exitErr ExitCodeError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("Execute() expected ExitCodeError, got %T: %v", err, err)
+	}
+	if exitErr.Code != 42 {
+		t.Fatalf("Execute() exit code = %d, want 42", exitErr.Code)
 	}
 }

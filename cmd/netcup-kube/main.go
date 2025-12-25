@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,21 +14,15 @@ import (
 
 var (
 	version = "dev"
-	
+
 	cfg            *config.Config
 	scriptExecutor *executor.Executor
-	
+
 	// Global flags
 	envFile          string
 	dryRun           bool
 	dryRunWriteFiles bool
 )
-
-func main() {
-	if err := rootCmd.Execute(); err != nil {
-		os.Exit(1)
-	}
-}
 
 // parseGlobalFlagsFromArgs manually parses global flags from args for commands with DisableFlagParsing.
 // Returns the parsed values and the remaining args without the global flags.
@@ -59,19 +54,37 @@ k3s clusters on Netcup root servers with optional vLAN worker nodes.
 
 It provides commands to install k3s, configure Traefik, set up edge TLS via Caddy,
 and manage worker node joins.`,
-	Version: version,
+	Version:       version,
+	SilenceUsage:  true,
+	SilenceErrors: true,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		// Cobra does not parse flags for commands with DisableFlagParsing, but we still want
+		// global flags like --env-file / --dry-run to work for those commands. Parse them
+		// from args before we load config.
+		if cmd.DisableFlagParsing {
+			parsedEnvFile, parsedDryRun, parsedDryRunWriteFiles, _ := parseGlobalFlagsFromArgs(args)
+			if parsedEnvFile != "" {
+				envFile = parsedEnvFile
+			}
+			if parsedDryRun {
+				dryRun = parsedDryRun
+			}
+			if parsedDryRunWriteFiles {
+				dryRunWriteFiles = parsedDryRunWriteFiles
+			}
+		}
+
 		// Initialize config
 		cfg = config.New()
-		
+
 		// Load configuration in correct precedence order (lowest to highest priority):
 		// 1. environment variables (lowest priority)
 		// 2. env-file
 		// 3. command-line flags (highest priority)
-		
+
 		// Load from environment first
 		cfg.LoadFromEnvironment()
-		
+
 		// Load from env file (if specified or default exists) - this can override env vars
 		if envFile == "" {
 			// Try default location
@@ -80,13 +93,13 @@ and manage worker node joins.`,
 				envFile = homeEnvFile
 			}
 		}
-		
+
 		if envFile != "" {
 			if err := cfg.LoadEnvFile(envFile); err != nil {
 				return fmt.Errorf("failed to load env file: %w", err)
 			}
 		}
-		
+
 		// Apply dry-run flags last (these override everything)
 		if dryRun {
 			cfg.SetFlag("DRY_RUN", "true")
@@ -94,14 +107,14 @@ and manage worker node joins.`,
 		if dryRunWriteFiles {
 			cfg.SetFlag("DRY_RUN_WRITE_FILES", "true")
 		}
-		
+
 		// Initialize executor
 		var err error
 		scriptExecutor, err = executor.New()
 		if err != nil {
 			return fmt.Errorf("failed to initialize executor: %w", err)
 		}
-		
+
 		return nil
 	},
 }
@@ -110,7 +123,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&envFile, "env-file", "", "Path to environment file (default: config/netcup-kube.env if exists)")
 	rootCmd.PersistentFlags().BoolVar(&dryRun, "dry-run", false, "Enable dry-run mode (no actual changes)")
 	rootCmd.PersistentFlags().BoolVar(&dryRunWriteFiles, "dry-run-write-files", false, "Dry-run but write config files")
-	
+
 	// Add subcommands
 	rootCmd.AddCommand(bootstrapCmd)
 	rootCmd.AddCommand(joinCmd)
@@ -133,7 +146,7 @@ Examples:
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Set MODE to bootstrap (though it's already the default)
 		cfg.SetFlag("MODE", "bootstrap")
-		
+
 		return scriptExecutor.Execute("bootstrap", args, cfg.ToEnvSlice())
 	},
 }
@@ -151,14 +164,14 @@ Examples:
   sudo netcup-kube join --dry-run`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg.SetFlag("MODE", "join")
-		
+
 		return scriptExecutor.Execute("join", args, cfg.ToEnvSlice())
 	},
 }
 
 var dnsCmd = &cobra.Command{
-	Use:                "dns",
-	Short:              "Configure edge TLS via Caddy",
+	Use:   "dns",
+	Short: "Configure edge TLS via Caddy",
 	Long: `Configure edge TLS via Caddy using either DNS-01 wildcard (default)
 or HTTP-01 for explicit hostnames.
 
@@ -177,23 +190,6 @@ Examples:
   # Add more domains to existing HTTP-01 config
   sudo netcup-kube dns --type edge-http --add-domains "new.example.com"`,
 	DisableFlagParsing: true,
-	PreRunE: func(cmd *cobra.Command, args []string) error {
-		// Parse global flags manually since DisableFlagParsing is true
-		parsedEnvFile, parsedDryRun, parsedDryRunWriteFiles, _ := parseGlobalFlagsFromArgs(args)
-		
-		// Set global variables so PersistentPreRunE can use them
-		if parsedEnvFile != "" {
-			envFile = parsedEnvFile
-		}
-		if parsedDryRun {
-			dryRun = parsedDryRun
-		}
-		if parsedDryRunWriteFiles {
-			dryRunWriteFiles = parsedDryRunWriteFiles
-		}
-		
-		return nil
-	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Check if help was requested
 		for _, arg := range args {
@@ -202,7 +198,7 @@ Examples:
 				return scriptExecutor.Execute("dns", args, cfg.ToEnvSlice())
 			}
 		}
-		
+
 		// Filter out global flags from args
 		_, _, _, filteredArgs := parseGlobalFlagsFromArgs(args)
 		return scriptExecutor.Execute("dns", filteredArgs, cfg.ToEnvSlice())
@@ -210,8 +206,8 @@ Examples:
 }
 
 var pairCmd = &cobra.Command{
-	Use:                "pair",
-	Short:              "Print a copy/paste join command for a worker node",
+	Use:   "pair",
+	Short: "Print a copy/paste join command for a worker node",
 	Long: `Print a copy/paste join command for a worker node.
 
 Optionally opens UFW firewall on port 6443 for a specific source IP/CIDR.
@@ -224,23 +220,6 @@ Examples:
   sudo netcup-kube pair --allow-from 159.195.64.217
   sudo netcup-kube pair --server-url https://152.53.136.34:6443`,
 	DisableFlagParsing: true,
-	PreRunE: func(cmd *cobra.Command, args []string) error {
-		// Parse global flags manually since DisableFlagParsing is true
-		parsedEnvFile, parsedDryRun, parsedDryRunWriteFiles, _ := parseGlobalFlagsFromArgs(args)
-		
-		// Set global variables so PersistentPreRunE can use them
-		if parsedEnvFile != "" {
-			envFile = parsedEnvFile
-		}
-		if parsedDryRun {
-			dryRun = parsedDryRun
-		}
-		if parsedDryRunWriteFiles {
-			dryRunWriteFiles = parsedDryRunWriteFiles
-		}
-		
-		return nil
-	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Check if help was requested
 		for _, arg := range args {
@@ -249,9 +228,20 @@ Examples:
 				return scriptExecutor.Execute("pair", args, cfg.ToEnvSlice())
 			}
 		}
-		
+
 		// Filter out global flags from args
 		_, _, _, filteredArgs := parseGlobalFlagsFromArgs(args)
 		return scriptExecutor.Execute("pair", filteredArgs, cfg.ToEnvSlice())
 	},
+}
+
+func main() {
+	if err := rootCmd.Execute(); err != nil {
+		var exitErr executor.ExitCodeError
+		if errors.As(err, &exitErr) {
+			os.Exit(exitErr.Code)
+		}
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 }

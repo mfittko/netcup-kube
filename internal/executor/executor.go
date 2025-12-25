@@ -8,6 +8,16 @@ import (
 	"path/filepath"
 )
 
+// ExitCodeError represents a non-zero exit status from the delegated script.
+// The script's stdout/stderr is already streamed; callers typically only need the code.
+type ExitCodeError struct {
+	Code int
+}
+
+func (e ExitCodeError) Error() string {
+	return fmt.Sprintf("script exited with code %d", e.Code)
+}
+
 // Executor handles execution of the shell scripts
 type Executor struct {
 	projectRoot string
@@ -22,12 +32,12 @@ func New() (*Executor, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to get current directory: %w", err)
 	}
-	
+
 	// If we're running from bin/, go up one level
 	if filepath.Base(currentDir) == "bin" {
 		currentDir = filepath.Dir(currentDir)
 	}
-	
+
 	// Check if scripts/main.sh exists
 	scriptPath := filepath.Join(currentDir, "scripts", "main.sh")
 	if _, err := os.Stat(scriptPath); err != nil {
@@ -42,7 +52,7 @@ func New() (*Executor, error) {
 			}
 		}
 	}
-	
+
 	return &Executor{
 		projectRoot: currentDir,
 		scriptPath:  scriptPath,
@@ -58,34 +68,34 @@ func (e *Executor) Execute(command string, args []string, env []string) error {
 		}
 		return fmt.Errorf("cannot access script %s: %w", e.scriptPath, err)
 	}
-	
+
 	// Build the command
 	cmd := exec.Command("bash", e.scriptPath, command)
-	
+
 	// Add any additional arguments
 	if len(args) > 0 {
 		cmd.Args = append(cmd.Args, args...)
 	}
-	
+
 	// Set environment: use the provided env slice as the full environment
 	// (cfg already includes all necessary system variables via LoadFromEnvironment)
 	cmd.Env = env
-	
+
 	// Connect stdio
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	
+
 	// Run the command
 	if err := cmd.Run(); err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
 			// Preserve the exit code from the script
-			os.Exit(exitErr.ExitCode())
+			return ExitCodeError{Code: exitErr.ExitCode()}
 		}
 		// For other types of errors, return them
 		return fmt.Errorf("failed to execute command: %w", err)
 	}
-	
+
 	return nil
 }
