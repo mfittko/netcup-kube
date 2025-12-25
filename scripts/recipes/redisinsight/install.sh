@@ -73,17 +73,12 @@ generate_htpasswd_line() {
   local pass="$2"
 
   if command -v htpasswd > /dev/null 2>&1; then
-    # bcrypt (preferred)
+    # bcrypt (preferred, required)
     htpasswd -nbB "${user}" "${pass}" | tr -d '\n'
     return 0
   fi
 
-  if command -v openssl > /dev/null 2>&1; then
-    # apr1-md5 (compat fallback; depends on Traefik build supporting it)
-    printf '%s:%s' "${user}" "$(openssl passwd -apr1 "${pass}")"
-    return 0
-  fi
-
+  # No supported strong password hashing tool available
   return 1
 }
 
