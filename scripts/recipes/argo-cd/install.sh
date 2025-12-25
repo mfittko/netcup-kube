@@ -5,17 +5,20 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPTS_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 # shellcheck disable=SC1091
 source "${SCRIPTS_DIR}/lib/common.sh"
+# shellcheck disable=SC1091
+source "${SCRIPTS_DIR}/recipes/lib.sh"
 
 usage() {
   cat << 'EOF'
 Install Argo CD on the cluster (and optionally expose it via Traefik).
 
 Usage:
-  netcup-kube-install argo-cd [--host cd.example.com] [--namespace argocd]
+  netcup-kube-install argo-cd [--host cd.example.com] [--namespace argocd] [--uninstall]
 
 Options:
   --host <fqdn>        Create a Traefik Ingress for this host (entrypoint: web).
   --namespace <name>   Namespace to install into (default: argocd).
+  --uninstall          Uninstall Argo CD from the namespace (deletes upstream manifests + ingress).
   -h, --help           Show this help.
 
 Environment:
@@ -30,6 +33,7 @@ EOF
 
 ARGO_NS="${NAMESPACE_ARGOCD}"
 ARGO_HOST=""
+UNINSTALL="false"
 # Pin to specific version instead of mutable 'stable' branch for supply chain security
 INSTALL_URL="https://raw.githubusercontent.com/argoproj/argo-cd/${ARGOCD_VERSION}/manifests/install.yaml"
 
@@ -49,6 +53,9 @@ while [[ $# -gt 0 ]]; do
     --host=*)
       ARGO_HOST="${1#*=}"
       ;;
+    --uninstall)
+      UNINSTALL="true"
+      ;;
     -h | --help)
       usage
       exit 0
@@ -61,6 +68,24 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -n "${ARGO_NS}" ]] || die "--namespace is required"
+
+if [[ "${UNINSTALL}" == "true" ]]; then
+  recipe_confirm_or_die "Uninstall Argo CD resources from namespace ${ARGO_NS}"
+  log "Deleting Argo CD ingress (if present)"
+  # The ingress created by this recipe is named 'argocd-server' (see ingress.yaml).
+  # Delete by name so uninstall works even if --host is not provided (or changed).
+  recipe_kdelete ingress argocd-server -n "${ARGO_NS}"
+  # Backwards-compat best-effort cleanup (older versions may have used a different name).
+  recipe_kdelete ingress argocd -n "${ARGO_NS}"
+
+  log "Deleting Argo CD resources from ${INSTALL_URL}"
+  k delete -n "${ARGO_NS}" --ignore-not-found=true -f "${INSTALL_URL}" || true
+
+  # Best-effort cleanup of the cmd-params CM we may have created/patched.
+  recipe_kdelete configmap argocd-cmd-params-cm -n "${ARGO_NS}"
+  log "Uninstall requested. Note: namespace '${ARGO_NS}' was not deleted."
+  exit 0
+fi
 
 KUBECONFIG="${KUBECONFIG:-}"
 if [[ -z "${KUBECONFIG}" ]]; then
@@ -110,20 +135,7 @@ if [[ -n "${ARGO_HOST}" ]]; then
   export ARGO_HOST
   envsubst < "${SCRIPT_DIR}/ingress.yaml" | k apply -f -
 
-  log "NOTE: Ensure ${ARGO_HOST} is in your edge-http domains before accessing the UI."
-  if [[ -f "/etc/caddy/Caddyfile" ]]; then
-    # We are on the server; append domain using the dedicated subcommand (safer than rewriting the full list).
-    if command -v "${SCRIPTS_DIR}/main.sh" > /dev/null 2>&1; then
-      log "  Appending ${ARGO_HOST} to Caddy edge-http domains (if needed)."
-      "${SCRIPTS_DIR}/main.sh" dns --type edge-http --add-domains "${ARGO_HOST}"
-    else
-      echo "  Run: sudo ./bin/netcup-kube dns --type edge-http --add-domains \"${ARGO_HOST}\""
-    fi
-  else
-    echo "  From your laptop:"
-    echo "    bin/netcup-kube-remote run dns --show --type edge-http --format csv  # to see current list"
-    echo "    bin/netcup-kube-remote run dns --type edge-http --add-domains \"${ARGO_HOST}\""
-  fi
+  recipe_maybe_add_edge_http_domain "${ARGO_HOST}"
 fi
 
 log "Initial admin password"

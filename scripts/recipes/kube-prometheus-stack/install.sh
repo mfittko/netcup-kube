@@ -5,18 +5,21 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPTS_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 # shellcheck disable=SC1091
 source "${SCRIPTS_DIR}/lib/common.sh"
+# shellcheck disable=SC1091
+source "${SCRIPTS_DIR}/recipes/lib.sh"
 
 usage() {
   cat << 'EOF'
 Install kube-prometheus-stack on the cluster using Helm (Grafana + Prometheus + Alertmanager).
 
 Usage:
-  netcup-kube-install kube-prometheus-stack [--namespace monitoring] [--host grafana.example.com] [--password <pass>]
+  netcup-kube-install kube-prometheus-stack [--namespace monitoring] [--host grafana.example.com] [--password <pass>] [--uninstall]
 
 Options:
   --namespace <name>   Namespace to install into (default: monitoring).
   --host <fqdn>        Create a Traefik Ingress for Grafana (entrypoint: web).
   --password <pass>    Grafana admin password (default: auto-generated).
+  --uninstall          Uninstall kube-prometheus-stack (Helm release 'kube-prometheus-stack' in the namespace).
   -h, --help           Show this help.
 
 Environment:
@@ -34,6 +37,7 @@ EOF
 NAMESPACE="monitoring"
 HOST=""
 PASSWORD=""
+UNINSTALL="false"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -58,6 +62,9 @@ while [[ $# -gt 0 ]]; do
     --password=*)
       PASSWORD="${1#*=}"
       ;;
+    --uninstall)
+      UNINSTALL="true"
+      ;;
     -h | --help | help)
       usage
       exit 0
@@ -73,11 +80,20 @@ done
 
 [[ -n "${NAMESPACE}" ]] || die "Namespace is required"
 
+if [[ "${UNINSTALL}" == "true" ]]; then
+  recipe_confirm_or_die "Uninstall kube-prometheus-stack (Helm release 'kube-prometheus-stack') from namespace ${NAMESPACE}"
+  log "Uninstalling kube-prometheus-stack from namespace: ${NAMESPACE}"
+  helm uninstall kube-prometheus-stack --namespace "${NAMESPACE}" || true
+  recipe_kdelete ingress grafana -n "${NAMESPACE}"
+  echo
+  log "Uninstall requested. Note: PVCs may remain depending on storage class/reclaim policy."
+  exit 0
+fi
+
 log "Installing kube-prometheus-stack into namespace: ${NAMESPACE}"
 
 # Ensure namespace exists
-log "Ensuring namespace exists"
-k create namespace "${NAMESPACE}" --dry-run=client -o yaml | k apply -f -
+recipe_ensure_namespace "${NAMESPACE}"
 
 # Add prometheus-community Helm repo
 log "Adding prometheus-community Helm repository"
@@ -174,20 +190,7 @@ spec:
               number: 80
 EOF
 
-  log "NOTE: Ensure ${HOST} is in your edge-http domains before accessing the UI."
-  if [[ -f "/etc/caddy/Caddyfile" ]]; then
-    # We are on the server; append domain using the dedicated subcommand (safer than rewriting the full list).
-    if command -v "${SCRIPTS_DIR}/main.sh" > /dev/null 2>&1; then
-      log "  Appending ${HOST} to Caddy edge-http domains (if needed)."
-      "${SCRIPTS_DIR}/main.sh" dns --type edge-http --add-domains "${HOST}"
-    else
-      echo "  Run: sudo ./bin/netcup-kube dns --type edge-http --add-domains \"${HOST}\""
-    fi
-  else
-    echo "  From your laptop:"
-    echo "    bin/netcup-kube-remote run dns --show --type edge-http --format csv  # to see current list"
-    echo "    bin/netcup-kube-remote run dns --type edge-http --add-domains \"${HOST}\""
-  fi
+  recipe_maybe_add_edge_http_domain "${HOST}"
 fi
 
 echo
