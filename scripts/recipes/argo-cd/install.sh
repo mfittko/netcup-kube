@@ -72,12 +72,11 @@ done
 if [[ "${UNINSTALL}" == "true" ]]; then
   recipe_confirm_or_die "Uninstall Argo CD resources from namespace ${ARGO_NS}"
   log "Deleting Argo CD ingress (if present)"
-  if [[ -n "${ARGO_HOST}" ]]; then
-    export ARGO_HOST
-    envsubst < "${SCRIPT_DIR}/ingress.yaml" | k delete --ignore-not-found=true -f - || true
-  else
-    recipe_kdelete ingress argocd -n "${ARGO_NS}"
-  fi
+  # The ingress created by this recipe is named 'argocd-server' (see ingress.yaml).
+  # Delete by name so uninstall works even if --host is not provided (or changed).
+  recipe_kdelete ingress argocd-server -n "${ARGO_NS}"
+  # Backwards-compat best-effort cleanup (older versions may have used a different name).
+  recipe_kdelete ingress argocd -n "${ARGO_NS}"
 
   log "Deleting Argo CD resources from ${INSTALL_URL}"
   k delete -n "${ARGO_NS}" --ignore-not-found=true -f "${INSTALL_URL}" || true

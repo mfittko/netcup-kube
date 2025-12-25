@@ -166,8 +166,6 @@ done
 REDIS_HOST="redis-master.${NAMESPACE}.svc.cluster.local"
 REDIS_ALIAS="redis-${NAMESPACE}"
 
-log "Installing RedisInsight into namespace: ${NAMESPACE}"
-
 if [[ "${UNINSTALL}" == "true" ]]; then
   # Don't create the namespace just to uninstall. If it doesn't exist, there's nothing to do.
   if ! k get namespace "${NAMESPACE}" > /dev/null 2>&1; then
@@ -194,6 +192,8 @@ if [[ "${UNINSTALL}" == "true" ]]; then
   log "RedisInsight uninstall requested."
   exit 0
 fi
+
+log "Installing RedisInsight into namespace: ${NAMESPACE}"
 
 # Ensure namespace exists
 recipe_ensure_namespace "${NAMESPACE}"
