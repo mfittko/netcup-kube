@@ -27,6 +27,9 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.23'
+      - name: Build CLI
+        run: |
+          go build -v ./cmd/netcup-kube
       - name: Run Go tests
         run: |
           go test -v -race -coverprofile=coverage.out ./internal/...

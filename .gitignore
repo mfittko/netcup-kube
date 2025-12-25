@@ -18,6 +18,9 @@ config/k3s.yaml
 # build/artefacts
 *.log
 
+# Go build artifacts
+bin/netcup-kube
+
 # Go test coverage
 *.out
 coverage.html

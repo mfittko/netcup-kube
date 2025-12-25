@@ -19,8 +19,8 @@ Project layout
 - `internal/` – Go internal packages
 
 Building
-- The repository includes a pre-built `bin/netcup-kube` binary for Linux x86_64
-- To rebuild from source: `make build` (requires Go 1.23+)
+- Build the CLI: `make build` (requires Go 1.23+)
+- This creates `bin/netcup-kube` binary (not committed to repository)
 - The CLI delegates to shell scripts in `scripts/` for all operations
 
 Remote bootstrap from Netcup root credentials
