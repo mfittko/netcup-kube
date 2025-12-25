@@ -37,6 +37,16 @@ Remote bootstrap from Netcup root credentials
   4) Clone this repo on the server for that user
 - Then SSH to the server as the new user and run `sudo ~/netcup-kube/bin/netcup-kube bootstrap`.
 
+Remote update + CLI build (recommended now that the binary is not committed)
+- Update the remote repo to the latest branch/ref:
+  - `./bin/netcup-kube-remote <host-or-ip> --user <name> git --branch main --pull`
+- Build the Go CLI for the remote host and upload it into the repo (`~/netcup-kube/bin/netcup-kube`):
+  - `./bin/netcup-kube-remote <host-or-ip> --user <name> build`
+  - This **cross-compiles locally** for the remote host (linux/amd64 or linux/arm64) and copies the binary over SSH.
+- Run a safe live smoke test on the management node before merging (non-destructive, uses `DRY_RUN=true`):
+  - `./bin/netcup-kube-remote <host-or-ip> --user <name> smoke`
+  - This will upload the binary (if needed) and then run `--help`, plus `bootstrap` and `join` in DRY_RUN mode.
+
 Quick start (on the target Debian 13 server)
 1) Copy the repo (or just `bin/netcup-kube` + `scripts/` folder) to the server
 2) Run: `sudo ./bin/netcup-kube bootstrap`
