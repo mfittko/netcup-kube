@@ -48,5 +48,5 @@ recipe_maybe_add_edge_http_domain() {
 recipe_kdelete() {
   # Delete k8s resources idempotently.
   # Usage: recipe_kdelete <args...>
-  k delete --ignore-not-found=true "$@" || true
+  k delete --ignore-not-found=true "$@"
 }

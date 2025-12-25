@@ -168,10 +168,13 @@ REDIS_ALIAS="redis-${NAMESPACE}"
 
 log "Installing RedisInsight into namespace: ${NAMESPACE}"
 
-# Ensure namespace exists
-recipe_ensure_namespace "${NAMESPACE}"
-
 if [[ "${UNINSTALL}" == "true" ]]; then
+  # Don't create the namespace just to uninstall. If it doesn't exist, there's nothing to do.
+  if ! k get namespace "${NAMESPACE}" > /dev/null 2>&1; then
+    log "Namespace ${NAMESPACE} does not exist; nothing to uninstall."
+    exit 0
+  fi
+
   if [[ "${DELETE_PVC}" == "true" ]]; then
     recipe_confirm_or_die "Uninstall RedisInsight from namespace ${NAMESPACE} (will delete deployment/service/ingress and PVC redisinsight-pvc)"
   else
@@ -191,6 +194,9 @@ if [[ "${UNINSTALL}" == "true" ]]; then
   log "RedisInsight uninstall requested."
   exit 0
 fi
+
+# Ensure namespace exists
+recipe_ensure_namespace "${NAMESPACE}"
 
 # If exposed via host, protect the UI by default.
 if [[ -n "${HOST}" ]]; then
