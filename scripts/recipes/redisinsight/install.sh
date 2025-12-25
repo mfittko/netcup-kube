@@ -16,6 +16,9 @@ apply_template() {
     -e "s|__NAMESPACE__|${NAMESPACE}|g" \
     -e "s|__IMAGE_VERSION_REDISINSIGHT__|${IMAGE_VERSION_REDISINSIGHT}|g" \
     -e "s|__HOST__|${HOST}|g" \
+    -e "s|__REDIS_HOST__|${REDIS_HOST}|g" \
+    -e "s|__REDIS_PORT__|${REDIS_PORT}|g" \
+    -e "s|__REDIS_ALIAS__|${REDIS_ALIAS}|g" \
     "${template_path}" | k apply -f -
 }
 
@@ -42,6 +45,8 @@ Notes:
   - RedisInsight provides a web GUI to manage Redis instances.
   - If you pass --host, the domain will be auto-added to Caddy edge-http domains (if on server).
   - You can connect to Redis instances in the cluster via their service names.
+  - If you pass --with-redis, RedisInsight will be preconfigured to connect to the in-cluster service:
+    redis-master.<namespace>.svc.cluster.local:6379
 EOF
 }
 
@@ -50,6 +55,9 @@ HOST=""
 WITH_REDIS="false"
 REDIS_STORAGE="${DEFAULT_STORAGE_REDIS}"
 REDIS_PASSWORD=""
+REDIS_HOST=""
+REDIS_PORT="6379"
+REDIS_ALIAS=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -99,11 +107,26 @@ done
 
 [[ -n "${NAMESPACE}" ]] || die "Namespace is required"
 
+REDIS_HOST="redis-master.${NAMESPACE}.svc.cluster.local"
+REDIS_ALIAS="redis-${NAMESPACE}"
+
 log "Installing RedisInsight into namespace: ${NAMESPACE}"
 
 # Ensure namespace exists
 log "Ensuring namespace exists"
 k create namespace "${NAMESPACE}" --dry-run=client -o yaml | k apply -f -
+
+# Ensure RedisInsight has a stable encryption key for storing sensitive data (DB passwords) in /data.
+#
+# Without this, some environments fail to initialize keychain-based encryption (keytar/libsecret),
+# which can prevent storing configured connections.
+if ! k -n "${NAMESPACE}" get secret redisinsight-encryption > /dev/null 2>&1; then
+  log "Creating RedisInsight encryption secret (redisinsight-encryption)"
+  enc_key="$(head -c 32 /dev/urandom | base64 | tr -d '\n')"
+  k -n "${NAMESPACE}" create secret generic redisinsight-encryption --from-literal=encryption-key="${enc_key}"
+else
+  log "RedisInsight encryption secret already present (redisinsight-encryption)."
+fi
 
 # Optional: ensure Redis exists first (so RedisInsight has something to connect to out-of-the-box).
 if [[ "${WITH_REDIS}" == "true" ]]; then
@@ -127,7 +150,11 @@ fi
 # Deploy RedisInsight using manifests
 log "Deploying RedisInsight"
 apply_template "${SCRIPT_DIR}/pvc.yaml"
-apply_template "${SCRIPT_DIR}/deployment.yaml"
+if [[ "${WITH_REDIS}" == "true" ]]; then
+  apply_template "${SCRIPT_DIR}/deployment.with-redis.yaml"
+else
+  apply_template "${SCRIPT_DIR}/deployment.yaml"
+fi
 apply_template "${SCRIPT_DIR}/service.yaml"
 
 log "Waiting for RedisInsight to be ready"
@@ -135,6 +162,62 @@ k wait --for=condition=available --timeout=300s deployment/redisinsight -n "${NA
 
 log "RedisInsight installed successfully!"
 echo
+
+seed_redisinsight_connection() {
+  local host="$1"
+  local port="$2"
+  local name="$3"
+  local username="$4"
+
+  command -v curl > /dev/null 2>&1 || {
+    log "WARN: curl not found; cannot auto-seed RedisInsight connection."
+    return 0
+  }
+
+  local password
+  password="$(k -n "${NAMESPACE}" get secret redis -o jsonpath='{.data.redis-password}' | base64 -d 2> /dev/null || true)"
+  [[ -n "${password}" ]] || {
+    log "WARN: could not read Redis password from Secret/redis; cannot auto-seed RedisInsight connection."
+    return 0
+  }
+
+  # Use a short-lived port-forward so we can call the RedisInsight API.
+  # The service exposes port 80 -> container 5540.
+  local pf_port="18001"
+  local pf_log="/tmp/netcup-kube-redisinsight-portforward.$$.log"
+  local pf_pid=""
+
+  k -n "${NAMESPACE}" port-forward svc/redisinsight "${pf_port}:80" > "${pf_log}" 2>&1 &
+  pf_pid="$!"
+  trap 'kill "${pf_pid}" 2>/dev/null || true; wait "${pf_pid}" 2>/dev/null || true; rm -f "${pf_log}"' RETURN
+
+  # Wait for port-forward to be ready
+  for _ in {1..30}; do
+    if curl -fsS "http://127.0.0.1:${pf_port}/api/databases" > /dev/null 2>&1; then
+      break
+    fi
+    sleep 0.2
+  done
+
+  # If the DB already exists, do nothing.
+  if curl -fsS "http://127.0.0.1:${pf_port}/api/databases" | grep -q "\"name\":\"${name}\""; then
+    log "RedisInsight already has database '${name}'."
+    return 0
+  fi
+
+  log "Seeding RedisInsight connection '${name}' -> ${host}:${port}"
+  curl -fsS -X POST "http://127.0.0.1:${pf_port}/api/databases" \
+    -H 'Content-Type: application/json' \
+    -d "{\"name\":\"${name}\",\"host\":\"${host}\",\"port\":${port},\"username\":\"${username}\",\"password\":\"${password}\"}" \
+    > /dev/null
+}
+
+if [[ "${WITH_REDIS}" == "true" ]]; then
+  # Make Redis show up by default inside RedisInsight.
+  # Some RedisInsight versions do not reliably auto-add DBs from RI_REDIS_* env vars in Kubernetes,
+  # so we seed the connection via the local API once.
+  seed_redisinsight_connection "${REDIS_HOST}" "${REDIS_PORT}" "${REDIS_ALIAS}" "default" || true
+fi
 
 if [[ -n "${HOST}" ]]; then
   log "Creating/Updating Traefik ingress for ${HOST}"

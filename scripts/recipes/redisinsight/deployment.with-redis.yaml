@@ -19,13 +19,27 @@ spec:
           ports:
             - containerPort: 5540
           env:
-            # RedisInsight stores sensitive data (DB passwords) in /data.
-            # Provide a stable encryption key so it can encrypt at rest without relying on OS keyrings.
+            # Preconfigure the connection in RedisInsight (see Redis docs: RI_REDIS_*).
+            # NOTE: If these env vars are removed later, RedisInsight may remove previously added connections.
+            # Use explicit ID suffix for maximum compatibility (some versions only recognize the indexed form).
             - name: RI_ENCRYPTION_KEY
               valueFrom:
                 secretKeyRef:
                   name: redisinsight-encryption
                   key: encryption-key
+            - name: RI_REDIS_HOST_0
+              value: "__REDIS_HOST__"
+            - name: RI_REDIS_PORT_0
+              value: "__REDIS_PORT__"
+            - name: RI_REDIS_ALIAS_0
+              value: "__REDIS_ALIAS__"
+            - name: RI_REDIS_USERNAME_0
+              value: "default"
+            - name: RI_REDIS_PASSWORD_0
+              valueFrom:
+                secretKeyRef:
+                  name: redis
+                  key: redis-password
           volumeMounts:
             - name: redisinsight-data
               mountPath: /data
