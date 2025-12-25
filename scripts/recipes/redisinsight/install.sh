@@ -6,6 +6,19 @@ SCRIPTS_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 # shellcheck disable=SC1091
 source "${SCRIPTS_DIR}/lib/common.sh"
 
+apply_template() {
+  local template_path="$1"
+  [[ -f "${template_path}" ]] || die "Missing manifest template: ${template_path}"
+
+  # Keep this dependency-free: replace well-known placeholders with sed.
+  # Use a delimiter that is unlikely to appear in values.
+  sed \
+    -e "s|__NAMESPACE__|${NAMESPACE}|g" \
+    -e "s|__IMAGE_VERSION_REDISINSIGHT__|${IMAGE_VERSION_REDISINSIGHT}|g" \
+    -e "s|__HOST__|${HOST}|g" \
+    "${template_path}" | k apply -f -
+}
+
 usage() {
   cat << 'EOF'
 Install RedisInsight on the cluster using Helm (Redis GUI).
@@ -69,62 +82,11 @@ log "Installing RedisInsight into namespace: ${NAMESPACE}"
 log "Ensuring namespace exists"
 k create namespace "${NAMESPACE}" --dry-run=client -o yaml | k apply -f -
 
-# Deploy RedisInsight using official manifests
+# Deploy RedisInsight using manifests
 log "Deploying RedisInsight"
-k apply -f - << EOF
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: redisinsight-pvc
-  namespace: ${NAMESPACE}
-spec:
-  accessModes:
-    - ReadWriteOnce
-  resources:
-    requests:
-      storage: 2Gi
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: redisinsight
-  namespace: ${NAMESPACE}
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: redisinsight
-  template:
-    metadata:
-      labels:
-        app: redisinsight
-    spec:
-      containers:
-      - name: redisinsight
-        image: redis/redisinsight:${IMAGE_VERSION_REDISINSIGHT}
-        ports:
-        - containerPort: 5540
-        volumeMounts:
-        - name: redisinsight-data
-          mountPath: /data
-      volumes:
-      - name: redisinsight-data
-        persistentVolumeClaim:
-          claimName: redisinsight-pvc
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: redisinsight
-  namespace: ${NAMESPACE}
-spec:
-  selector:
-    app: redisinsight
-  ports:
-  - protocol: TCP
-    port: 80
-    targetPort: 5540
-EOF
+apply_template "${SCRIPT_DIR}/pvc.yaml"
+apply_template "${SCRIPT_DIR}/deployment.yaml"
+apply_template "${SCRIPT_DIR}/service.yaml"
 
 log "Waiting for RedisInsight to be ready"
 k wait --for=condition=available --timeout=300s deployment/redisinsight -n "${NAMESPACE}"
@@ -134,48 +96,20 @@ echo
 
 if [[ -n "${HOST}" ]]; then
   log "Creating/Updating Traefik ingress for ${HOST}"
-  k apply -f - << EOF
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: redisinsight
-  namespace: ${NAMESPACE}
-spec:
-  rules:
-  - host: ${HOST}
-    http:
-      paths:
-      - path: /
-        pathType: Prefix
-        backend:
-          service:
-            name: redisinsight
-            port:
-              number: 80
-EOF
+  apply_template "${SCRIPT_DIR}/ingress.yaml"
 
   log "NOTE: Ensure ${HOST} is in your edge-http domains before accessing the UI."
   if [[ -f "/etc/caddy/Caddyfile" ]]; then
-    # We are on the server; try to auto-append the domain if missing.
-    current_csv=""
+    # We are on the server; append domain using the dedicated subcommand (safer than rewriting the full list).
     if command -v "${SCRIPTS_DIR}/main.sh" > /dev/null 2>&1; then
-      current_csv="$("${SCRIPTS_DIR}/main.sh" dns --show --type edge-http --format csv 2> /dev/null || true)"
-    fi
-
-    if [[ -n "${current_csv}" ]]; then
-      if grep -qw "${HOST}" <<< "${current_csv//,/ }"; then
-        log "  ${HOST} is already in Caddy edge-http domains."
-      else
-        new_domains="${current_csv},${HOST}"
-        log "  Appending ${HOST} to Caddy edge-http domains."
-        "${SCRIPTS_DIR}/main.sh" dns --type edge-http --domains "${new_domains}"
-      fi
+      log "  Appending ${HOST} to Caddy edge-http domains (if needed)."
+      "${SCRIPTS_DIR}/main.sh" dns --type edge-http --add-domains "${HOST}"
     else
-      echo "  Run: sudo ./bin/netcup-kube dns --type edge-http --domains \"<current>,${HOST}\""
+      echo "  Run: sudo ./bin/netcup-kube dns --type edge-http --add-domains \"${HOST}\""
     fi
   else
     echo "  From your laptop:"
-    echo "    bin/netcup-kube-remote domains  # to see current list"
+    echo "    bin/netcup-kube-remote run dns --show --type edge-http --format csv  # to see current list"
     echo "    bin/netcup-kube-remote run dns --type edge-http --add-domains \"${HOST}\""
   fi
 fi
