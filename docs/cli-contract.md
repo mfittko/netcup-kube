@@ -178,8 +178,8 @@ netcup-kube-tunnel [start|stop|status] [options]
 
 **Behavior:**
 - Uses SSH ControlMaster for reliable start/stop/status
-- Socket location: `${XDG_RUNTIME_DIR:-/tmp}/netcup-kube-tunnel-${user}_${host}_${local_port}.ctl`
-  - Where `${user}`, `${host}`, and `${local_port}` are the actual runtime values (e.g., `ops_example.com_6443`)
+- Socket location: `${XDG_RUNTIME_DIR:-/tmp}/netcup-kube-tunnel-${user}_${host}-${local_port}.ctl`
+  - Where `${user}`, `${host}`, and `${local_port}` are the actual runtime values (e.g., `ops_example.com-6443`)
 - Checks port availability before starting (fails if port in use)
 - SSH options: `-fN -M -S <socket> -L <local>:<remote-host>:<remote-port> -o ControlPersist=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3`
 
