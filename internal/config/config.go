@@ -133,7 +133,7 @@ func (c *Config) expandVars(value string) string {
 		varValue := ""
 		if val, exists := c.Env[varName]; exists {
 			varValue = val
-		} else if val := os.Getenv(varName); val != "" {
+		} else if val, ok := os.LookupEnv(varName); ok {
 			varValue = val
 		}
 		
