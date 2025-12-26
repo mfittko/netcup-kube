@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/url"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -178,11 +179,16 @@ func RequiredWith(field, value string, otherFields map[string]string) error {
 	}
 
 	if len(setFields) > 0 {
+		// Sort field names for consistent error messages
+		sortedFields := make([]string, len(setFields))
+		copy(sortedFields, setFields)
+		sort.Strings(sortedFields)
+		
 		return &Error{
 			Field:       field,
 			Value:       value,
 			Message:     "field is required when other fields are set",
-			Remediation: fmt.Sprintf("%s is required when %s is set", field, strings.Join(setFields, ", ")),
+			Remediation: fmt.Sprintf("%s is required when %s is set", field, strings.Join(sortedFields, ", ")),
 		}
 	}
 

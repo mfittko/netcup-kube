@@ -37,11 +37,21 @@ func parseGlobalFlagsFromArgs(args []string) (parsedEnvFile string, parsedDryRun
 			parsedDryRun = true
 		} else if arg == "--dry-run-write-files" {
 			parsedDryRunWriteFiles = true
-		} else if arg == "--env-file" && i+1 < len(args) {
+		} else if arg == "--env-file" {
+			if i+1 >= len(args) || strings.HasPrefix(args[i+1], "-") {
+				// Error: --env-file provided without a value
+				fmt.Fprintln(os.Stderr, "Error: --env-file requires a value")
+				os.Exit(1)
+			}
 			parsedEnvFile = args[i+1]
 			i++ // Skip the value
 		} else if strings.HasPrefix(arg, "--env-file=") {
 			parsedEnvFile = strings.TrimPrefix(arg, "--env-file=")
+			if parsedEnvFile == "" {
+				// Error: --env-file= with empty value
+				fmt.Fprintln(os.Stderr, "Error: --env-file requires a value")
+				os.Exit(1)
+			}
 		} else {
 			remainingArgs = append(remainingArgs, arg)
 		}
@@ -289,11 +299,7 @@ Examples:
 				if printErr := formatter.PrintValidation(result); printErr != nil {
 					return printErr
 				}
-				// Only print text error message if not in JSON mode
-				if format != output.FormatJSON {
-					return fmt.Errorf("validation failed")
-				}
-				// For JSON mode, return an ExitCodeError to exit cleanly without additional output
+				// Return ExitCodeError to exit with code 1 without printing additional error message
 				return executor.ExitCodeError{Code: 1}
 			}
 			return err
