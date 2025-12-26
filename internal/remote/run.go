@@ -33,7 +33,7 @@ func runWithClient(client Client, cfg *Config, opts RunOptions) error {
 	// Keep this list intentionally small: `remote run` is meant for the main lifecycle commands
 	// that are safe and commonly used over SSH. If new top-level commands are added to netcup-kube,
 	// update this allowlist accordingly.
-	supportedCmds := []string{"bootstrap", "join", "pair", "dns", "install", "tunnel", "help", "-h", "--help"}
+	supportedCmds := []string{"bootstrap", "join", "pair", "dns", "install", "ssh", "help", "-h", "--help"}
 	cmdValid := false
 	for _, cmd := range supportedCmds {
 		if opts.Args[0] == cmd {

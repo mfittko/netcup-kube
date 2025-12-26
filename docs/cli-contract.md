@@ -147,7 +147,7 @@ netcup-kube remote run [--no-tty] [--env-file <path>] [--branch <name>] [--ref <
 - `--pull` — Pull from remote before running
 - `--no-pull` — Skip pull
 - `--` — Stop parsing remote flags (pass remaining args to netcup-kube)
-- `<netcup-kube-args...>` — Arguments to pass to netcup-kube (supported: `bootstrap`, `join`, `pair`, `dns`, `install`, `tunnel`, `help`)
+- `<netcup-kube-args...>` — Arguments to pass to netcup-kube (supported: `bootstrap`, `join`, `pair`, `dns`, `install`, `ssh`, `help`)
 
 **Command: `install`**
 ```bash

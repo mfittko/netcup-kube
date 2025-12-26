@@ -146,7 +146,7 @@ func init() {
 	rootCmd.AddCommand(validateCmd)
 	rootCmd.AddCommand(remoteCmd)
 	rootCmd.AddCommand(installCmd)
-	rootCmd.AddCommand(tunnelCmd)
+	rootCmd.AddCommand(sshCmd)
 }
 
 var bootstrapCmd = &cobra.Command{
