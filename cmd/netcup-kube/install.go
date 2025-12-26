@@ -258,14 +258,8 @@ func ensureTunnelRunning(envFile, projectRoot string) error {
 		// Tunnel not running, start it
 		fmt.Println("SSH tunnel not running. Starting tunnel...")
 		
-		tunnelScript := filepath.Join(projectRoot, "bin", "netcup-kube-tunnel")
-		if _, err := os.Stat(tunnelScript); err != nil {
-			// Fall back to using the Go tunnel command if available
-			return startTunnelGo(remoteHost, remoteUser, tunnelPort)
-		}
-		
-		startCmd := exec.Command(tunnelScript, "start")
-		if err := startCmd.Run(); err != nil {
+		// Use the Go tunnel implementation
+		if err := startTunnelViaGo(remoteHost, remoteUser, tunnelPort); err != nil {
 			return fmt.Errorf("failed to start SSH tunnel: %w", err)
 		}
 		
@@ -283,8 +277,29 @@ func ensureTunnelRunning(envFile, projectRoot string) error {
 	return nil
 }
 
-func startTunnelGo(host, user, localPort string) error {
-	// This will be used when the tunnel command is integrated
-	// For now, return an error suggesting to use the tunnel command
-	return fmt.Errorf("tunnel not running. Please start it with: netcup-kube tunnel start")
+func startTunnelViaGo(host, user, localPort string) error {
+	// Start tunnel using the same SSH ControlMaster logic as the tunnel command
+	ctlSocket := getTunnelControlSocket(user, host, localPort)
+	remoteHost := "127.0.0.1"
+	remotePort := "6443"
+
+	// Check if port is in use
+	portCmd := exec.Command("sh", "-c", fmt.Sprintf("command -v lsof > /dev/null && lsof -nP -iTCP:%s -sTCP:LISTEN || command -v ss > /dev/null && ss -ltn '( sport = :%s )' | tail -n +2 | grep -q .", localPort, localPort))
+	if err := portCmd.Run(); err == nil {
+		return fmt.Errorf("localhost:%s is already in use", localPort)
+	}
+
+	// Start the tunnel
+	sshCmd := exec.Command("ssh",
+		"-M", "-S", ctlSocket,
+		"-fN",
+		"-L", fmt.Sprintf("%s:%s:%s", localPort, remoteHost, remotePort),
+		fmt.Sprintf("%s@%s", user, host),
+		"-o", "ControlPersist=yes",
+		"-o", "ExitOnForwardFailure=yes",
+		"-o", "ServerAliveInterval=30",
+		"-o", "ServerAliveCountMax=3",
+	)
+
+	return sshCmd.Run()
 }

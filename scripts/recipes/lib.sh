@@ -62,7 +62,8 @@ recipe_helm_repo_add() {
   [[ -n "${repo_url}" ]] || die "Helm repo URL is required"
   
   log "Adding Helm repository: ${repo_name}"
-  if ! helm repo list 2> /dev/null | grep -q "^${repo_name}"; then
+  # Use word boundary to ensure exact repo name match
+  if ! helm repo list 2> /dev/null | grep -q "^${repo_name}[[:space:]]"; then
     if [[ "${force_update}" == "--force-update" ]]; then
       helm repo add "${repo_name}" "${repo_url}" --force-update
     else
