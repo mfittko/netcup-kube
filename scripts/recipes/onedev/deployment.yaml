@@ -1,0 +1,48 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: onedev
+  namespace: __NAMESPACE__
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: onedev
+  template:
+    metadata:
+      labels:
+        app: onedev
+    spec:
+      containers:
+        - name: onedev
+          image: 1dev/server:__IMAGE_VERSION_ONEDEV__
+          ports:
+            - name: http
+              containerPort: 6610
+            - name: ssh
+              containerPort: 6611
+          volumeMounts:
+            - name: onedev-data
+              mountPath: /opt/onedev
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 6610
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 24
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 6610
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 6
+      volumes:
+        - name: onedev-data
+          persistentVolumeClaim:
+            claimName: onedev-pvc
+
+

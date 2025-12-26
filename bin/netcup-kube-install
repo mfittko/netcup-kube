@@ -42,6 +42,7 @@ Available recipes:
   redisinsight             Install RedisInsight (Redis GUI)
   kube-prometheus-stack    Install Grafana + Prometheus + Alertmanager
   dashboard                Install Kubernetes Dashboard (official web UI)
+  onedev                   Install OneDev (lightweight Git platform with CI)
 
 Examples:
   netcup-kube-install argo-cd --help
@@ -183,11 +184,13 @@ if [[ ${RECIPE_EXIT_CODE} -eq 0 && -n "${HOST_ARG}" && "${HOST_ARG}" != "__NEXT_
       cat > "${tmp_env}" << 'EOF'
 CONFIRM=true
 EOF
-      if "${REMOTE_BIN}" remote run --no-tty --env-file "${tmp_env}" dns --type edge-http --add-domains "${HOST_ARG}"; then
+      # IMPORTANT: `remote run` uses cobra flag parsing. If the remote command includes flags,
+      # pass it after `--` so flags like `--type` are not parsed as `remote run` flags.
+      if "${REMOTE_BIN}" remote run --no-tty --env-file "${tmp_env}" -- dns --type edge-http --add-domains "${HOST_ARG}"; then
         echo "✓ Domain added successfully!"
       else
         echo "⚠ Failed to add domain automatically. Run manually:"
-        echo "  CONFIRM=true bin/netcup-kube remote run --no-tty dns --type edge-http --add-domains \"${HOST_ARG}\""
+        echo "  CONFIRM=true bin/netcup-kube remote run --no-tty -- dns --type edge-http --add-domains \"${HOST_ARG}\""
       fi
     fi
   fi

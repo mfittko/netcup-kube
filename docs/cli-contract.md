@@ -76,6 +76,7 @@ netcup-kube-install <recipe> [recipe-options]
 - `redisinsight` — Install RedisInsight (Redis GUI)
 - `kube-prometheus-stack` — Install Grafana + Prometheus + Alertmanager
 - `dashboard` — Install Kubernetes Dashboard (official web UI)
+- `onedev` — Install OneDev (lightweight Git platform with integrated CI)
 
 **Common Options:**
 - `--help`, `-h` — Show recipe-specific help
