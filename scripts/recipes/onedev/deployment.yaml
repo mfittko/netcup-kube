@@ -4,7 +4,10 @@ metadata:
   name: onedev
   namespace: __NAMESPACE__
 spec:
+  strategy:
+    type: Recreate
   replicas: 1
+  revisionHistoryLimit: 2
   selector:
     matchLabels:
       app: onedev
@@ -13,6 +16,7 @@ spec:
       labels:
         app: onedev
     spec:
+      terminationGracePeriodSeconds: 60
       containers:
         - name: onedev
           image: 1dev/server:__IMAGE_VERSION_ONEDEV__

@@ -17,7 +17,6 @@ apply_template() {
     -e "s|__IMAGE_VERSION_ONEDEV__|${IMAGE_VERSION_ONEDEV}|g" \
     -e "s|__STORAGE__|${STORAGE}|g" \
     -e "s|__HOST__|${HOST}|g" \
-    -e "s|__MIDDLEWARE_REF__|${MIDDLEWARE_REF}|g" \
     -e "s|__SSH_NODEPORT__|${SSH_NODEPORT}|g" \
     "${template_path}" | k apply -f -
 }
@@ -27,16 +26,12 @@ usage() {
 Install OneDev on the cluster (lightweight Git platform with CI) using a Kubernetes Deployment.
 
 Usage:
-  netcup-kube-install onedev [--namespace onedev] [--storage 20Gi] [--host onedev.example.com] [--auth|--no-auth] [--expose-ssh] [--ssh-nodeport 30611] [--uninstall] [--delete-pvc]
+  netcup-kube-install onedev [--namespace onedev] [--storage 20Gi] [--host onedev.example.com] [--expose-ssh] [--ssh-nodeport 30611] [--uninstall] [--delete-pvc]
 
 Options:
   --namespace <name>     Namespace to install into (default: recipes.conf NAMESPACE_ONEDEV, fallback: onedev).
   --storage <size>       PVC size for /opt/onedev (default: recipes.conf DEFAULT_STORAGE_ONEDEV).
   --host <fqdn>          Create a Traefik Ingress for the web UI (entrypoint: web).
-  --auth                 Protect the UI with Traefik BasicAuth when --host is used (default: true).
-  --no-auth              Disable BasicAuth even when --host is used (NOT recommended).
-  --auth-user <user>     BasicAuth username (default: admin).
-  --auth-pass <pass>     BasicAuth password (default: auto-generated and printed once).
   --expose-ssh            Expose OneDev SSH port (6611) via a NodePort service.
   --ssh-nodeport <port>  NodePort to use for SSH when --expose-ssh is set (default: let Kubernetes choose).
   --uninstall            Uninstall OneDev resources from the namespace (deployment/services/ingress/secrets).
@@ -54,28 +49,11 @@ NAMESPACE="${NAMESPACE_ONEDEV:-onedev}"
 STORAGE="${DEFAULT_STORAGE_ONEDEV:-20Gi}"
 HOST=""
 
-ENABLE_AUTH="auto" # auto|true|false
-AUTH_USER="admin"
-AUTH_PASS=""
-AUTH_PASS_GENERATED="false"
-MIDDLEWARE_REF=""
-
 EXPOSE_SSH="false"
 SSH_NODEPORT=""
 
 UNINSTALL="false"
 DELETE_PVC="false"
-
-generate_htpasswd_line() {
-  local user="$1"
-  local pass="$2"
-
-  if command -v htpasswd > /dev/null 2>&1; then
-    htpasswd -nbB "${user}" "${pass}" | tr -d '\n'
-    return 0
-  fi
-  return 1
-}
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -99,26 +77,6 @@ while [[ $# -gt 0 ]]; do
       ;;
     --host=*)
       HOST="${1#*=}"
-      ;;
-    --auth)
-      ENABLE_AUTH="true"
-      ;;
-    --no-auth)
-      ENABLE_AUTH="false"
-      ;;
-    --auth-user)
-      shift
-      AUTH_USER="${1:-}"
-      ;;
-    --auth-user=*)
-      AUTH_USER="${1#*=}"
-      ;;
-    --auth-pass)
-      shift
-      AUTH_PASS="${1:-}"
-      ;;
-    --auth-pass=*)
-      AUTH_PASS="${1#*=}"
       ;;
     --expose-ssh)
       EXPOSE_SSH="true"
@@ -166,6 +124,7 @@ if [[ "${UNINSTALL}" == "true" ]]; then
   fi
 
   recipe_kdelete ingress onedev -n "${NAMESPACE}"
+  # Backwards-compat cleanup (older versions used Traefik BasicAuth).
   recipe_kdelete middleware onedev-auth -n "${NAMESPACE}"
   recipe_kdelete secret onedev-basicauth -n "${NAMESPACE}"
   recipe_kdelete service onedev-web -n "${NAMESPACE}"
@@ -184,36 +143,12 @@ log "Installing OneDev into namespace: ${NAMESPACE}"
 
 recipe_ensure_namespace "${NAMESPACE}"
 
-if [[ -n "${HOST}" ]]; then
-  if [[ "${ENABLE_AUTH}" == "auto" ]]; then
-    ENABLE_AUTH="true"
-  fi
-  if [[ "${ENABLE_AUTH}" == "true" ]]; then
-    [[ -n "${AUTH_USER}" ]] || die "--auth-user is required when auth is enabled"
-
-    if [[ -z "${AUTH_PASS}" ]]; then
-      if command -v openssl > /dev/null 2>&1; then
-        AUTH_PASS="$(openssl rand -base64 18 | tr -d '\n')"
-      else
-        die "openssl not found; pass --auth-pass explicitly"
-      fi
-      AUTH_PASS_GENERATED="true"
-      log "Generated OneDev BasicAuth password (store this now):"
-      echo "  user: ${AUTH_USER}"
-      echo "  pass: ${AUTH_PASS}"
-    fi
-
-    htline="$(generate_htpasswd_line "${AUTH_USER}" "${AUTH_PASS}")" || die "Could not generate htpasswd line (need htpasswd)"
-    k -n "${NAMESPACE}" create secret generic onedev-basicauth \
-      --from-literal=users="${htline}" \
-      --dry-run=client -o yaml | k apply -f -
-
-    MIDDLEWARE_REF="${NAMESPACE}-onedev-auth@kubernetescrd"
-    apply_template "${SCRIPT_DIR}/middleware-basicauth.yaml"
-  else
-    MIDDLEWARE_REF=""
-  fi
+# Backwards-compat: ensure any previously enabled Traefik BasicAuth is removed.
+if k -n "${NAMESPACE}" get ingress onedev > /dev/null 2>&1; then
+  k -n "${NAMESPACE}" annotate ingress onedev traefik.ingress.kubernetes.io/router.middlewares- 2> /dev/null || true
 fi
+recipe_kdelete middleware onedev-auth -n "${NAMESPACE}"
+recipe_kdelete secret onedev-basicauth -n "${NAMESPACE}"
 
 log "Deploying OneDev"
 apply_template "${SCRIPT_DIR}/pvc.yaml"
@@ -236,11 +171,6 @@ k wait --for=condition=available --timeout=600s deployment/onedev -n "${NAMESPAC
 if [[ -n "${HOST}" ]]; then
   log "Creating/Updating Traefik ingress for ${HOST}"
   apply_template "${SCRIPT_DIR}/ingress.yaml"
-  if [[ "${ENABLE_AUTH}" == "true" ]]; then
-    k -n "${NAMESPACE}" annotate ingress onedev \
-      traefik.ingress.kubernetes.io/router.middlewares="${MIDDLEWARE_REF}" \
-      --overwrite
-  fi
   recipe_maybe_add_edge_http_domain "${HOST}"
 fi
 
@@ -249,16 +179,6 @@ echo
 echo "OneDev UI:"
 if [[ -n "${HOST}" ]]; then
   echo "  URL: https://${HOST}/"
-  if [[ "${ENABLE_AUTH}" == "true" ]]; then
-    echo
-    echo "BasicAuth:"
-    echo "  user: ${AUTH_USER}"
-    if [[ "${AUTH_PASS_GENERATED}" == "true" ]]; then
-      echo "  pass: ${AUTH_PASS}"
-    else
-      echo "  pass: (not retrievable from cluster; Secret stores an htpasswd hash)"
-    fi
-  fi
 else
   echo "  Port-forward: kubectl -n ${NAMESPACE} port-forward svc/onedev-web 6610:80"
   echo "  Then open: http://localhost:6610"
