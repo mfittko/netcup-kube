@@ -9,6 +9,9 @@ import (
 	"strings"
 )
 
+// hostnameRegex is a pre-compiled regex for RFC 1123 hostname validation
+var hostnameRegex = regexp.MustCompile(`^([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)*[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$`)
+
 // Error represents a validation error with an actionable remediation hint
 type Error struct {
 	Field       string
@@ -89,7 +92,6 @@ func Hostname(field, value string) error {
 	// - Labels can contain alphanumeric and hyphens
 	// - Labels cannot start or end with hyphen
 	// - Labels must start with alphanumeric
-	hostnameRegex := regexp.MustCompile(`^([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)*[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$`)
 	
 	if len(value) > 253 || !hostnameRegex.MatchString(value) {
 		return &Error{

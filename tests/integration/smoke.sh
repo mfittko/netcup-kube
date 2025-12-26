@@ -52,9 +52,7 @@ echo "✓ Validation passed (JSON output)"
 
 # Test validation with invalid IP
 output=$(NODE_IP=999.999.999.999 ./bin/netcup-kube validate --output json 2>&1 || true)
-# Extract just the JSON part (before "validation failed")
-json_output=$(echo "$output" | sed '/^validation failed$/d')
-if echo "$json_output" | jq -e '.valid == false' > /dev/null; then
+if echo "$output" | jq -e '.valid == false' > /dev/null; then
   echo "✓ Validation correctly caught invalid IP"
 else
   echo "Error: Validation should have caught invalid IP" >&2
@@ -63,7 +61,7 @@ else
 fi
 
 # Test validation with invalid IP in JSON mode - detailed check
-if echo "$json_output" | jq -e '.valid == false and .errors[0].field == "NODE_IP"' > /dev/null; then
+if echo "$output" | jq -e '.valid == false and .errors[0].field == "NODE_IP"' > /dev/null; then
   echo "✓ Validation correctly reported invalid IP in JSON"
 else
   echo "Error: Expected validation error in JSON, got: $output" >&2

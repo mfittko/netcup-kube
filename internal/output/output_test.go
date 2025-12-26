@@ -300,3 +300,54 @@ func TestFormatter_UnsupportedFormat(t *testing.T) {
 		t.Errorf("PrintValidation() error should mention unsupported format, got: %v", err)
 	}
 }
+
+func TestParseFormat(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		want    Format
+		wantErr bool
+	}{
+		{
+			name:    "valid text format",
+			input:   "text",
+			want:    FormatText,
+			wantErr: false,
+		},
+		{
+			name:    "valid json format",
+			input:   "json",
+			want:    FormatJSON,
+			wantErr: false,
+		},
+		{
+			name:    "invalid format",
+			input:   "xml",
+			want:    FormatText,
+			wantErr: true,
+		},
+		{
+			name:    "empty string",
+			input:   "",
+			want:    FormatText,
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ParseFormat(tt.input)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ParseFormat() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if got != tt.want {
+				t.Errorf("ParseFormat() = %v, want %v", got, tt.want)
+			}
+			if err != nil && !strings.Contains(err.Error(), "invalid output format") {
+				t.Errorf("ParseFormat() error should mention invalid format, got: %v", err)
+			}
+		})
+	}
+}
+

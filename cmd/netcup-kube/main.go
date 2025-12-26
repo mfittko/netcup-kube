@@ -257,18 +257,16 @@ Examples:
   BASE_DOMAIN=example.com netcup-kube validate
   netcup-kube validate --env-file config/netcup-kube.env`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// Determine output format
-		format := output.FormatText
-		if outputFormat == "json" {
-			format = output.FormatJSON
-		} else if outputFormat != "text" && outputFormat != "" {
-			return fmt.Errorf("invalid output format: %q (must be 'text' or 'json')", outputFormat)
+		// Parse and validate output format
+		format, err := output.ParseFormat(outputFormat)
+		if err != nil {
+			return err
 		}
 
 		formatter := output.New(format)
 
 		// Validate configuration
-		err := cfg.Validate()
+		err = cfg.Validate()
 		if err != nil {
 			// Convert validation errors to output format
 			var validationErrs validation.Errors
@@ -290,7 +288,12 @@ Examples:
 				if printErr := formatter.PrintValidation(result); printErr != nil {
 					return printErr
 				}
-				return fmt.Errorf("validation failed")
+				// Only print text error message if not in JSON mode
+				if format != output.FormatJSON {
+					return fmt.Errorf("validation failed")
+				}
+				// For JSON mode, just exit with error code without additional message
+				os.Exit(1)
 			}
 			return err
 		}

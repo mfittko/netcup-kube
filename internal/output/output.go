@@ -17,6 +17,17 @@ const (
 	FormatJSON Format = "json"
 )
 
+// ParseFormat parses a format string and validates it
+func ParseFormat(s string) (Format, error) {
+	format := Format(s)
+	switch format {
+	case FormatText, FormatJSON:
+		return format, nil
+	default:
+		return FormatText, fmt.Errorf("invalid output format: %q (must be 'text' or 'json')", s)
+	}
+}
+
 // Formatter handles outputting data in different formats
 type Formatter struct {
 	format Format
