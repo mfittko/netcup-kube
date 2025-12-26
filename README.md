@@ -1,13 +1,13 @@
 # netcup-kube
-Bootstrap a production-ready k3s cluster on a Netcup root server (public) with up to N private vLAN nodes (Debian 13).
+Bootstrap a production-ready k3s cluster on a Netcup Debian 13 server.
 
 Features
 - k3s server bootstrap/join
 - Traefik forced to NodePort (30080/30443) via HelmChartConfig
 - Optional edge TLS via Caddy (wildcard dns-01 using Netcup CCP DNS API, or http-01)
 - Optional Kubernetes Dashboard via Helm with Traefik Ingress and optional Caddy Basic Auth
-- Optional NAT for vLAN-only nodes (+ persistent systemd unit)
 - Optional UFW setup with safe defaults
+- Advanced: Optional NAT gateway for private vLAN worker nodes (opt-in via `ENABLE_VLAN_NAT=true`)
 
 Project layout
 - `bin/netcup-kube` – Go CLI binary (entrypoint)
@@ -62,7 +62,6 @@ Environment variables (selected)
 - KUBECONFIG_MODE=0600|0640 (defaults to 0640 when running via sudo; otherwise 0600)
 - KUBECONFIG_GROUP=ops (defaults to sudo user's primary group; used for k3s write-kubeconfig-group)
 - SERVER_URL, TOKEN, TOKEN_FILE (required for `MODE=join`)
-- PRIVATE_IFACE, PRIVATE_CIDR, ENABLE_VLAN_NAT=true, PUBLIC_IFACE
 - EDGE_PROXY=none|caddy, BASE_DOMAIN=example.com, ACME_EMAIL=user@example.com
 - CADDY_CERT_MODE=dns01_wildcard|http01 (default dns01_wildcard)
 - CADDY_HTTP01_HOSTS="kube.example.com demo.example.com" (optional; used for HTTP-01 mode)
@@ -71,9 +70,15 @@ Environment variables (selected)
 - DASH_AUTH_REGEN=true (optional; force regenerating dashboard basic auth hash)
 - CONFIRM=true (required for non-interactive runs of commands that would overwrite configs / open firewall rules)
 
-Notes
-- The NAT systemd unit uses a dedicated helper at `/usr/local/sbin/vlan-nat-apply` so it’s stable across reboots.
-  - NAT is **opt-in**: it is only configured when `ENABLE_VLAN_NAT=true` (and requires `PRIVATE_CIDR` + `PUBLIC_IFACE`).
+Advanced: vLAN NAT Gateway (optional)
+- For advanced setups with private vLAN worker nodes that need NAT to reach the internet:
+  - ENABLE_VLAN_NAT=true (enables NAT gateway configuration)
+  - PRIVATE_CIDR (required when ENABLE_VLAN_NAT=true, e.g., "10.10.0.0/24")
+  - PRIVATE_IFACE (optional, private network interface)
+  - PUBLIC_IFACE (required when ENABLE_VLAN_NAT=true, e.g., "eth0")
+  - Creates a persistent systemd unit with helper at `/usr/local/sbin/vlan-nat-apply`
+- Note: NAT gateway is **opt-in only** and not required for typical single-server or multi-server deployments.
+
 
 Testing
 - Lint/format: `make check` (shfmt + shellcheck)
