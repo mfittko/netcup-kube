@@ -316,3 +316,10 @@ exit 42
 		t.Fatalf("Execute() exit code = %d, want 42", exitErr.Code)
 	}
 }
+
+func TestExitCodeError_Error(t *testing.T) {
+	err := ExitCodeError{Code: 42}
+	if got := err.Error(); got != "script exited with code 42" {
+		t.Fatalf("ExitCodeError.Error() = %q, want %q", got, "script exited with code 42")
+	}
+}
