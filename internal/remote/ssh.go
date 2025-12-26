@@ -15,7 +15,10 @@ type SSHClient struct {
 	IdentityFile string
 }
 
-// NewSSHClient creates a new SSH client
+// NewSSHClient creates a new SSH client.
+//
+// NOTE: We pick a *private key* file here (no ".pub"), because `ssh -i` needs the private key.
+// Public keys are used separately for provisioning (authorized_keys), see `Config.GetPubKey()`.
 func NewSSHClient(host, user string) *SSHClient {
 	// Pick a public key (prefer ed25519)
 	identityFile := ""
@@ -198,7 +201,12 @@ func (c *SSHClient) buildRemoteCommand(command string, args []string, env map[st
 	return strings.Join(parts, " ")
 }
 
-// shellEscape escapes a string for safe use in a shell command
+// shellEscape escapes a string for safe use as a single shell argument.
+//
+// We wrap the entire string in single quotes so the shell treats it as a literal and does not
+// expand spaces or metacharacters. To embed a literal single quote inside a single-quoted string
+// in POSIX shells, the sequence must be: end the quote, insert '\'', then reopen the quote.
+// Concretely, "foo'bar" becomes 'foo'\''bar'.
 func shellEscape(s string) string {
 	// Use single quotes for simplicity and safety
 	// Replace any single quotes in the string with '\''

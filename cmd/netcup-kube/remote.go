@@ -20,9 +20,7 @@ var (
 var remoteCmd = &cobra.Command{
 	Use:   "remote",
 	Short: "Execute commands on remote hosts",
-	Long: `Remote execution engine for netcup-kube.
-
-Remote execution engine for safer, more reliable remote operations.`,
+	Long:  `Remote execution engine for netcup-kube, providing safer, more reliable remote operations.`,
 	SilenceUsage: true,
 }
 
@@ -42,7 +40,7 @@ Examples:
   netcup-kube remote --host root.example.com --user ops provision
   ROOT_PASS=xxx netcup-kube remote --host 203.0.113.10 provision`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, err := loadRemoteConfig()
+		cfg, err := loadRemoteConfig(cmd)
 		if err != nil {
 			return err
 		}
@@ -60,7 +58,7 @@ Examples:
   netcup-kube remote git --ref v1.0.0
   netcup-kube remote git --branch develop`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, err := loadRemoteConfig()
+		cfg, err := loadRemoteConfig(cmd)
 		if err != nil {
 			return err
 		}
@@ -103,7 +101,7 @@ Examples:
   netcup-kube remote build
   netcup-kube remote build --branch main --pull`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, err := loadRemoteConfig()
+		cfg, err := loadRemoteConfig(cmd)
 		if err != nil {
 			return err
 		}
@@ -157,7 +155,7 @@ Examples:
   netcup-kube remote smoke
   netcup-kube remote smoke --branch main --pull`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, err := loadRemoteConfig()
+		cfg, err := loadRemoteConfig(cmd)
 		if err != nil {
 			return err
 		}
@@ -198,7 +196,7 @@ Examples:
   netcup-kube remote run --no-tty --env-file ./env/test.env bootstrap
   netcup-kube remote run -- dns --help`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, err := loadRemoteConfig()
+		cfg, err := loadRemoteConfig(cmd)
 		if err != nil {
 			return err
 		}
@@ -229,8 +227,8 @@ Examples:
 	},
 }
 
-func loadRemoteConfig() (*remote.Config, error) {
-	cfg := buildRemoteConfig()
+func loadRemoteConfig(cmd *cobra.Command) (*remote.Config, error) {
+	cfg := buildRemoteConfig(cmd)
 	if err := cfg.LoadConfigFromEnv(cfg.ConfigPath); err != nil {
 		return nil, fmt.Errorf("failed to load config: %w", err)
 	}
@@ -240,14 +238,17 @@ func loadRemoteConfig() (*remote.Config, error) {
 	return cfg, nil
 }
 
-func buildRemoteConfig() *remote.Config {
+func buildRemoteConfig(cmd *cobra.Command) *remote.Config {
 	cfg := remote.NewConfig()
 	
 	if remoteHost != "" {
 		cfg.Host = remoteHost
 	}
-	if remoteUser != "" {
+
+	// Only treat --user as explicit when the flag was actually provided.
+	if cmd != nil && cmd.Flags().Changed("user") && remoteUser != "" {
 		cfg.User = remoteUser
+		cfg.UserExplicit = true
 	}
 	if remotePubKey != "" {
 		cfg.PubKeyPath = remotePubKey
@@ -295,7 +296,7 @@ func findProjectRoot() (string, error) {
 		}
 	}
 
-	return currentDir, nil // Return current dir as fallback
+	return "", fmt.Errorf("could not locate project root: scripts/main.sh not found in current directory or expected locations")
 }
 
 func init() {

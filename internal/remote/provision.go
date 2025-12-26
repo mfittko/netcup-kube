@@ -55,7 +55,7 @@ func ensureRootAccess(client Client, host string, pubKeyPath string) error {
 			fmt.Printf("Root password for root@%s: ", host)
 			// Note: In production, use a proper password input method
 			// For now, we'll just read from environment or fail
-			return fmt.Errorf("ROOT_PASS environment variable not set")
+			return fmt.Errorf("ROOT_PASS environment variable is empty or not set")
 		}
 
 		fmt.Println("Pushing SSH key to root with sshpass+ssh-copy-id")
@@ -73,7 +73,8 @@ func ensureRootAccess(client Client, host string, pubKeyPath string) error {
 			return fmt.Errorf("failed to copy SSH key: %w", err)
 		}
 
-		// Clear the password from environment for security
+		// Best-effort cleanup: clears the env var for subsequent commands in this process.
+		// Note: this does not guarantee the value is removed from memory.
 		os.Unsetenv("ROOT_PASS")
 		return nil
 	}
@@ -99,9 +100,10 @@ fi
 usermod -aG sudo __NEW_USER__
 install -d -m 0700 -o __NEW_USER__ -g __NEW_USER__ /home/__NEW_USER__/.ssh
 
-# Append key once
-awk 'BEGIN{seen=0} $0=="__PUBKEY__"{seen=1} END{exit !seen}' /home/__NEW_USER__/.ssh/authorized_keys 2>/dev/null || \
-  echo "__PUBKEY__" >> /home/__NEW_USER__/.ssh/authorized_keys
+# Append key once (treat pubkey literally, no regex interpretation)
+if ! grep -Fxq "__PUBKEY__" /home/__NEW_USER__/.ssh/authorized_keys 2>/dev/null; then
+  printf '%s\n' "__PUBKEY__" >> /home/__NEW_USER__/.ssh/authorized_keys
+fi
 chown __NEW_USER__:__NEW_USER__ /home/__NEW_USER__/.ssh/authorized_keys
 chmod 0600 /home/__NEW_USER__/.ssh/authorized_keys
 

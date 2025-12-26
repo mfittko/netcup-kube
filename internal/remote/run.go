@@ -30,6 +30,9 @@ func runWithClient(client Client, cfg *Config, opts RunOptions) error {
 		return fmt.Errorf("missing netcup-kube command arguments")
 	}
 
+	// Keep this list intentionally small: `remote run` is meant for the main lifecycle commands
+	// that are safe and commonly used over SSH. If new top-level commands are added to netcup-kube,
+	// update this allowlist accordingly.
 	supportedCmds := []string{"bootstrap", "join", "pair", "dns", "help", "-h", "--help"}
 	cmdValid := false
 	for _, cmd := range supportedCmds {
@@ -90,7 +93,13 @@ exec "${bin}" "$@"
 `
 
 	// Build command arguments for the remote runner
-	// We need to pass this as a shell command string
+	// We need to pass this as a single remote shell command string.
+	//
+	// Escaping layers (intentional):
+	// - `runnerScript` is shell-escaped and passed as the argument to `bash -lc` on the remote host.
+	// - Each user-provided arg is individually shell-escaped so it cannot inject additional shell tokens
+	//   when we join the command string and feed it to `ssh`.
+	// - The remote runner then execs the remote binary with the original argv preserved.
 	cmdParts := []string{"sudo", "-E", "bash", "-lc", shellEscape(runnerScript), "bash", remoteEnv, remoteBin}
 	
 	// Escape each user argument for safe shell execution
@@ -136,7 +145,9 @@ func cleanupRemoteEnv(client Client, remoteEnv string, forceTTY bool) {
 		return
 	}
 
-	_ = client.Execute("sudo", []string{"rm", "-f", remoteEnv}, forceTTY)
+	if err := client.Execute("sudo", []string{"rm", "-f", remoteEnv}, forceTTY); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to clean up remote env file %s: %v\n", remoteEnv, err)
+	}
 }
 
 // joinArgs joins arguments for display

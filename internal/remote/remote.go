@@ -20,6 +20,9 @@ const (
 type Config struct {
 	Host       string
 	User       string
+	// UserExplicit indicates the user was explicitly set by a caller (e.g. CLI flag),
+	// so it should not be overridden by values loaded from config files.
+	UserExplicit bool
 	PubKeyPath string
 	RepoURL    string
 	ConfigPath string
@@ -71,8 +74,9 @@ func (c *Config) LoadConfigFromEnv(configPath string) error {
 		}
 	}
 
-	// Set user if still default
-	if c.User == defaultUser {
+	// Set user from file only when the caller didn't explicitly set it.
+	// We treat the default ("cubeadmin") as an "unset" value for convenience.
+	if !c.UserExplicit && c.User == defaultUser {
 		if user, ok := vars["MGMT_USER"]; ok && user != "" {
 			c.User = user
 		} else if user, ok := vars["DEFAULT_USER"]; ok && user != "" {
@@ -178,7 +182,7 @@ elif [[ -n "${branch}" ]]; then
     git checkout "${branch}"
   else
     if ! git show-ref --verify --quiet "refs/remotes/origin/${branch}"; then
-      echo "[remote] ERROR: origin/${branch} not found" >&2
+      echo "[remote] ERROR: branch '${branch}' not found locally or as 'origin/${branch}'" >&2
       exit 1
     fi
     git checkout -b "${branch}" --track "origin/${branch}"
@@ -206,6 +210,8 @@ fi
 // RemoteBuildAndUpload builds the Go binary locally and uploads it to the remote host
 func RemoteBuildAndUpload(client Client, cfg *Config, projectRoot string, opts GitOptions) error {
 	// Sync git if requested
+	// NOTE: A sync is still performed when Branch/Ref are set even if Pull=false,
+	// because we need at least a fetch+checkout to put the remote repo on the requested ref/branch.
 	if opts.Branch != "" || opts.Ref != "" || opts.Pull {
 		if err := RemoteGitSync(client, cfg.GetRemoteRepoDir(), opts); err != nil {
 			return fmt.Errorf("git sync failed: %w", err)
