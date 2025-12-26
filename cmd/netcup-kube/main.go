@@ -9,6 +9,8 @@ import (
 
 	"github.com/mfittko/netcup-kube/internal/config"
 	"github.com/mfittko/netcup-kube/internal/executor"
+	"github.com/mfittko/netcup-kube/internal/output"
+	"github.com/mfittko/netcup-kube/internal/validation"
 	"github.com/spf13/cobra"
 )
 
@@ -22,6 +24,7 @@ var (
 	envFile          string
 	dryRun           bool
 	dryRunWriteFiles bool
+	outputFormat     string
 )
 
 // parseGlobalFlagsFromArgs manually parses global flags from args for commands with DisableFlagParsing.
@@ -123,12 +126,14 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&envFile, "env-file", "", "Path to environment file (default: config/netcup-kube.env if exists)")
 	rootCmd.PersistentFlags().BoolVar(&dryRun, "dry-run", false, "Enable dry-run mode (no actual changes)")
 	rootCmd.PersistentFlags().BoolVar(&dryRunWriteFiles, "dry-run-write-files", false, "Dry-run but write config files")
+	rootCmd.PersistentFlags().StringVarP(&outputFormat, "output", "o", "text", "Output format: text or json")
 
 	// Add subcommands
 	rootCmd.AddCommand(bootstrapCmd)
 	rootCmd.AddCommand(joinCmd)
 	rootCmd.AddCommand(dnsCmd)
 	rootCmd.AddCommand(pairCmd)
+	rootCmd.AddCommand(validateCmd)
 	rootCmd.AddCommand(remoteCmd)
 }
 
@@ -233,6 +238,66 @@ Examples:
 		// Filter out global flags from args
 		_, _, _, filteredArgs := parseGlobalFlagsFromArgs(args)
 		return scriptExecutor.Execute("pair", filteredArgs, cfg.ToEnvSlice())
+	},
+}
+
+var validateCmd = &cobra.Command{
+	Use:   "validate",
+	Short: "Validate configuration without executing any commands",
+	Long: `Validate configuration values for correctness.
+
+This command checks all configuration values (from environment, env file, or flags)
+and reports any validation errors with remediation hints.
+
+Supports both text and JSON output formats via --output flag.
+
+Examples:
+  netcup-kube validate
+  netcup-kube validate --output json
+  BASE_DOMAIN=example.com netcup-kube validate
+  netcup-kube validate --env-file config/netcup-kube.env`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		// Determine output format
+		format := output.FormatText
+		if outputFormat == "json" {
+			format = output.FormatJSON
+		} else if outputFormat != "text" && outputFormat != "" {
+			return fmt.Errorf("invalid output format: %q (must be 'text' or 'json')", outputFormat)
+		}
+
+		formatter := output.New(format)
+
+		// Validate configuration
+		err := cfg.Validate()
+		if err != nil {
+			// Convert validation errors to output format
+			var validationErrs validation.Errors
+			if errors.As(err, &validationErrs) {
+				result := &output.ValidationResult{
+					Valid:  false,
+					Errors: make([]output.ValidationError, 0, len(validationErrs)),
+				}
+				for _, e := range validationErrs {
+					if valErr, ok := e.(*validation.Error); ok {
+						result.Errors = append(result.Errors, output.ValidationError{
+							Field:       valErr.Field,
+							Value:       valErr.Value,
+							Message:     valErr.Message,
+							Remediation: valErr.Remediation,
+						})
+					}
+				}
+				if printErr := formatter.PrintValidation(result); printErr != nil {
+					return printErr
+				}
+				return fmt.Errorf("validation failed")
+			}
+			return err
+		}
+
+		// Validation passed
+		result := &output.ValidationResult{Valid: true}
+		return formatter.PrintValidation(result)
 	},
 }
 
