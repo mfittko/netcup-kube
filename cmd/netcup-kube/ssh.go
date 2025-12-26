@@ -14,7 +14,6 @@ var (
 	sshUser       string
 	sshEnvFile    string
 	sshNoEnv      bool
-	sshTunnel     string
 	sshLocalPort  string
 	sshRemoteHost string
 	sshRemotePort string
@@ -25,10 +24,10 @@ var sshCmd = &cobra.Command{
 	Short: "Open SSH shell or manage SSH tunnel for kubectl access",
 	Long: `Open an interactive SSH shell to the management node or manage an SSH tunnel.
 
-Without --tunnel flag:
+Without subcommand:
   Opens an interactive SSH shell to the management node.
 
-With --tunnel flag:
+With tunnel subcommand:
   Manages an SSH tunnel using ControlMaster for reliable start/stop/status operations.
   The tunnel forwards local port (default 6443) to the k3s API server on the remote host.
 
@@ -38,10 +37,10 @@ Examples:
   netcup-kube ssh --host example.com --user ops
 
   # Manage tunnel
-  netcup-kube ssh --tunnel start
-  netcup-kube ssh --tunnel stop
-  netcup-kube ssh --tunnel status
-  netcup-kube ssh --tunnel start --local-port 6443`,
+  netcup-kube ssh tunnel start
+  netcup-kube ssh tunnel stop
+  netcup-kube ssh tunnel status
+  netcup-kube ssh tunnel start --local-port 6443`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Load environment
 		if err := loadSSHEnv(); err != nil {
@@ -72,13 +71,99 @@ Examples:
 			return fmt.Errorf("no host provided and no TUNNEL_HOST/MGMT_HOST found in config")
 		}
 
-		// If --tunnel flag is provided, manage tunnel
-		if sshTunnel != "" {
-			return handleTunnel()
+		// Open interactive SSH shell
+		return openSSHShell()
+	},
+}
+
+// SSH tunnel subcommand
+var sshTunnelCmd = &cobra.Command{
+	Use:   "tunnel [start|stop|status]",
+	Short: "Manage SSH tunnel for kubectl access",
+	Long: `Manage an SSH tunnel using ControlMaster for reliable start/stop/status operations.
+
+The tunnel forwards local port (default 6443) to the k3s API server on the remote host.
+
+Commands:
+  start   - Start SSH tunnel (default if no command specified)
+  stop    - Stop SSH tunnel
+  status  - Check tunnel status
+
+Examples:
+  netcup-kube ssh tunnel start
+  netcup-kube ssh tunnel stop
+  netcup-kube ssh tunnel status
+  netcup-kube ssh tunnel start --local-port 6443`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		// Load environment
+		if err := loadSSHEnv(); err != nil {
+			return err
 		}
 
-		// Otherwise, open interactive SSH shell
-		return openSSHShell()
+		// Apply defaults for host and user
+		if sshHost == "" {
+			sshHost = os.Getenv("TUNNEL_HOST")
+			if sshHost == "" {
+				sshHost = os.Getenv("MGMT_HOST")
+				if sshHost == "" {
+					sshHost = os.Getenv("MGMT_IP")
+				}
+			}
+		}
+		if sshUser == "" {
+			sshUser = os.Getenv("TUNNEL_USER")
+			if sshUser == "" {
+				sshUser = os.Getenv("MGMT_USER")
+				if sshUser == "" {
+					sshUser = "ops"
+				}
+			}
+		}
+
+		if sshHost == "" {
+			return fmt.Errorf("no host provided and no TUNNEL_HOST/MGMT_HOST found in config")
+		}
+
+		// Apply tunnel-specific defaults
+		if sshLocalPort == "" {
+			sshLocalPort = os.Getenv("TUNNEL_LOCAL_PORT")
+			if sshLocalPort == "" {
+				sshLocalPort = "6443"
+			}
+		}
+		if sshRemoteHost == "" {
+			sshRemoteHost = os.Getenv("TUNNEL_REMOTE_HOST")
+			if sshRemoteHost == "" {
+				sshRemoteHost = "127.0.0.1"
+			}
+		}
+		if sshRemotePort == "" {
+			sshRemotePort = os.Getenv("TUNNEL_REMOTE_PORT")
+			if sshRemotePort == "" {
+				sshRemotePort = "6443"
+			}
+		}
+
+		// Determine action
+		action := "start" // default
+		if len(args) > 0 {
+			action = args[0]
+			if action != "start" && action != "stop" && action != "status" {
+				return fmt.Errorf("unknown tunnel command: %s (valid: start, stop, status)", action)
+			}
+		}
+
+		// Execute tunnel action
+		switch action {
+		case "start":
+			return sshTunnelStart()
+		case "stop":
+			return sshTunnelStop()
+		case "status":
+			return sshTunnelStatus()
+		default:
+			return fmt.Errorf("unknown tunnel action: %s", action)
+		}
 	},
 }
 
@@ -135,45 +220,6 @@ func openSSHShell() error {
 	sshCmd.Stderr = os.Stderr
 
 	return sshCmd.Run()
-}
-
-func handleTunnel() error {
-	action := sshTunnel
-	if action != "start" && action != "stop" && action != "status" {
-		return fmt.Errorf("invalid --tunnel value: %s (valid: start, stop, status)", action)
-	}
-
-	// Apply tunnel-specific defaults
-	if sshLocalPort == "" {
-		sshLocalPort = os.Getenv("TUNNEL_LOCAL_PORT")
-		if sshLocalPort == "" {
-			sshLocalPort = "6443"
-		}
-	}
-	if sshRemoteHost == "" {
-		sshRemoteHost = os.Getenv("TUNNEL_REMOTE_HOST")
-		if sshRemoteHost == "" {
-			sshRemoteHost = "127.0.0.1"
-		}
-	}
-	if sshRemotePort == "" {
-		sshRemotePort = os.Getenv("TUNNEL_REMOTE_PORT")
-		if sshRemotePort == "" {
-			sshRemotePort = "6443"
-		}
-	}
-
-	// Execute tunnel action
-	switch action {
-	case "start":
-		return sshTunnelStart()
-	case "stop":
-		return sshTunnelStop()
-	case "status":
-		return sshTunnelStatus()
-	default:
-		return fmt.Errorf("unknown tunnel action: %s", action)
-	}
 }
 
 func sshTunnelStart() error {
@@ -330,12 +376,17 @@ func showPortListeners(port string) {
 }
 
 func init() {
-	sshCmd.Flags().StringVar(&sshHost, "host", "", "Target SSH host")
-	sshCmd.Flags().StringVar(&sshUser, "user", "", "SSH user")
-	sshCmd.Flags().StringVar(&sshEnvFile, "env-file", "", "Load env file")
-	sshCmd.Flags().BoolVar(&sshNoEnv, "no-env", false, "Skip loading env file")
-	sshCmd.Flags().StringVar(&sshTunnel, "tunnel", "", "Manage SSH tunnel: start, stop, or status")
-	sshCmd.Flags().StringVar(&sshLocalPort, "local-port", "", "Local port to bind (tunnel mode)")
-	sshCmd.Flags().StringVar(&sshRemoteHost, "remote-host", "", "Remote host to forward to (tunnel mode)")
-	sshCmd.Flags().StringVar(&sshRemotePort, "remote-port", "", "Remote port to forward to (tunnel mode)")
+	// Add flags to main ssh command
+	sshCmd.PersistentFlags().StringVar(&sshHost, "host", "", "Target SSH host")
+	sshCmd.PersistentFlags().StringVar(&sshUser, "user", "", "SSH user")
+	sshCmd.PersistentFlags().StringVar(&sshEnvFile, "env-file", "", "Load env file")
+	sshCmd.PersistentFlags().BoolVar(&sshNoEnv, "no-env", false, "Skip loading env file")
+
+	// Add flags specific to tunnel subcommand
+	sshTunnelCmd.Flags().StringVar(&sshLocalPort, "local-port", "", "Local port to bind")
+	sshTunnelCmd.Flags().StringVar(&sshRemoteHost, "remote-host", "", "Remote host to forward to")
+	sshTunnelCmd.Flags().StringVar(&sshRemotePort, "remote-port", "", "Remote port to forward to")
+
+	// Add tunnel as a subcommand of ssh
+	sshCmd.AddCommand(sshTunnelCmd)
 }
