@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/mfittko/netcup-kube/internal/tunnel"
 )
 
 func TestLoadSSHEnv(t *testing.T) {
@@ -132,7 +134,7 @@ func TestLoadSSHEnv_NonExistentExplicitFile(t *testing.T) {
 
 func TestPortInUse(t *testing.T) {
 	// Test with a port that's definitely not in use
-	inUse := portInUse("99999")
+	inUse := tunnel.PortInUse("99999")
 	// The result depends on system state, so we just verify it doesn't crash
 	t.Logf("Port 99999 in use: %v", inUse)
 }
@@ -245,9 +247,9 @@ func TestSSHTunnelStatus_NoTunnel(t *testing.T) {
 }
 
 func TestPortInUse_WithLsof(t *testing.T) {
-	// This test verifies portInUse handles the lsof case
+	// This test verifies PortInUse handles the lsof case
 	// We use a high port that's unlikely to be in use
-	inUse := portInUse("65432")
+	inUse := tunnel.PortInUse("65432")
 	// Result depends on system state, just verify it doesn't crash
 	t.Logf("Port 65432 in use (via lsof path): %v", inUse)
 }

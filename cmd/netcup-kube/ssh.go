@@ -258,40 +258,13 @@ func sshTunnelStatus() error {
 		fmt.Printf("control:     <no output>\n")
 	}
 
-	if portInUse(sshLocalPort) {
+	if tunnel.PortInUse(sshLocalPort) {
 		fmt.Printf("listen:      yes (something is bound to localhost:%s)\n", sshLocalPort)
 	} else {
 		fmt.Printf("listen:      no\n")
 	}
 
 	return fmt.Errorf("tunnel not running")
-}
-
-func portInUse(port string) bool {
-	// Try to detect OS and use appropriate command
-	var cmd *exec.Cmd
-
-	// Try lsof (macOS and some Linux)
-	if _, err := exec.LookPath("lsof"); err == nil {
-		cmd = exec.Command("lsof", "-nP", "-iTCP:"+port, "-sTCP:LISTEN")
-		cmd.Stdout = nil
-		cmd.Stderr = nil
-		if err := cmd.Run(); err == nil {
-			return true
-		}
-	}
-
-	// Try ss (Linux)
-	if _, err := exec.LookPath("ss"); err == nil {
-		cmd = exec.Command("sh", "-c", fmt.Sprintf("ss -ltn '( sport = :%s )' | tail -n +2 | grep -q .", port))
-		cmd.Stdout = nil
-		cmd.Stderr = nil
-		if err := cmd.Run(); err == nil {
-			return true
-		}
-	}
-
-	return false
 }
 
 func showPortListeners(port string) {

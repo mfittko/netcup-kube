@@ -47,7 +47,8 @@ func (m *Manager) GetControlSocket() string {
 func (m *Manager) IsRunning() bool {
 	ctlSocket := m.GetControlSocket()
 	checkCmd := exec.Command("ssh", "-S", ctlSocket, "-O", "check", fmt.Sprintf("%s@%s", m.User, m.Host))
-		checkCmd.Stderr = nil
+	checkCmd.Stdout = nil
+	checkCmd.Stderr = nil
 	return checkCmd.Run() == nil
 }
 
@@ -59,7 +60,7 @@ func (m *Manager) Start() error {
 	}
 
 	// Check if port is already in use
-	if portInUse(m.LocalPort) {
+	if PortInUse(m.LocalPort) {
 		return fmt.Errorf("localhost:%s is already in use", m.LocalPort)
 	}
 
@@ -107,8 +108,8 @@ func (m *Manager) Status() (running bool, listenPort string) {
 	return
 }
 
-// portInUse checks if a local port is in use
-func portInUse(port string) bool {
+// PortInUse checks if a local port is in use
+func PortInUse(port string) bool {
 	// Try lsof (macOS and some Linux)
 	if _, err := exec.LookPath("lsof"); err == nil {
 		cmd := exec.Command("lsof", "-nP", "-iTCP:"+port, "-sTCP:LISTEN")
