@@ -97,10 +97,7 @@ recipe_ensure_namespace "${NAMESPACE}"
 
 # Add prometheus-community Helm repo
 log "Adding prometheus-community Helm repository"
-if ! helm repo list 2> /dev/null | grep -q "^prometheus-community"; then
-  helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
-fi
-helm repo update
+recipe_helm_repo_add "prometheus-community" "https://prometheus-community.github.io/helm-charts"
 
 # Generate secure password if not provided
 if [[ -z "${PASSWORD}" ]]; then

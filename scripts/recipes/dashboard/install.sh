@@ -91,10 +91,7 @@ recipe_ensure_namespace "${NAMESPACE}"
 
 # Add Dashboard Helm repo
 log "Adding Kubernetes Dashboard Helm repository"
-if ! helm repo list 2> /dev/null | grep -q "^kubernetes-dashboard"; then
-  helm repo add kubernetes-dashboard https://kubernetes.github.io/dashboard/ --force-update
-fi
-helm repo update kubernetes-dashboard
+recipe_helm_repo_add "kubernetes-dashboard" "https://kubernetes.github.io/dashboard/"
 
 # Install/Upgrade Dashboard
 log "Installing/Upgrading Kubernetes Dashboard via Helm"
