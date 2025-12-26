@@ -74,11 +74,7 @@ log "Installing Sealed Secrets into namespace: ${NAMESPACE}"
 recipe_ensure_namespace "${NAMESPACE}"
 
 # Add Sealed Secrets Helm repo
-log "Adding Sealed Secrets Helm repository"
-if ! helm repo list 2> /dev/null | grep -q "^sealed-secrets"; then
-  helm repo add sealed-secrets https://bitnami-labs.github.io/sealed-secrets
-fi
-helm repo update
+recipe_helm_repo_add "sealed-secrets" "https://bitnami-labs.github.io/sealed-secrets"
 
 # Install/Upgrade Sealed Secrets
 log "Installing/Upgrading Sealed Secrets via Helm"

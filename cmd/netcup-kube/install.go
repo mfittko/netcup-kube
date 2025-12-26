@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 )
@@ -151,9 +152,15 @@ Examples:
 					// Create temp env file with CONFIRM=true
 					tmpEnv, err := os.CreateTemp("", "netcup-kube-install.env.*")
 					if err == nil {
-						defer os.Remove(tmpEnv.Name())
-						tmpEnv.WriteString("CONFIRM=true\n")
-						tmpEnv.Close()
+						defer func() {
+							tmpEnv.Close()
+							os.Remove(tmpEnv.Name())
+						}()
+						
+						if _, err := tmpEnv.WriteString("CONFIRM=true\n"); err != nil {
+							fmt.Fprintf(os.Stderr, "Warning: failed to write temp env file: %v\n", err)
+						} else {
+							tmpEnv.Close()
 						
 						// Run the domain add command
 						dnsCmd := exec.Command(remoteBin, "remote", "run", "--no-tty", "--env-file", tmpEnv.Name(), "dns", "--type", "edge-http", "--add-domains", hostArg)
@@ -166,6 +173,7 @@ Examples:
 							fmt.Printf("⚠ Failed to add domain automatically. Run manually:\n")
 							fmt.Printf("  CONFIRM=true bin/netcup-kube remote run --no-tty dns --type edge-http --add-domains \"%s\"\n", hostArg)
 						}
+					}
 					}
 				}
 			}
@@ -264,7 +272,7 @@ func ensureTunnelRunning(envFile, projectRoot string) error {
 		}
 		
 		// Give tunnel a moment to establish
-		exec.Command("sleep", "1").Run()
+		time.Sleep(1 * time.Second)
 		
 		// Verify tunnel is now running
 		checkCmd := exec.Command("ssh", "-S", ctlSocket, "-O", "check", fmt.Sprintf("%s@%s", remoteUser, remoteHost))

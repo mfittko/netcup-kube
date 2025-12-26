@@ -25,7 +25,7 @@ The `netcup-kube` project provides four primary CLI entrypoints:
 1. **`netcup-kube`** — Main orchestrator for k3s cluster bootstrapping and configuration
 2. **`netcup-kube install`** — Recipe dispatcher for installing optional components
 3. **`netcup-kube remote`** — Remote bootstrap and command execution
-4. **`netcup-kube-tunnel`** — SSH tunnel manager for local kubectl access
+4. **`netcup-kube ssh`** — SSH shell and tunnel manager for local kubectl access
 
 All scripts follow bash `set -euo pipefail` semantics: they exit on any error, undefined variable access, or pipeline failure.
 
@@ -50,7 +50,7 @@ netcup-kube <command> [options]
 - `dns` — Configure edge TLS via Caddy
 - `pair` — Print copy/paste join command for worker nodes
 - `install` — Install optional components (recipes) onto the cluster
-- `tunnel` — Manage SSH tunnel for local kubectl access
+- `ssh` — Open SSH shell or manage SSH tunnel for kubectl access
 - `validate` — Validate configuration
 - `remote` — Execute commands on remote hosts
 - `help`, `-h`, `--help` — Show usage information
@@ -624,7 +624,7 @@ These elements define the public CLI contract and **must not change** without a 
    - `netcup-kube bootstrap|join|dns|pair|help`
    - `netcup-kube install <recipe>`
    - `netcup-kube remote provision|git|run`
-   - `netcup-kube-tunnel start|stop|status`
+   - `netcup-kube ssh tunnel start|stop|status`
 
 2. **Required Arguments**
    - `netcup-kube install` requires `<recipe>` positional argument

@@ -23,6 +23,24 @@ func getTunnelControlSocket(user, host, localPort string) string {
 }
 
 // loadEnvFile loads key=value pairs from an environment file
+// isValidEnvKey checks if a string is a valid environment variable name
+func isValidEnvKey(key string) bool {
+	if len(key) == 0 {
+		return false
+	}
+	// Must start with letter or underscore
+	if !(key[0] >= 'A' && key[0] <= 'Z' || key[0] == '_' || key[0] >= 'a' && key[0] <= 'z') {
+		return false
+	}
+	// Subsequent characters can be letters, digits, or underscore
+	for _, c := range key {
+		if !(c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '_') {
+			return false
+		}
+	}
+	return true
+}
+
 func loadEnvFile(path string) (map[string]string, error) {
 	env := make(map[string]string)
 
@@ -41,6 +59,9 @@ func loadEnvFile(path string) (map[string]string, error) {
 		parts := strings.SplitN(line, "=", 2)
 		if len(parts) == 2 {
 			key := strings.TrimSpace(parts[0])
+			if !isValidEnvKey(key) {
+				continue
+			}
 			value := strings.TrimSpace(parts[1])
 			// Remove quotes if present
 			if len(value) >= 2 && ((value[0] == '"' && value[len(value)-1] == '"') || (value[0] == '\'' && value[len(value)-1] == '\'')) {

@@ -42,29 +42,9 @@ Examples:
   netcup-kube ssh tunnel status
   netcup-kube ssh tunnel start --local-port 6443`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// Load environment
-		if err := loadSSHEnv(); err != nil {
+		// Load environment and apply defaults
+		if err := loadSSHDefaults(); err != nil {
 			return err
-		}
-
-		// Apply defaults for host and user
-		if sshHost == "" {
-			sshHost = os.Getenv("TUNNEL_HOST")
-			if sshHost == "" {
-				sshHost = os.Getenv("MGMT_HOST")
-				if sshHost == "" {
-					sshHost = os.Getenv("MGMT_IP")
-				}
-			}
-		}
-		if sshUser == "" {
-			sshUser = os.Getenv("TUNNEL_USER")
-			if sshUser == "" {
-				sshUser = os.Getenv("MGMT_USER")
-				if sshUser == "" {
-					sshUser = "ops"
-				}
-			}
 		}
 
 		if sshHost == "" {
@@ -95,29 +75,9 @@ Examples:
   netcup-kube ssh tunnel status
   netcup-kube ssh tunnel start --local-port 6443`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// Load environment
-		if err := loadSSHEnv(); err != nil {
+		// Load environment and apply defaults
+		if err := loadSSHDefaults(); err != nil {
 			return err
-		}
-
-		// Apply defaults for host and user
-		if sshHost == "" {
-			sshHost = os.Getenv("TUNNEL_HOST")
-			if sshHost == "" {
-				sshHost = os.Getenv("MGMT_HOST")
-				if sshHost == "" {
-					sshHost = os.Getenv("MGMT_IP")
-				}
-			}
-		}
-		if sshUser == "" {
-			sshUser = os.Getenv("TUNNEL_USER")
-			if sshUser == "" {
-				sshUser = os.Getenv("MGMT_USER")
-				if sshUser == "" {
-					sshUser = "ops"
-				}
-			}
 		}
 
 		if sshHost == "" {
@@ -389,4 +349,36 @@ func init() {
 
 	// Add tunnel as a subcommand of ssh
 	sshCmd.AddCommand(sshTunnelCmd)
+}
+
+// loadSSHDefaults loads environment variables and applies defaults for SSH host and user
+func loadSSHDefaults() error {
+// Load environment
+if err := loadSSHEnv(); err != nil {
+return err
+}
+
+// Apply defaults for host
+if sshHost == "" {
+sshHost = os.Getenv("TUNNEL_HOST")
+if sshHost == "" {
+sshHost = os.Getenv("MGMT_HOST")
+if sshHost == "" {
+sshHost = os.Getenv("MGMT_IP")
+}
+}
+}
+
+// Apply defaults for user
+if sshUser == "" {
+sshUser = os.Getenv("TUNNEL_USER")
+if sshUser == "" {
+sshUser = os.Getenv("MGMT_USER")
+if sshUser == "" {
+sshUser = "ops"
+}
+}
+}
+
+return nil
 }
