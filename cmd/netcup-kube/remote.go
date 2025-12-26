@@ -18,9 +18,9 @@ var (
 )
 
 var remoteCmd = &cobra.Command{
-	Use:   "remote",
-	Short: "Execute commands on remote hosts",
-	Long:  `Remote execution engine for netcup-kube, providing safer, more reliable remote operations.`,
+	Use:          "remote",
+	Short:        "Execute commands on remote hosts",
+	Long:         `Remote execution engine for netcup-kube, providing safer, more reliable remote operations.`,
 	SilenceUsage: true,
 }
 
@@ -131,14 +131,14 @@ Examples:
 }
 
 var (
-	gitBranch string
-	gitRef    string
-	gitPull   bool
-	runNoTTY  bool
+	gitBranch  string
+	gitRef     string
+	gitPull    bool
+	runNoTTY   bool
 	runEnvFile string
-	runBranch string
-	runRef    string
-	runPull   bool
+	runBranch  string
+	runRef     string
+	runPull    bool
 )
 
 var remoteSmokeCmd = &cobra.Command{
@@ -228,8 +228,9 @@ Examples:
 }
 
 var remoteInstallCmd = &cobra.Command{
-	Use:   "install <recipe> [recipe-options]",
-	Short: "Run the installer for a recipe on the remote management node",
+	Use:                "install <recipe> [recipe-options]",
+	Short:              "Run the installer for a recipe on the remote management node",
+	DisableFlagParsing: true, // Allow recipe flags to pass through
 	Long: `Execute a recipe installer on the remote host.
 
 This command:
@@ -238,26 +239,81 @@ This command:
 - Runs the netcup-kube install command on the remote host
 - Forces a TTY by default for interactive prompts
 
+Note: Remote flags (--env-file, --branch, --pull, --no-tty) must come BEFORE the recipe name.
+      Recipe flags (--namespace, --storage, etc.) come AFTER the recipe name.
+
 Examples:
   netcup-kube remote install argo-cd --host cd.example.com
-  netcup-kube remote install redis --namespace platform --storage 20Gi
-  netcup-kube remote install --env-file ./config/netcup-kube.env postgres
-  netcup-kube remote install --branch main --pull dashboard
-  netcup-kube remote install --no-tty postgres --uninstall`,
+  netcup-kube remote install --env-file ./config/netcup-kube.env redis --namespace platform --storage 20Gi
+  netcup-kube remote install --branch main --pull postgres --uninstall
+  netcup-kube remote install --no-tty dashboard`,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// Manual flag parsing since DisableFlagParsing is enabled
+		var (
+			recipeArgs []string
+			i          = 0
+		)
+
+		// Parse remote flags
+		for i < len(args) {
+			arg := args[i]
+			if arg == "-h" || arg == "--help" || arg == "help" {
+				return cmd.Help()
+			}
+			// Remote flags that take values
+			if arg == "--env-file" || arg == "--branch" || arg == "--ref" {
+				if i+1 >= len(args) {
+					return fmt.Errorf("flag %s requires a value", arg)
+				}
+				switch arg {
+				case "--env-file":
+					runEnvFile = args[i+1]
+				case "--branch":
+					runBranch = args[i+1]
+				case "--ref":
+					runRef = args[i+1]
+				}
+				i += 2
+				continue
+			}
+			// Boolean flags
+			if arg == "--pull" {
+				runPull = true
+				i++
+				continue
+			}
+			if arg == "--no-pull" {
+				runPull = false
+				i++
+				continue
+			}
+			if arg == "--no-tty" {
+				runNoTTY = true
+				i++
+				continue
+			}
+			// Everything else is recipe name + args
+			recipeArgs = args[i:]
+			break
+		}
+
+		if len(recipeArgs) == 0 {
+			return cmd.Help()
+		}
+
 		cfg, err := loadRemoteConfig(cmd)
 		if err != nil {
 			return err
 		}
 
-		pullIsSet := cmd.Flags().Changed("pull") || cmd.Flags().Changed("no-pull")
-		if runBranch != "" && !pullIsSet {
+		pullIsSet := runPull || runBranch != ""
+		if runBranch != "" && !runPull {
 			runPull = true
 		}
 
 		// Build install command arguments
 		installArgs := []string{"install"}
-		installArgs = append(installArgs, args...)
+		installArgs = append(installArgs, recipeArgs...)
 
 		opts := remote.RunOptions{
 			ForceTTY: !runNoTTY,
@@ -269,11 +325,6 @@ Examples:
 				PullIsSet: pullIsSet,
 			},
 			Args: installArgs,
-		}
-
-		// If no args (or user asked for install help), show help for this subcommand.
-		if len(args) == 0 || args[0] == "-h" || args[0] == "--help" || args[0] == "help" {
-			return cmd.Help()
 		}
 
 		return remote.Run(cfg, opts)
@@ -293,7 +344,7 @@ func loadRemoteConfig(cmd *cobra.Command) (*remote.Config, error) {
 
 func buildRemoteConfig(cmd *cobra.Command) *remote.Config {
 	cfg := remote.NewConfig()
-	
+
 	if remoteHost != "" {
 		cfg.Host = remoteHost
 	}
@@ -309,7 +360,7 @@ func buildRemoteConfig(cmd *cobra.Command) *remote.Config {
 	if remoteRepo != "" {
 		cfg.RepoURL = remoteRepo
 	}
-	
+
 	// Use default config path if not specified
 	if remoteConfigPath == "" {
 		remoteConfigPath = filepath.Join("config", "netcup-kube.env")

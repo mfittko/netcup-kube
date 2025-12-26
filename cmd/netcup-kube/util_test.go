@@ -179,7 +179,7 @@ func TestFindProjectRoot(t *testing.T) {
 	// The function looks for scripts/main.sh, so we need to be in a location where it exists
 	// In test environment, we might be in cmd/netcup-kube or project root
 	root, err := findProjectRoot()
-	
+
 	// If we get an error, try changing to project root first
 	if err != nil {
 		// Try going up directories to find project root
@@ -194,7 +194,7 @@ func TestFindProjectRoot(t *testing.T) {
 		}
 		// Restore directory
 		os.Chdir(oldWd)
-		
+
 		if err != nil {
 			t.Skipf("Skipping test - not in a position to find project root: %v", err)
 			return

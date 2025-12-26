@@ -6,11 +6,11 @@ import (
 
 func TestParseGlobalFlagsFromArgs(t *testing.T) {
 	tests := []struct {
-		name         string
-		args         []string
-		wantEnvFile  string
-		wantDryRun   bool
-		wantArgs     []string
+		name        string
+		args        []string
+		wantEnvFile string
+		wantDryRun  bool
+		wantArgs    []string
 	}{
 		{
 			name:     "no flags",
@@ -47,7 +47,7 @@ func TestParseGlobalFlagsFromArgs(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			envFile, dryRun, _, args := parseGlobalFlagsFromArgs(tt.args)
-			
+
 			if envFile != tt.wantEnvFile {
 				t.Errorf("parseGlobalFlagsFromArgs() envFile = %v, want %v", envFile, tt.wantEnvFile)
 			}

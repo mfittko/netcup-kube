@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
@@ -57,7 +58,7 @@ Examples:
 		// Check if recipe exists
 		recipesDir := filepath.Join(projectRoot, "scripts", "recipes")
 		recipeScript := filepath.Join(recipesDir, recipe, "install.sh")
-		
+
 		if _, err := os.Stat(recipeScript); err != nil {
 			if os.IsNotExist(err) {
 				return fmt.Errorf("unknown recipe: %s\nRun 'netcup-kube install --help' to see available recipes", recipe)
@@ -104,14 +105,14 @@ Examples:
 				// Not on server; fetch from remote if not already cached locally
 				if _, err := os.Stat(localKubeconfig); err != nil {
 					fmt.Println("KUBECONFIG not set and local kubeconfig not found. Fetching from remote...")
-					
+
 					if err := fetchKubeconfig(envFile, localKubeconfig, configDir); err != nil {
 						return err
 					}
-					
+
 					fmt.Printf("Kubeconfig saved to %s\n", localKubeconfig)
 				}
-				
+
 				kubeconfig = localKubeconfig
 			}
 		}
@@ -148,7 +149,7 @@ Examples:
 				remoteBin := filepath.Join(projectRoot, "bin", "netcup-kube")
 				if _, err := os.Stat(remoteBin); err == nil {
 					fmt.Printf("\nAdding %s to Caddy edge-http domains...\n", hostArg)
-					
+
 					// Create temp env file with CONFIRM=true
 					tmpEnv, err := os.CreateTemp("", "netcup-kube-install.env.*")
 					if err == nil {
@@ -156,24 +157,24 @@ Examples:
 							tmpEnv.Close()
 							os.Remove(tmpEnv.Name())
 						}()
-						
+
 						if _, err := tmpEnv.WriteString("CONFIRM=true\n"); err != nil {
 							fmt.Fprintf(os.Stderr, "Warning: failed to write temp env file: %v\n", err)
 						} else {
 							tmpEnv.Close()
-						
-						// Run the domain add command
-						dnsCmd := exec.Command(remoteBin, "remote", "run", "--no-tty", "--env-file", tmpEnv.Name(), "dns", "--type", "edge-http", "--add-domains", hostArg)
-						dnsCmd.Stdout = os.Stdout
-						dnsCmd.Stderr = os.Stderr
-						
-						if err := dnsCmd.Run(); err == nil {
-							fmt.Println("✓ Domain added successfully!")
-						} else {
-							fmt.Printf("⚠ Failed to add domain automatically. Run manually:\n")
-							fmt.Printf("  CONFIRM=true bin/netcup-kube remote run --no-tty dns --type edge-http --add-domains \"%s\"\n", hostArg)
+
+							// Run the domain add command
+							dnsCmd := exec.Command(remoteBin, "remote", "run", "--no-tty", "--env-file", tmpEnv.Name(), "dns", "--type", "edge-http", "--add-domains", hostArg)
+							dnsCmd.Stdout = os.Stdout
+							dnsCmd.Stderr = os.Stderr
+
+							if err := dnsCmd.Run(); err == nil {
+								fmt.Println("✓ Domain added successfully!")
+							} else {
+								fmt.Printf("⚠ Failed to add domain automatically. Run manually:\n")
+								fmt.Printf("  CONFIRM=true bin/netcup-kube remote run --no-tty dns --type edge-http --add-domains \"%s\"\n", hostArg)
+							}
 						}
-					}
 					}
 				}
 			}
@@ -215,13 +216,13 @@ func fetchKubeconfig(envFile, localKubeconfig, configDir string) error {
 
 	// Fetch kubeconfig via scp
 	fmt.Printf("Fetching kubeconfig from %s@%s:/etc/rancher/k3s/k3s.yaml\n", remoteUser, remoteHost)
-	
-	scpCmd := exec.Command("scp", 
+
+	scpCmd := exec.Command("scp",
 		fmt.Sprintf("%s@%s:/etc/rancher/k3s/k3s.yaml", remoteUser, remoteHost),
 		localKubeconfig)
 	scpCmd.Stdout = os.Stdout
 	scpCmd.Stderr = os.Stderr
-	
+
 	if err := scpCmd.Run(); err != nil {
 		return fmt.Errorf("failed to fetch kubeconfig: %w", err)
 	}
@@ -257,30 +258,30 @@ func ensureTunnelRunning(envFile, projectRoot string) error {
 
 	// Check if tunnel is running using the control socket
 	ctlSocket := getTunnelControlSocket(remoteUser, remoteHost, tunnelPort)
-	
+
 	checkCmd := exec.Command("ssh", "-S", ctlSocket, "-O", "check", fmt.Sprintf("%s@%s", remoteUser, remoteHost))
 	checkCmd.Stdout = nil
 	checkCmd.Stderr = nil
-	
+
 	if err := checkCmd.Run(); err != nil {
 		// Tunnel not running, start it
 		fmt.Println("SSH tunnel not running. Starting tunnel...")
-		
+
 		// Use the Go tunnel implementation
 		if err := startTunnelViaGo(remoteHost, remoteUser, tunnelPort); err != nil {
-			return fmt.Errorf("failed to start SSH tunnel: %w", err)
+			return fmt.Errorf("failed to start SSH tunnel: %w\n\nTroubleshooting:\n  - Verify MGMT_HOST=%s and MGMT_USER=%s are correct\n  - Check SSH access: ssh %s@%s\n  - Start tunnel manually: netcup-kube ssh tunnel start", err, remoteHost, remoteUser, remoteUser, remoteHost)
 		}
-		
+
 		// Give tunnel a moment to establish
 		time.Sleep(1 * time.Second)
-		
+
 		// Verify tunnel is now running
 		checkCmd := exec.Command("ssh", "-S", ctlSocket, "-O", "check", fmt.Sprintf("%s@%s", remoteUser, remoteHost))
 		if err := checkCmd.Run(); err != nil {
-			return fmt.Errorf("ERROR: Failed to start SSH tunnel")
+			return fmt.Errorf("tunnel failed to start (verify SSH access and known_hosts)\n\nTroubleshooting:\n  - Check SSH access: ssh %s@%s\n  - View tunnel status: netcup-kube ssh tunnel status\n  - Start tunnel manually: netcup-kube ssh tunnel start", remoteUser, remoteHost)
 		}
 	}
-	
+
 	fmt.Printf("Using tunnel: localhost:%s -> %s:6443\n", tunnelPort, remoteHost)
 	return nil
 }
@@ -309,5 +310,17 @@ func startTunnelViaGo(host, user, localPort string) error {
 		"-o", "ServerAliveCountMax=3",
 	)
 
-	return sshCmd.Run()
+	// Capture stderr to surface SSH errors
+	var errBuf bytes.Buffer
+	sshCmd.Stderr = &errBuf
+
+	if err := sshCmd.Run(); err != nil {
+		errMsg := errBuf.String()
+		if errMsg != "" {
+			return fmt.Errorf("%w: %s", err, errMsg)
+		}
+		return err
+	}
+
+	return nil
 }

@@ -353,32 +353,32 @@ func init() {
 
 // loadSSHDefaults loads environment variables and applies defaults for SSH host and user
 func loadSSHDefaults() error {
-// Load environment
-if err := loadSSHEnv(); err != nil {
-return err
-}
+	// Load environment
+	if err := loadSSHEnv(); err != nil {
+		return err
+	}
 
-// Apply defaults for host
-if sshHost == "" {
-sshHost = os.Getenv("TUNNEL_HOST")
-if sshHost == "" {
-sshHost = os.Getenv("MGMT_HOST")
-if sshHost == "" {
-sshHost = os.Getenv("MGMT_IP")
-}
-}
-}
+	// Apply defaults for host
+	if sshHost == "" {
+		sshHost = os.Getenv("TUNNEL_HOST")
+		if sshHost == "" {
+			sshHost = os.Getenv("MGMT_HOST")
+			if sshHost == "" {
+				sshHost = os.Getenv("MGMT_IP")
+			}
+		}
+	}
 
-// Apply defaults for user
-if sshUser == "" {
-sshUser = os.Getenv("TUNNEL_USER")
-if sshUser == "" {
-sshUser = os.Getenv("MGMT_USER")
-if sshUser == "" {
-sshUser = "ops"
-}
-}
-}
+	// Apply defaults for user
+	if sshUser == "" {
+		sshUser = os.Getenv("TUNNEL_USER")
+		if sshUser == "" {
+			sshUser = os.Getenv("MGMT_USER")
+			if sshUser == "" {
+				sshUser = "ops"
+			}
+		}
+	}
 
-return nil
+	return nil
 }
