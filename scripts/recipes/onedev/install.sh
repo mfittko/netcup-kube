@@ -32,7 +32,7 @@ Options:
   --namespace <name>     Namespace to install into (default: recipes.conf NAMESPACE_ONEDEV, fallback: onedev).
   --storage <size>       PVC size for /opt/onedev (default: recipes.conf DEFAULT_STORAGE_ONEDEV).
   --host <fqdn>          Create a Traefik Ingress for the web UI (entrypoint: web).
-  --expose-ssh            Expose OneDev SSH port (6611) via a NodePort service.
+  --expose-ssh             Expose OneDev SSH port (6611) via a NodePort service.
   --ssh-nodeport <port>  NodePort to use for SSH when --expose-ssh is set (default: let Kubernetes choose).
   --uninstall            Uninstall OneDev resources from the namespace (deployment/services/ingress/secrets).
   --delete-pvc           When used with --uninstall, also delete the PVC (onedev-pvc). Default: keep PVC.
