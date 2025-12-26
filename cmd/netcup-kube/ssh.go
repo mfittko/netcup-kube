@@ -6,6 +6,8 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/mfittko/netcup-kube/internal/config"
+	"github.com/mfittko/netcup-kube/internal/tunnel"
 	"github.com/spf13/cobra"
 )
 
@@ -156,7 +158,7 @@ func loadSSHEnv() error {
 	}
 
 	// Load the env file
-	env, err := loadEnvFile(envPath)
+	env, err := config.LoadEnvFileToMap(envPath)
 	if err != nil {
 		return fmt.Errorf("failed to load env file: %w", err)
 	}
@@ -183,40 +185,23 @@ func openSSHShell() error {
 }
 
 func sshTunnelStart() error {
-	ctlSocket := getTunnelControlSocket(sshUser, sshHost, sshLocalPort)
+	mgr := tunnel.New(sshUser, sshHost, sshLocalPort, sshRemoteHost, sshRemotePort)
 
 	// Check if already running
-	checkCmd := exec.Command("ssh", "-S", ctlSocket, "-O", "check", fmt.Sprintf("%s@%s", sshUser, sshHost))
-	checkCmd.Stdout = nil
-	checkCmd.Stderr = nil
-
-	if err := checkCmd.Run(); err == nil {
+	if mgr.IsRunning() {
 		fmt.Printf("Tunnel already running on localhost:%s -> %s:%s via %s@%s\n",
 			sshLocalPort, sshRemoteHost, sshRemotePort, sshUser, sshHost)
 		return nil
-	}
-
-	// Check if port is already in use
-	if portInUse(sshLocalPort) {
-		return fmt.Errorf("ERROR: localhost:%s is already in use. Stop the existing process or choose a different --local-port", sshLocalPort)
 	}
 
 	// Start the tunnel
 	fmt.Printf("Starting tunnel on localhost:%s -> %s:%s via %s@%s\n",
 		sshLocalPort, sshRemoteHost, sshRemotePort, sshUser, sshHost)
 
-	tunnelCmd := exec.Command("ssh",
-		"-M", "-S", ctlSocket,
-		"-fN",
-		"-L", fmt.Sprintf("%s:%s:%s", sshLocalPort, sshRemoteHost, sshRemotePort),
-		fmt.Sprintf("%s@%s", sshUser, sshHost),
-		"-o", "ControlPersist=yes",
-		"-o", "ExitOnForwardFailure=yes",
-		"-o", "ServerAliveInterval=30",
-		"-o", "ServerAliveCountMax=3",
-	)
-
-	if err := tunnelCmd.Run(); err != nil {
+	if err := mgr.Start(); err != nil {
+		if strings.Contains(err.Error(), "already in use") {
+			return fmt.Errorf("ERROR: localhost:%s is already in use. Stop the existing process or choose a different --local-port", sshLocalPort)
+		}
 		return fmt.Errorf("failed to start tunnel: %w", err)
 	}
 
@@ -227,30 +212,26 @@ func sshTunnelStart() error {
 }
 
 func sshTunnelStop() error {
-	ctlSocket := getTunnelControlSocket(sshUser, sshHost, sshLocalPort)
+	mgr := tunnel.New(sshUser, sshHost, sshLocalPort, sshRemoteHost, sshRemotePort)
 
 	// Check if running
-	checkCmd := exec.Command("ssh", "-S", ctlSocket, "-O", "check", fmt.Sprintf("%s@%s", sshUser, sshHost))
-	checkCmd.Stdout = nil
-	checkCmd.Stderr = nil
-
-	if err := checkCmd.Run(); err != nil {
+	if !mgr.IsRunning() {
 		fmt.Printf("No tunnel running for localhost:%s via %s@%s.\n", sshLocalPort, sshUser, sshHost)
 		return nil
 	}
 
 	// Stop the tunnel
-	exitCmd := exec.Command("ssh", "-S", ctlSocket, "-O", "exit", fmt.Sprintf("%s@%s", sshUser, sshHost))
-	exitCmd.Stdout = nil
-	exitCmd.Stderr = nil
-	exitCmd.Run() // Ignore errors
+	if err := mgr.Stop(); err != nil {
+		return fmt.Errorf("failed to stop tunnel: %w", err)
+	}
 
 	fmt.Printf("Stopped tunnel on localhost:%s via %s@%s.\n", sshLocalPort, sshUser, sshHost)
 	return nil
 }
 
 func sshTunnelStatus() error {
-	ctlSocket := getTunnelControlSocket(sshUser, sshHost, sshLocalPort)
+	mgr := tunnel.New(sshUser, sshHost, sshLocalPort, sshRemoteHost, sshRemotePort)
+	ctlSocket := mgr.GetControlSocket()
 
 	// Check status
 	checkCmd := exec.Command("ssh", "-S", ctlSocket, "-O", "check", fmt.Sprintf("%s@%s", sshUser, sshHost))

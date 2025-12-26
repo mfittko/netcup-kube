@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
@@ -9,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mfittko/netcup-kube/internal/config"
+	"github.com/mfittko/netcup-kube/internal/tunnel"
 	"github.com/spf13/cobra"
 )
 
@@ -191,7 +192,7 @@ func fetchKubeconfig(envFile, localKubeconfig, configDir string) error {
 	}
 
 	// Load env file to get MGMT_HOST and MGMT_USER
-	env, err := loadEnvFile(envFile)
+	env, err := config.LoadEnvFileToMap(envFile)
 	if err != nil {
 		return fmt.Errorf("failed to load env file: %w", err)
 	}
@@ -232,7 +233,7 @@ func fetchKubeconfig(envFile, localKubeconfig, configDir string) error {
 
 func ensureTunnelRunning(envFile, projectRoot string) error {
 	// Load env file to get tunnel settings
-	env, err := loadEnvFile(envFile)
+	env, err := config.LoadEnvFileToMap(envFile)
 	if err != nil {
 		// If env file doesn't exist, use defaults
 		env = make(map[string]string)
@@ -256,75 +257,34 @@ func ensureTunnelRunning(envFile, projectRoot string) error {
 		return nil
 	}
 
-	// Check if tunnel is running using the control socket
-	ctlSocket := getTunnelControlSocket(remoteUser, remoteHost, tunnelPort)
+	// Create tunnel manager
+	mgr := tunnel.New(remoteUser, remoteHost, tunnelPort, "127.0.0.1", "6443")
 
-	checkCmd := exec.Command("ssh", "-S", ctlSocket, "-O", "check", fmt.Sprintf("%s@%s", remoteUser, remoteHost))
-	checkCmd.Stdout = nil
-	checkCmd.Stderr = nil
+	// Check if tunnel is running
+	if mgr.IsRunning() {
+		fmt.Printf("Using tunnel: localhost:%s -> %s:6443\n", tunnelPort, remoteHost)
+		return nil
+	}
 
-	if err := checkCmd.Run(); err != nil {
-		// Tunnel not running, start it
-		fmt.Println("SSH tunnel not running. Starting tunnel...")
+	// Tunnel not running, start it
+	fmt.Println("SSH tunnel not running. Starting tunnel...")
 
-		// Use the Go tunnel implementation
-		if err := startTunnelViaGo(remoteHost, remoteUser, tunnelPort); err != nil {
-			troubleshooting := fmt.Sprintf("\n\nTroubleshooting:\n  - Verify MGMT_HOST=%s and MGMT_USER=%s are correct\n  - Check SSH access: ssh %s@%s\n  - Start tunnel manually: netcup-kube ssh tunnel start",
-				remoteHost, remoteUser, remoteUser, remoteHost)
-			return fmt.Errorf("failed to start SSH tunnel: %w%s", err, troubleshooting)
-		}
+	if err := mgr.Start(); err != nil {
+		troubleshooting := fmt.Sprintf("\n\nTroubleshooting:\n  - Verify MGMT_HOST=%s and MGMT_USER=%s are correct\n  - Check SSH access: ssh %s@%s\n  - Start tunnel manually: netcup-kube ssh tunnel start",
+			remoteHost, remoteUser, remoteUser, remoteHost)
+		return fmt.Errorf("failed to start SSH tunnel: %w%s", err, troubleshooting)
+	}
 
-		// Give tunnel a moment to establish
-		time.Sleep(1 * time.Second)
+	// Give tunnel a moment to establish
+	time.Sleep(1 * time.Second)
 
-		// Verify tunnel is now running
-		checkCmd := exec.Command("ssh", "-S", ctlSocket, "-O", "check", fmt.Sprintf("%s@%s", remoteUser, remoteHost))
-		if err := checkCmd.Run(); err != nil {
-			troubleshooting := fmt.Sprintf("\n\nTroubleshooting:\n  - Check SSH access: ssh %s@%s\n  - View tunnel status: netcup-kube ssh tunnel status\n  - Start tunnel manually: netcup-kube ssh tunnel start",
-				remoteUser, remoteHost)
-			return fmt.Errorf("tunnel failed to start (verify SSH access and known_hosts)%s", troubleshooting)
-		}
+	// Verify tunnel is now running
+	if !mgr.IsRunning() {
+		troubleshooting := fmt.Sprintf("\n\nTroubleshooting:\n  - Check SSH access: ssh %s@%s\n  - View tunnel status: netcup-kube ssh tunnel status\n  - Start tunnel manually: netcup-kube ssh tunnel start",
+			remoteUser, remoteHost)
+		return fmt.Errorf("tunnel failed to start (verify SSH access and known_hosts)%s", troubleshooting)
 	}
 
 	fmt.Printf("Using tunnel: localhost:%s -> %s:6443\n", tunnelPort, remoteHost)
-	return nil
-}
-
-func startTunnelViaGo(host, user, localPort string) error {
-	// Start tunnel using the same SSH ControlMaster logic as the tunnel command
-	ctlSocket := getTunnelControlSocket(user, host, localPort)
-	remoteHost := "127.0.0.1"
-	remotePort := "6443"
-
-	// Check if port is in use
-	portCmd := exec.Command("sh", "-c", fmt.Sprintf("command -v lsof > /dev/null && lsof -nP -iTCP:%s -sTCP:LISTEN || command -v ss > /dev/null && ss -ltn '( sport = :%s )' | tail -n +2 | grep -q .", localPort, localPort))
-	if err := portCmd.Run(); err == nil {
-		return fmt.Errorf("localhost:%s is already in use", localPort)
-	}
-
-	// Start the tunnel
-	sshCmd := exec.Command("ssh",
-		"-M", "-S", ctlSocket,
-		"-fN",
-		"-L", fmt.Sprintf("%s:%s:%s", localPort, remoteHost, remotePort),
-		fmt.Sprintf("%s@%s", user, host),
-		"-o", "ControlPersist=yes",
-		"-o", "ExitOnForwardFailure=yes",
-		"-o", "ServerAliveInterval=30",
-		"-o", "ServerAliveCountMax=3",
-	)
-
-	// Capture stderr to surface SSH errors
-	var errBuf bytes.Buffer
-	sshCmd.Stderr = &errBuf
-
-	if err := sshCmd.Run(); err != nil {
-		errMsg := errBuf.String()
-		if errMsg != "" {
-			return fmt.Errorf("%w: %s", err, errMsg)
-		}
-		return err
-	}
-
 	return nil
 }

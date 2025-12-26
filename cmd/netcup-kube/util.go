@@ -4,25 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
-
-	"github.com/mfittko/netcup-kube/internal/config"
 )
-
-// getTunnelControlSocket returns the path to the SSH ControlMaster socket for the tunnel
-func getTunnelControlSocket(user, host, localPort string) string {
-	base := os.Getenv("XDG_RUNTIME_DIR")
-	if base == "" {
-		base = "/tmp"
-	}
-
-	key := fmt.Sprintf("%s@%s-%s", user, host, localPort)
-	key = strings.ReplaceAll(key, "@", "_")
-	key = strings.ReplaceAll(key, ":", "_")
-	key = strings.ReplaceAll(key, "/", "_")
-
-	return filepath.Join(base, fmt.Sprintf("netcup-kube-tunnel-%s.ctl", key))
-}
 
 // findProjectRoot locates the netcup-kube project root directory.
 // It searches in the current directory, parent directories (if in bin/), and relative to the executable.
@@ -58,10 +40,4 @@ func findProjectRoot() (string, error) {
 	}
 
 	return "", fmt.Errorf("could not locate project root: scripts/main.sh not found in current directory or expected locations")
-}
-
-// loadEnvFile loads key=value pairs from an environment file.
-// This is a thin wrapper around config.LoadEnvFileToMap for backward compatibility.
-func loadEnvFile(path string) (map[string]string, error) {
-	return config.LoadEnvFileToMap(path)
 }
