@@ -227,6 +227,59 @@ Examples:
 	},
 }
 
+var remoteInstallCmd = &cobra.Command{
+	Use:   "install <recipe> [recipe-options]",
+	Short: "Run the installer for a recipe on the remote management node",
+	Long: `Execute a recipe installer on the remote host.
+
+This command:
+- Optionally syncs the remote repo to a specific branch/ref
+- Uploads an env file if specified
+- Runs the netcup-kube install command on the remote host
+- Forces a TTY by default for interactive prompts
+
+Examples:
+  netcup-kube remote install argo-cd --host cd.example.com
+  netcup-kube remote install redis --namespace platform --storage 20Gi
+  netcup-kube remote install --env-file ./config/netcup-kube.env postgres
+  netcup-kube remote install --branch main --pull dashboard
+  netcup-kube remote install --no-tty postgres --uninstall`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		cfg, err := loadRemoteConfig(cmd)
+		if err != nil {
+			return err
+		}
+
+		pullIsSet := cmd.Flags().Changed("pull") || cmd.Flags().Changed("no-pull")
+		if runBranch != "" && !pullIsSet {
+			runPull = true
+		}
+
+		// Build install command arguments
+		installArgs := []string{"install"}
+		installArgs = append(installArgs, args...)
+
+		opts := remote.RunOptions{
+			ForceTTY: !runNoTTY,
+			EnvFile:  runEnvFile,
+			Git: remote.GitOptions{
+				Branch:    runBranch,
+				Ref:       runRef,
+				Pull:      runPull,
+				PullIsSet: pullIsSet,
+			},
+			Args: installArgs,
+		}
+
+		// If no args (or user asked for install help), show help for this subcommand.
+		if len(args) == 0 || args[0] == "-h" || args[0] == "--help" || args[0] == "help" {
+			return cmd.Help()
+		}
+
+		return remote.Run(cfg, opts)
+	},
+}
+
 func loadRemoteConfig(cmd *cobra.Command) (*remote.Config, error) {
 	cfg := buildRemoteConfig(cmd)
 	if err := cfg.LoadConfigFromEnv(cfg.ConfigPath); err != nil {
@@ -321,6 +374,7 @@ func init() {
 	remoteCmd.AddCommand(remoteBuildCmd)
 	remoteCmd.AddCommand(remoteSmokeCmd)
 	remoteCmd.AddCommand(remoteRunCmd)
+	remoteCmd.AddCommand(remoteInstallCmd)
 
 	// remote run flags (netcup-kube args should go after `--` if they start with `-`)
 	remoteRunCmd.Flags().BoolVar(&runNoTTY, "no-tty", false, "Disable forced TTY (default: forces a TTY for prompts)")
@@ -329,4 +383,12 @@ func init() {
 	remoteRunCmd.Flags().StringVar(&runRef, "ref", "", "Git ref (commit/tag)")
 	remoteRunCmd.Flags().BoolVar(&runPull, "pull", false, "Pull latest changes (ff-only)")
 	remoteRunCmd.Flags().Bool("no-pull", false, "Do not pull changes")
+
+	// remote install flags
+	remoteInstallCmd.Flags().BoolVar(&runNoTTY, "no-tty", false, "Disable forced TTY (default: forces a TTY for prompts)")
+	remoteInstallCmd.Flags().StringVar(&runEnvFile, "env-file", "", "Upload and source an env file before running installer")
+	remoteInstallCmd.Flags().StringVar(&runBranch, "branch", "", "Git branch name")
+	remoteInstallCmd.Flags().StringVar(&runRef, "ref", "", "Git ref (commit/tag)")
+	remoteInstallCmd.Flags().BoolVar(&runPull, "pull", false, "Pull latest changes (ff-only)")
+	remoteInstallCmd.Flags().Bool("no-pull", false, "Do not pull changes")
 }
