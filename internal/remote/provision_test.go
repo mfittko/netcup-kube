@@ -116,3 +116,68 @@ func TestEnsureRootAccess_SshpassWithRootPass_UnsetsEnv(t *testing.T) {
 		t.Fatalf("expected ROOT_PASS to be unset")
 	}
 }
+
+func TestProvision_PubKeyWithTrailingNewline(t *testing.T) {
+	// Create a temporary pubkey file with trailing newline (typical SSH key format)
+	tmpDir := t.TempDir()
+	pubKeyPath := tmpDir + "/id_test.pub"
+	pubKeyContent := "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITest test@localhost\n"
+	if err := os.WriteFile(pubKeyPath, []byte(pubKeyContent), 0600); err != nil {
+		t.Fatalf("Failed to create test pubkey: %v", err)
+	}
+
+	cfg := NewConfig()
+	cfg.Host = "test.example.com"
+	cfg.User = "testuser"
+	cfg.PubKeyPath = pubKeyPath
+
+	// This should fail at SSH connection, but the important thing is that
+	// pubkey trimming doesn't cause the script to fail with syntax errors
+	err := Provision(cfg)
+	// We expect it to fail at SSH connection, not at pubkey validation
+	if err != nil && strings.Contains(err.Error(), "multiple lines") {
+		t.Errorf("Should not fail with 'multiple lines' error for trailing newline, got: %v", err)
+	}
+}
+
+func TestProvision_EmptyPubKey(t *testing.T) {
+	tmpDir := t.TempDir()
+	pubKeyPath := tmpDir + "/empty.pub"
+	if err := os.WriteFile(pubKeyPath, []byte("  \n  \n"), 0600); err != nil {
+		t.Fatalf("Failed to create test pubkey: %v", err)
+	}
+
+	cfg := NewConfig()
+	cfg.Host = "test.example.com"
+	cfg.User = "testuser"
+	cfg.PubKeyPath = pubKeyPath
+
+	err := Provision(cfg)
+	if err == nil {
+		t.Error("Provision should fail with empty public key")
+	}
+	if err != nil && !strings.Contains(err.Error(), "empty") {
+		t.Errorf("Expected 'empty' error, got: %v", err)
+	}
+}
+
+func TestProvision_MultilinePubKey(t *testing.T) {
+	tmpDir := t.TempDir()
+	pubKeyPath := tmpDir + "/multiline.pub"
+	if err := os.WriteFile(pubKeyPath, []byte("line1\nline2\n"), 0600); err != nil {
+		t.Fatalf("Failed to create test pubkey: %v", err)
+	}
+
+	cfg := NewConfig()
+	cfg.Host = "test.example.com"
+	cfg.User = "testuser"
+	cfg.PubKeyPath = pubKeyPath
+
+	err := Provision(cfg)
+	if err == nil {
+		t.Error("Provision should fail with multiline public key")
+	}
+	if err != nil && !strings.Contains(err.Error(), "multiple lines") {
+		t.Errorf("Expected 'multiple lines' error, got: %v", err)
+	}
+}

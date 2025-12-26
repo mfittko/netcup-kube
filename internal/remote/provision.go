@@ -19,6 +19,17 @@ func Provision(cfg *Config) error {
 		return fmt.Errorf("failed to read public key: %w", err)
 	}
 
+	// Trim whitespace (especially trailing newlines) from the pubkey to avoid
+	// breaking the shell script's grep/printf commands with embedded newlines.
+	pubKey := strings.TrimSpace(string(pubKeyContent))
+	if pubKey == "" {
+		return fmt.Errorf("public key file is empty: %s", pubKeyPath)
+	}
+	// Validate it's a single line (no embedded newlines after trimming)
+	if strings.Contains(pubKey, "\n") {
+		return fmt.Errorf("public key file contains multiple lines: %s", pubKeyPath)
+	}
+
 	// Create root SSH client
 	rootClient := NewSSHClient(cfg.Host, "root")
 
@@ -29,7 +40,7 @@ func Provision(cfg *Config) error {
 	}
 
 	// Build and run the provisioning script
-	script := buildProvisionScript(cfg.User, string(pubKeyContent), cfg.RepoURL, cfg.Host)
+	script := buildProvisionScript(cfg.User, pubKey, cfg.RepoURL, cfg.Host)
 	
 	fmt.Printf("[remote] Provisioning %s@%s...\n", cfg.User, cfg.Host)
 	if err := rootClient.ExecuteScript(script, nil); err != nil {
@@ -52,10 +63,8 @@ func ensureRootAccess(client Client, host string, pubKeyPath string) error {
 		// Try to use sshpass
 		rootPass := os.Getenv("ROOT_PASS")
 		if rootPass == "" {
-			fmt.Printf("Root password for root@%s: ", host)
-			// Note: In production, use a proper password input method
-			// For now, we'll just read from environment or fail
-			return fmt.Errorf("ROOT_PASS environment variable is empty or not set")
+			// No password provided; instruct user to set ROOT_PASS or use ssh-copy-id
+			return fmt.Errorf("ROOT_PASS environment variable is empty or not set. Either set ROOT_PASS or run:\n  ssh-copy-id -o StrictHostKeyChecking=no -i %s root@%s", pubKeyPath, host)
 		}
 
 		fmt.Println("Pushing SSH key to root with sshpass+ssh-copy-id")
