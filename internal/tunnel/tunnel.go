@@ -109,14 +109,25 @@ func (m *Manager) Status() (running bool, listenPort string) {
 
 // portInUse checks if a local port is in use
 func portInUse(port string) bool {
-	// Try lsof first
-	cmd := exec.Command("sh", "-c", fmt.Sprintf("command -v lsof > /dev/null && lsof -nP -iTCP:%s -sTCP:LISTEN", port))
-	if err := cmd.Run(); err == nil {
-		return true
+	// Try lsof (macOS and some Linux)
+	if _, err := exec.LookPath("lsof"); err == nil {
+		cmd := exec.Command("lsof", "-nP", "-iTCP:"+port, "-sTCP:LISTEN")
+		cmd.Stdout = nil
+		cmd.Stderr = nil
+		if err := cmd.Run(); err == nil {
+			return true
+		}
 	}
 
-	// Fallback to ss
-	cmd = exec.Command("sh", "-c", fmt.Sprintf("command -v ss > /dev/null && ss -ltn '( sport = :%s )' | tail -n +2 | grep -q .", port))
-	return cmd.Run() == nil
-}
+	// Try ss (Linux)
+	if _, err := exec.LookPath("ss"); err == nil {
+		cmd := exec.Command("sh", "-c", fmt.Sprintf("ss -ltn '( sport = :%s )' | tail -n +2 | grep -q .", port))
+		cmd.Stdout = nil
+		cmd.Stderr = nil
+		if err := cmd.Run(); err == nil {
+			return true
+		}
+	}
 
+	return false
+}
