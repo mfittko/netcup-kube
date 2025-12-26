@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/mfittko/netcup-kube/internal/config"
 )
 
 // getTunnelControlSocket returns the path to the SSH ControlMaster socket for the tunnel
@@ -22,55 +24,44 @@ func getTunnelControlSocket(user, host, localPort string) string {
 	return filepath.Join(base, fmt.Sprintf("netcup-kube-tunnel-%s.ctl", key))
 }
 
-// isValidEnvKey checks if a string is a valid environment variable name
-func isValidEnvKey(key string) bool {
-	if len(key) == 0 {
-		return false
+// findProjectRoot locates the netcup-kube project root directory.
+// It searches in the current directory, parent directories (if in bin/), and relative to the executable.
+// Returns an error if scripts/main.sh cannot be found.
+func findProjectRoot() (string, error) {
+	// Try current directory first
+	currentDir, err := os.Getwd()
+	if err != nil {
+		return "", err
 	}
-	// Must start with letter or underscore
-	if !((key[0] >= 'A' && key[0] <= 'Z') || key[0] == '_' || (key[0] >= 'a' && key[0] <= 'z')) {
-		return false
+
+	// Check if scripts/main.sh exists in current directory
+	if _, err := os.Stat(filepath.Join(currentDir, "scripts", "main.sh")); err == nil {
+		return currentDir, nil
 	}
-	// Subsequent characters can be letters, digits, or underscore
-	for _, c := range key {
-		if !((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_') {
-			return false
+
+	// If running from bin/, go up one level
+	if filepath.Base(currentDir) == "bin" {
+		parent := filepath.Dir(currentDir)
+		if _, err := os.Stat(filepath.Join(parent, "scripts", "main.sh")); err == nil {
+			return parent, nil
 		}
 	}
-	return true
+
+	// Try relative to the executable
+	exe, err := os.Executable()
+	if err == nil {
+		exeDir := filepath.Dir(exe)
+		projectRoot := filepath.Dir(exeDir)
+		if _, err := os.Stat(filepath.Join(projectRoot, "scripts", "main.sh")); err == nil {
+			return projectRoot, nil
+		}
+	}
+
+	return "", fmt.Errorf("could not locate project root: scripts/main.sh not found in current directory or expected locations")
 }
 
-// loadEnvFile loads key=value pairs from an environment file
-
+// loadEnvFile loads key=value pairs from an environment file.
+// This is a thin wrapper around config.LoadEnvFileToMap for backward compatibility.
 func loadEnvFile(path string) (map[string]string, error) {
-	env := make(map[string]string)
-
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return env, err
-	}
-
-	lines := strings.Split(string(data), "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-
-		parts := strings.SplitN(line, "=", 2)
-		if len(parts) == 2 {
-			key := strings.TrimSpace(parts[0])
-			if !isValidEnvKey(key) {
-				continue
-			}
-			value := strings.TrimSpace(parts[1])
-			// Remove quotes if present
-			if len(value) >= 2 && ((value[0] == '"' && value[len(value)-1] == '"') || (value[0] == '\'' && value[len(value)-1] == '\'')) {
-				value = value[1 : len(value)-1]
-			}
-			env[key] = value
-		}
-	}
-
-	return env, nil
+	return config.LoadEnvFileToMap(path)
 }

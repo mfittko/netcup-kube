@@ -9,6 +9,53 @@ import (
 	"github.com/mfittko/netcup-kube/internal/validation"
 )
 
+// LoadEnvFileToMap loads environment variables from a file and returns them as a map.
+// This is a convenience function for cases where a simple map is needed instead of a Config object.
+// Returns an empty map if the file doesn't exist (not an error).
+func LoadEnvFileToMap(path string) (map[string]string, error) {
+	result := make(map[string]string)
+
+	file, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return result, nil // File doesn't exist, return empty map
+		}
+		return result, fmt.Errorf("failed to open env file: %w", err)
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+
+		// Skip empty lines and comments
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		// Parse KEY=value format
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+
+		key := strings.TrimSpace(parts[0])
+		value := strings.TrimSpace(parts[1])
+
+		// Remove quotes if present (for backward compatibility with simpler parser)
+		if len(value) >= 2 {
+			if (value[0] == '"' && value[len(value)-1] == '"') ||
+				(value[0] == '\'' && value[len(value)-1] == '\'') {
+				value = value[1 : len(value)-1]
+			}
+		}
+
+		result[key] = value
+	}
+
+	return result, scanner.Err()
+}
+
 // Config holds the configuration for netcup-kube commands
 type Config struct {
 	// Environment variables to pass to scripts

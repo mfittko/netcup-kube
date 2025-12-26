@@ -89,10 +89,10 @@ func ensureRootAccess(client Client, host string, pubKeyPath string) error {
 	}
 
 	// No automated method available
-	return fmt.Errorf(`passwordless SSH for root not set up yet.
+	return fmt.Errorf(`passwordless SSH for root not set up yet
 Install sshpass to allow password authentication, or run:
   ssh-copy-id -o StrictHostKeyChecking=no -i %s root@%s
-Then re-run the provision command.`, pubKeyPath, host)
+Then re-run the provision command`, pubKeyPath, host)
 }
 
 // buildProvisionScript creates the provisioning script

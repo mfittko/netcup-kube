@@ -24,7 +24,6 @@ var (
 	envFile          string
 	dryRun           bool
 	dryRunWriteFiles bool
-	outputFormat     string
 )
 
 // parseGlobalFlagsFromArgs manually parses global flags from args for commands with DisableFlagParsing.
@@ -136,7 +135,6 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&envFile, "env-file", "", "Path to environment file (default: config/netcup-kube.env if exists)")
 	rootCmd.PersistentFlags().BoolVar(&dryRun, "dry-run", false, "Enable dry-run mode (no actual changes)")
 	rootCmd.PersistentFlags().BoolVar(&dryRunWriteFiles, "dry-run-write-files", false, "Dry-run but write config files")
-	rootCmd.PersistentFlags().StringVarP(&outputFormat, "output", "o", "text", "Output format: text or json")
 
 	// Add subcommands
 	rootCmd.AddCommand(bootstrapCmd)
@@ -270,6 +268,9 @@ Examples:
   netcup-kube validate --env-file config/netcup-kube.env`,
 	SilenceErrors: true, // We handle error output ourselves
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// Get the output format from the flag
+		outputFormat, _ := cmd.Flags().GetString("output")
+
 		// Parse and validate output format
 		format, err := output.ParseFormat(outputFormat)
 		if err != nil {
@@ -311,6 +312,11 @@ Examples:
 		result := &output.ValidationResult{Valid: true}
 		return formatter.PrintValidation(result)
 	},
+}
+
+func init() {
+	// Add output flag to validate command only
+	validateCmd.Flags().StringP("output", "o", "text", "Output format: text or json")
 }
 
 func main() {
