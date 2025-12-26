@@ -77,7 +77,7 @@ func smokeWithClient(client Client, cfg *Config, opts GitOptions, projectRoot st
 
 	for _, test := range tests {
 		fmt.Printf("[smoke] Running: %s\n", test.name)
-		
+
 		runOpts := RunOptions{
 			ForceTTY: false,
 			EnvFile:  test.envFile,

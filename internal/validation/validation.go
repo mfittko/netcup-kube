@@ -101,7 +101,7 @@ func Hostname(field, value string) error {
 	// - Labels can contain alphanumeric and hyphens
 	// - Labels cannot start or end with hyphen
 	// - Labels must start with alphanumeric
-	
+
 	if len(value) > 253 || !hostnameRegex.MatchString(value) {
 		return &Error{
 			Field:       field,
@@ -183,7 +183,7 @@ func RequiredWith(field, value string, otherFields map[string]string) error {
 		sortedFields := make([]string, len(setFields))
 		copy(sortedFields, setFields)
 		sort.Strings(sortedFields)
-		
+
 		return &Error{
 			Field:       field,
 			Value:       value,

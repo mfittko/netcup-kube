@@ -117,5 +117,3 @@ func TestSSHClient_ExecuteScript_Upload_TestConnection(t *testing.T) {
 		t.Fatalf("expected args captured")
 	}
 }
-
-

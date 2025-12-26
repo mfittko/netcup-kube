@@ -10,22 +10,22 @@ import (
 )
 
 const (
-	defaultUser     = "cubeadmin"
-	defaultRepoURL  = "https://github.com/mfittko/netcup-kube.git"
-	remoteRepoDir   = "/home/%s/netcup-kube"
-	remoteBinPath   = "/home/%s/netcup-kube/bin/netcup-kube"
+	defaultUser    = "cubeadmin"
+	defaultRepoURL = "https://github.com/mfittko/netcup-kube.git"
+	remoteRepoDir  = "/home/%s/netcup-kube"
+	remoteBinPath  = "/home/%s/netcup-kube/bin/netcup-kube"
 )
 
 // Config holds the configuration for remote operations
 type Config struct {
-	Host       string
-	User       string
+	Host string
+	User string
 	// UserExplicit indicates the user was explicitly set by a caller (e.g. CLI flag),
 	// so it should not be overridden by values loaded from config files.
 	UserExplicit bool
-	PubKeyPath string
-	RepoURL    string
-	ConfigPath string
+	PubKeyPath   string
+	RepoURL      string
+	ConfigPath   string
 }
 
 // GitOptions holds options for git operations
@@ -38,10 +38,10 @@ type GitOptions struct {
 
 // RunOptions holds options for the run command
 type RunOptions struct {
-	Git     GitOptions
+	Git      GitOptions
 	ForceTTY bool
-	EnvFile string
-	Args    []string
+	EnvFile  string
+	Args     []string
 }
 
 // NewConfig creates a new remote config with defaults
@@ -110,7 +110,7 @@ func (c *Config) GetPubKey() (string, error) {
 		}
 	}
 
-	return "", fmt.Errorf("no public key found. Generate one with: ssh-keygen -t ed25519 -C '%s@%s'", 
+	return "", fmt.Errorf("no public key found. Generate one with: ssh-keygen -t ed25519 -C '%s@%s'",
 		os.Getenv("USER"), getHostname())
 }
 
@@ -150,7 +150,7 @@ func RemoteGitSync(client Client, repoDir string, opts GitOptions) error {
 	if branch != "" {
 		branchArg = branch
 	}
-	
+
 	refArg := "__NONE__"
 	if ref != "" {
 		refArg = ref

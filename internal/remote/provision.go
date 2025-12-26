@@ -41,7 +41,7 @@ func Provision(cfg *Config) error {
 
 	// Build and run the provisioning script
 	script := buildProvisionScript(cfg.User, pubKey, cfg.RepoURL, cfg.Host)
-	
+
 	fmt.Printf("[remote] Provisioning %s@%s...\n", cfg.User, cfg.Host)
 	if err := rootClient.ExecuteScript(script, nil); err != nil {
 		return fmt.Errorf("provisioning failed: %w", err)
