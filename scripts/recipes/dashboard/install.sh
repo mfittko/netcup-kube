@@ -13,7 +13,7 @@ usage() {
 Install Kubernetes Dashboard on the cluster using Helm.
 
 Usage:
-  netcup-kube-install dashboard [--namespace kubernetes-dashboard] [--host kube.example.com] [--uninstall]
+  netcup-kube install dashboard [--namespace kubernetes-dashboard] [--host kube.example.com] [--uninstall]
 
 Options:
   --namespace <name>   Namespace to install into (default: kubernetes-dashboard).

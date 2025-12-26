@@ -13,7 +13,7 @@ usage() {
 Install Sealed Secrets on the cluster using Helm.
 
 Usage:
-  netcup-kube-install sealed-secrets [--namespace kube-system] [--uninstall]
+  netcup-kube install sealed-secrets [--namespace kube-system] [--uninstall]
 
 Options:
   --namespace <name>   Namespace to install into (default: kube-system).

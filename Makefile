@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 
-SCRIPTS := $(shell find bin scripts -type f \( -name "*.sh" -o -name netcup-kube-tunnel -o -name netcup-kube-install \))
+SCRIPTS := $(shell find bin scripts -type f -name "*.sh")
 
 # Go build variables
 GO_CMD := go

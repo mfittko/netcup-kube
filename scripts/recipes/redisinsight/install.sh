@@ -30,7 +30,7 @@ usage() {
 Install RedisInsight on the cluster using Helm (Redis GUI).
 
 Usage:
-  netcup-kube-install redisinsight [--namespace platform] [--host redis.example.com] [--with-redis] [--uninstall]
+  netcup-kube install redisinsight [--namespace platform] [--host redis.example.com] [--with-redis] [--uninstall]
 
 Options:
   --namespace <name>   Namespace to install into (default: platform).

@@ -13,7 +13,7 @@ usage() {
 Install Argo CD on the cluster (and optionally expose it via Traefik).
 
 Usage:
-  netcup-kube-install argo-cd [--host cd.example.com] [--namespace argocd] [--uninstall]
+  netcup-kube install argo-cd [--host cd.example.com] [--namespace argocd] [--uninstall]
 
 Options:
   --host <fqdn>        Create a Traefik Ingress for this host (entrypoint: web).

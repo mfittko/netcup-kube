@@ -26,13 +26,13 @@ All config values can be overridden via environment variables:
 
 ```bash
 # Use custom storage size
-STORAGE=20Gi netcup-kube-install redis
+STORAGE=20Gi netcup-kube install redis
 
 # Use custom namespace
-NAMESPACE=my-monitoring netcup-kube-install kube-prometheus-stack
+NAMESPACE=my-monitoring netcup-kube install kube-prometheus-stack
 
 # Combine overrides
-NAMESPACE=prod-db STORAGE=50Gi netcup-kube-install postgres
+NAMESPACE=prod-db STORAGE=50Gi netcup-kube install postgres
 ```
 
 ## Available Recipes
@@ -51,14 +51,14 @@ Install recipes using the dispatcher:
 
 ```bash
 # Install locally (with KUBECONFIG set)
-netcup-kube-install kube-prometheus-stack
+netcup-kube install kube-prometheus-stack
 
 # Install remotely
-netcup-kube-install --host mfittko.com kube-prometheus-stack
+netcup-kube install --host mfittko.com kube-prometheus-stack
 
 # With custom options
-STORAGE=20Gi netcup-kube-install redis
-PASSWORD=mysecret netcup-kube-install kube-prometheus-stack
+STORAGE=20Gi netcup-kube install redis
+PASSWORD=mysecret netcup-kube install kube-prometheus-stack
 ```
 
 ## Recipe Structure

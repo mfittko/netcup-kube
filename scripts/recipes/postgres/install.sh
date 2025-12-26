@@ -13,7 +13,7 @@ usage() {
 Install PostgreSQL on the cluster using Helm (Bitnami chart).
 
 Usage:
-  netcup-kube-install postgres [--namespace platform] [--password <pass>] [--storage <size>] [--uninstall]
+  netcup-kube install postgres [--namespace platform] [--password <pass>] [--storage <size>] [--uninstall]
 
 Options:
   --namespace <name>   Namespace to install into (default: platform).

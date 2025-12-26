@@ -13,7 +13,7 @@ usage() {
 Install Redis on the cluster using Helm (Bitnami chart).
 
 Usage:
-  netcup-kube-install redis [--namespace platform] [--password <pass>] [--storage <size>] [--uninstall]
+  netcup-kube install redis [--namespace platform] [--password <pass>] [--storage <size>] [--uninstall]
 
 Options:
   --namespace <name>   Namespace to install into (default: platform).

@@ -13,7 +13,7 @@ usage() {
 Install kube-prometheus-stack on the cluster using Helm (Grafana + Prometheus + Alertmanager).
 
 Usage:
-  netcup-kube-install kube-prometheus-stack [--namespace monitoring] [--host grafana.example.com] [--password <pass>] [--uninstall]
+  netcup-kube install kube-prometheus-stack [--namespace monitoring] [--host grafana.example.com] [--password <pass>] [--uninstall]
 
 Options:
   --namespace <name>   Namespace to install into (default: monitoring).
