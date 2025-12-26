@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 
-SCRIPTS := $(shell find bin scripts -type f \( -name "*.sh" -o -name netcup-kube-tunnel -o -name netcup-kube-install \))
+SCRIPTS := $(shell find scripts -type f -name "*.sh")
 
 # Go build variables
 GO_CMD := go
@@ -15,10 +15,10 @@ GO_MAIN := ./cmd/$(BINARY_NAME)
 .PHONY: fmt fmt-check lint check test build build-go clean test-go go-deps
 
 fmt:
-	shfmt -w -i 2 -ci -sr bin scripts
+	shfmt -w -i 2 -ci -sr scripts
 
 fmt-check:
-	shfmt -d -i 2 -ci -sr bin scripts
+	shfmt -d -i 2 -ci -sr scripts
 
 lint:
 	shellcheck -x $(SCRIPTS)

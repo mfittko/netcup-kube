@@ -38,24 +38,24 @@ func (c *Config) LoadEnvFile(path string) error {
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
-		
+
 		// Skip empty lines and comments
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		
+
 		// Parse KEY=value format
 		parts := strings.SplitN(line, "=", 2)
 		if len(parts) != 2 {
 			continue
 		}
-		
+
 		key := strings.TrimSpace(parts[0])
 		value := strings.TrimSpace(parts[1])
-		
+
 		// Simple variable expansion: ${VAR} -> value of VAR
 		value = c.expandVars(value)
-		
+
 		// Set value, overriding any existing values (env-file has higher priority than process env)
 		c.Env[key] = value
 	}
@@ -72,10 +72,10 @@ func (c *Config) LoadFromEnvironment() {
 		if len(parts) != 2 {
 			continue
 		}
-		
+
 		key := parts[0]
 		value := parts[1]
-		
+
 		// Only set if not already set; allows later config sources to override
 		if _, exists := c.Env[key]; !exists {
 			c.Env[key] = value
@@ -101,15 +101,15 @@ func (c *Config) SetFlag(key, value string) {
 func (c *Config) expandVars(value string) string {
 	var result strings.Builder
 	result.Grow(len(value)) // Pre-allocate capacity
-	
+
 	pos := 0
 	iterations := 0
 	maxIterations := 100 // Safety limit to prevent bugs in loop logic from causing hangs
-	
+
 	// Simple expansion: ${VAR}
 	for pos < len(value) && iterations < maxIterations {
 		iterations++
-		
+
 		start := strings.Index(value[pos:], "${")
 		if start == -1 {
 			// No more variables, append the rest
@@ -117,10 +117,10 @@ func (c *Config) expandVars(value string) string {
 			break
 		}
 		start += pos
-		
+
 		// Append text before the variable
 		result.WriteString(value[pos:start])
-		
+
 		end := strings.Index(value[start+2:], "}")
 		if end == -1 {
 			// Malformed variable reference, append as-is and continue
@@ -128,9 +128,9 @@ func (c *Config) expandVars(value string) string {
 			break
 		}
 		end += start + 2
-		
+
 		varName := value[start+2 : end]
-		
+
 		// Look up the variable value
 		varValue := ""
 		if val, exists := c.Env[varName]; exists {
@@ -138,18 +138,18 @@ func (c *Config) expandVars(value string) string {
 		} else if val, ok := os.LookupEnv(varName); ok {
 			varValue = val
 		}
-		
+
 		result.WriteString(varValue)
 		pos = end + 1
 	}
-	
+
 	// If we hit the maximum iteration limit before processing the entire value,
 	// log a warning and append the remaining text without further expansion.
 	if iterations >= maxIterations && pos < len(value) {
 		fmt.Fprintf(os.Stderr, "config: variable expansion exceeded max iterations; returning partially expanded result\n")
 		result.WriteString(value[pos:])
 	}
-	
+
 	return result.String()
 }
 
@@ -167,7 +167,7 @@ func (c *Config) Validate() error {
 	var errs validation.Errors
 
 	mode := c.Env["MODE"]
-	
+
 	// Validate MODE
 	if mode != "" {
 		if err := validation.OneOf("MODE", mode, []string{"bootstrap", "join"}); err != nil {
@@ -269,4 +269,3 @@ func (c *Config) Validate() error {
 	}
 	return nil
 }
-

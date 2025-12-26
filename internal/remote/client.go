@@ -14,5 +14,3 @@ type Client interface {
 	// OutputCommand runs a remote command and returns stdout (used for simple probes like uname -m).
 	OutputCommand(command string, args []string) ([]byte, error)
 }
-
-

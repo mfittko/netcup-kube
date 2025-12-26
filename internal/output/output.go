@@ -113,8 +113,8 @@ type ValidationError struct {
 
 // ValidationResult represents validation results
 type ValidationResult struct {
-	Valid  bool               `json:"valid"`
-	Errors []ValidationError  `json:"errors,omitempty"`
+	Valid  bool              `json:"valid"`
+	Errors []ValidationError `json:"errors,omitempty"`
 }
 
 // PrintValidation outputs validation results

@@ -305,7 +305,7 @@ func TestExpandVars_MaxIterations(t *testing.T) {
 	// Capture stderr to check for warning
 	// Note: This is a simple test that just ensures it doesn't panic
 	result := cfg.expandVars(input.String())
-	
+
 	// Should return something (not panic)
 	if len(result) == 0 && input.Len() > 0 {
 		t.Error("expandVars() returned empty string for non-empty input")
@@ -347,11 +347,11 @@ func TestValidate(t *testing.T) {
 		{
 			name: "valid bootstrap config with defaults",
 			env: map[string]string{
-				"MODE":                    "bootstrap",
-				"SERVICE_CIDR":            "10.43.0.0/16",
-				"CLUSTER_CIDR":            "10.42.0.0/16",
-				"TRAEFIK_NODEPORT_HTTP":   "30080",
-				"TRAEFIK_NODEPORT_HTTPS":  "30443",
+				"MODE":                   "bootstrap",
+				"SERVICE_CIDR":           "10.43.0.0/16",
+				"CLUSTER_CIDR":           "10.42.0.0/16",
+				"TRAEFIK_NODEPORT_HTTP":  "30080",
+				"TRAEFIK_NODEPORT_HTTPS": "30443",
 			},
 			wantErr: false,
 		},
@@ -485,8 +485,8 @@ func TestValidate(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "empty config",
-			env: map[string]string{},
+			name:    "empty config",
+			env:     map[string]string{},
 			wantErr: false,
 		},
 	}
@@ -502,4 +502,3 @@ func TestValidate(t *testing.T) {
 		})
 	}
 }
-

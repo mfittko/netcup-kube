@@ -16,10 +16,10 @@ func TestConfirmationRequired(t *testing.T) {
 	if os.Geteuid() != 0 {
 		t.Skip("Skipping confirmation tests: requires root privileges (run via 'make test' for Docker-based testing)")
 	}
-	
+
 	// This test validates that the dns command (which overwrites Caddy config)
 	// requires CONFIRM=true when running non-interactively
-	
+
 	// Skip if we can't find the binary
 	binPath := filepath.Join("..", "..", "bin", "netcup-kube")
 	if _, err := os.Stat(binPath); os.IsNotExist(err) {
@@ -34,9 +34,9 @@ func TestConfirmationRequired(t *testing.T) {
 		errContains string
 	}{
 		{
-			name:        "dns command without CONFIRM should fail in non-interactive mode",
-			command:     []string{"dns", "--type", "edge-http", "--domains", "test.example.com"},
-			env:         map[string]string{
+			name:    "dns command without CONFIRM should fail in non-interactive mode",
+			command: []string{"dns", "--type", "edge-http", "--domains", "test.example.com"},
+			env: map[string]string{
 				"DRY_RUN": "true",
 				// No CONFIRM=true, and no TTY (test runs non-interactively)
 			},
@@ -44,29 +44,29 @@ func TestConfirmationRequired(t *testing.T) {
 			errContains: "CONFIRM=true", // Should mention CONFIRM in error
 		},
 		{
-			name:        "dns command with CONFIRM=true should succeed",
-			command:     []string{"dns", "--type", "edge-http", "--domains", "test.example.com"},
-			env:         map[string]string{
+			name:    "dns command with CONFIRM=true should succeed",
+			command: []string{"dns", "--type", "edge-http", "--domains", "test.example.com"},
+			env: map[string]string{
 				"DRY_RUN": "true",
 				"CONFIRM": "true",
 			},
 			wantErr: false,
 		},
 		{
-			name:        "bootstrap in DRY_RUN mode should not require CONFIRM",
-			command:     []string{"bootstrap"},
-			env:         map[string]string{
-				"DRY_RUN":      "true",
-				"EDGE_PROXY":   "none",
-				"DASH_ENABLE":  "false",
-				"ENABLE_UFW":   "false",
+			name:    "bootstrap in DRY_RUN mode should not require CONFIRM",
+			command: []string{"bootstrap"},
+			env: map[string]string{
+				"DRY_RUN":     "true",
+				"EDGE_PROXY":  "none",
+				"DASH_ENABLE": "false",
+				"ENABLE_UFW":  "false",
 			},
 			wantErr: false,
 		},
 		{
-			name:        "join in DRY_RUN mode should not require CONFIRM",
-			command:     []string{"join"},
-			env:         map[string]string{
+			name:    "join in DRY_RUN mode should not require CONFIRM",
+			command: []string{"join"},
+			env: map[string]string{
 				"MODE":       "join",
 				"DRY_RUN":    "true",
 				"SERVER_URL": "https://192.168.1.1:6443",
@@ -79,17 +79,17 @@ func TestConfirmationRequired(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cmd := exec.Command(binPath, tt.command...)
-			
+
 			// Set up environment
 			env := os.Environ()
 			for k, v := range tt.env {
 				env = append(env, k+"="+v)
 			}
 			cmd.Env = env
-			
+
 			// Capture output
 			output, err := cmd.CombinedOutput()
-			
+
 			if tt.wantErr {
 				if err == nil {
 					t.Errorf("Expected error but command succeeded. Output: %s", output)
@@ -113,7 +113,7 @@ func TestDryRunBehavior(t *testing.T) {
 	if os.Geteuid() != 0 {
 		t.Skip("Skipping DRY_RUN tests: requires root privileges (run via 'make test' for Docker-based testing)")
 	}
-	
+
 	binPath := filepath.Join("..", "..", "bin", "netcup-kube")
 	if _, err := os.Stat(binPath); os.IsNotExist(err) {
 		t.Skip("netcup-kube binary not found, run 'make build-go' first")
@@ -152,15 +152,15 @@ func TestDryRunBehavior(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cmd := exec.Command(binPath, tt.command...)
-			
+
 			env := os.Environ()
 			for k, v := range tt.env {
 				env = append(env, k+"="+v)
 			}
 			cmd.Env = env
-			
+
 			output, err := cmd.CombinedOutput()
-			
+
 			if tt.wantErr && err == nil {
 				t.Errorf("Expected error but command succeeded. Output: %s", output)
 			} else if !tt.wantErr && err != nil {
@@ -169,4 +169,3 @@ func TestDryRunBehavior(t *testing.T) {
 		})
 	}
 }
-

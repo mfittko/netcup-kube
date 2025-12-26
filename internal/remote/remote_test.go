@@ -8,7 +8,7 @@ import (
 
 func TestNewConfig(t *testing.T) {
 	cfg := NewConfig()
-	
+
 	if cfg.User != defaultUser {
 		t.Errorf("User = %s, want %s", cfg.User, defaultUser)
 	}
@@ -21,24 +21,24 @@ func TestLoadConfigFromEnv(t *testing.T) {
 	// Create a test config file
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "test.env")
-	
+
 	configContent := `MGMT_HOST=example.com
 MGMT_IP=192.168.1.1
 MGMT_USER=ops
 DEFAULT_USER=admin
 `
-	
+
 	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
 		t.Fatalf("Failed to create test config: %v", err)
 	}
 
 	tests := []struct {
-		name         string
-		initialHost  string
-		initialUser  string
-		configPath   string
-		wantHost     string
-		wantUser     string
+		name        string
+		initialHost string
+		initialUser string
+		configPath  string
+		wantHost    string
+		wantUser    string
 	}{
 		{
 			name:        "load host from MGMT_HOST",
@@ -79,13 +79,13 @@ DEFAULT_USER=admin
 			cfg := NewConfig()
 			cfg.Host = tt.initialHost
 			cfg.User = tt.initialUser
-			
+
 			err := cfg.LoadConfigFromEnv(tt.configPath)
 			if err != nil {
 				t.Errorf("LoadConfigFromEnv() error = %v", err)
 				return
 			}
-			
+
 			if cfg.Host != tt.wantHost {
 				t.Errorf("Host = %s, want %s", cfg.Host, tt.wantHost)
 			}
@@ -162,13 +162,13 @@ func TestGetPubKey(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := NewConfig()
 			cfg.PubKeyPath = tt.initialPubKey
-			
+
 			key, err := cfg.GetPubKey()
 			if (err != nil) != tt.wantErr {
 				t.Errorf("GetPubKey() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
-			
+
 			if !tt.wantErr && key == "" {
 				t.Error("GetPubKey() returned empty key")
 			}
@@ -179,10 +179,10 @@ func TestGetPubKey(t *testing.T) {
 func TestGetRemoteRepoDir(t *testing.T) {
 	cfg := NewConfig()
 	cfg.User = "testuser"
-	
+
 	want := "/home/testuser/netcup-kube"
 	got := cfg.GetRemoteRepoDir()
-	
+
 	if got != want {
 		t.Errorf("GetRemoteRepoDir() = %s, want %s", got, want)
 	}
@@ -191,10 +191,10 @@ func TestGetRemoteRepoDir(t *testing.T) {
 func TestGetRemoteBinPath(t *testing.T) {
 	cfg := NewConfig()
 	cfg.User = "testuser"
-	
+
 	want := "/home/testuser/netcup-kube/bin/netcup-kube"
 	got := cfg.GetRemoteBinPath()
-	
+
 	if got != want {
 		t.Errorf("GetRemoteBinPath() = %s, want %s", got, want)
 	}
@@ -203,7 +203,7 @@ func TestGetRemoteBinPath(t *testing.T) {
 func TestFileExists(t *testing.T) {
 	tmpDir := t.TempDir()
 	existingFile := filepath.Join(tmpDir, "exists.txt")
-	
+
 	if err := os.WriteFile(existingFile, []byte("test"), 0644); err != nil {
 		t.Fatalf("Failed to create test file: %v", err)
 	}

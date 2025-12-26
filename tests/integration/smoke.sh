@@ -26,11 +26,13 @@ export EDGE_PROXY=none
 export DASH_ENABLE=false
 
 echo "==== Testing helper scripts ===="
-# Local helper sanity: ensure tunnel script is present and runnable.
-./bin/netcup-kube-tunnel --help > /dev/null
+# Local helper sanity: ensure ssh command works
+./bin/netcup-kube ssh --help > /dev/null
+echo "  ✓ netcup-kube ssh --help"
 
 # Recipe installer sanity check
-./bin/netcup-kube-install --help > /dev/null
+./bin/netcup-kube install --help > /dev/null
+echo "  ✓ netcup-kube install --help"
 
 echo "==== Testing command help ===="
 # netcup-kube subcommand help should not require interactivity.

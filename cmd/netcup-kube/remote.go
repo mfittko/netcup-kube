@@ -18,9 +18,9 @@ var (
 )
 
 var remoteCmd = &cobra.Command{
-	Use:   "remote",
-	Short: "Execute commands on remote hosts",
-	Long:  `Remote execution engine for netcup-kube, providing safer, more reliable remote operations.`,
+	Use:          "remote",
+	Short:        "Execute commands on remote hosts",
+	Long:         `Remote execution engine for netcup-kube, providing safer, more reliable remote operations.`,
 	SilenceUsage: true,
 }
 
@@ -131,14 +131,14 @@ Examples:
 }
 
 var (
-	gitBranch string
-	gitRef    string
-	gitPull   bool
-	runNoTTY  bool
+	gitBranch  string
+	gitRef     string
+	gitPull    bool
+	runNoTTY   bool
 	runEnvFile string
-	runBranch string
-	runRef    string
-	runPull   bool
+	runBranch  string
+	runRef     string
+	runPull    bool
 )
 
 var remoteSmokeCmd = &cobra.Command{
@@ -227,6 +227,115 @@ Examples:
 	},
 }
 
+var remoteInstallCmd = &cobra.Command{
+	Use:                "install <recipe> [recipe-options]",
+	Short:              "Run the installer for a recipe on the remote management node",
+	DisableFlagParsing: true, // Allow recipe flags to pass through
+	Long: `Execute a recipe installer on the remote host.
+
+This command:
+- Optionally syncs the remote repo to a specific branch/ref
+- Uploads an env file if specified
+- Runs the netcup-kube install command on the remote host
+- Forces a TTY by default for interactive prompts
+
+Note: Remote flags (--env-file, --branch, --pull, --no-tty) must come BEFORE the recipe name.
+      Recipe flags (--namespace, --storage, etc.) come AFTER the recipe name.
+
+Examples:
+  netcup-kube remote install argo-cd --host cd.example.com
+  netcup-kube remote install --env-file ./config/netcup-kube.env redis --namespace platform --storage 20Gi
+  netcup-kube remote install --branch main --pull postgres --uninstall
+  netcup-kube remote install --no-tty dashboard`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		// Manual flag parsing since DisableFlagParsing is enabled
+		var (
+			recipeArgs []string
+			i          = 0
+		)
+
+		// Parse remote flags
+		for i < len(args) {
+			arg := args[i]
+			if arg == "-h" || arg == "--help" || arg == "help" {
+				return cmd.Help()
+			}
+			// Remote flags that take values
+			if arg == "--env-file" || arg == "--branch" || arg == "--ref" {
+				if i+1 >= len(args) {
+					return fmt.Errorf("flag %s requires a value", arg)
+				}
+				val := args[i+1]
+				// Prevent interpreting another flag as the value
+				if len(val) > 0 && val[0] == '-' {
+					return fmt.Errorf("flag %s requires a value, but got another flag %q", arg, val)
+				}
+				switch arg {
+				case "--env-file":
+					runEnvFile = val
+				case "--branch":
+					runBranch = val
+				case "--ref":
+					runRef = val
+				}
+				i += 2
+				continue
+			}
+			// Boolean flags
+			if arg == "--pull" {
+				runPull = true
+				i++
+				continue
+			}
+			if arg == "--no-pull" {
+				runPull = false
+				i++
+				continue
+			}
+			if arg == "--no-tty" {
+				runNoTTY = true
+				i++
+				continue
+			}
+			// Everything else is recipe name + args
+			recipeArgs = args[i:]
+			break
+		}
+
+		if len(recipeArgs) == 0 {
+			return cmd.Help()
+		}
+
+		cfg, err := loadRemoteConfig(cmd)
+		if err != nil {
+			return err
+		}
+
+		pullIsSet := runPull || runBranch != ""
+		if runBranch != "" && !runPull {
+			runPull = true
+		}
+
+		// Build install command arguments
+		installArgs := []string{"install"}
+		installArgs = append(installArgs, recipeArgs...)
+
+		opts := remote.RunOptions{
+			ForceTTY: !runNoTTY,
+			EnvFile:  runEnvFile,
+			Git: remote.GitOptions{
+				Branch:    runBranch,
+				Ref:       runRef,
+				Pull:      runPull,
+				PullIsSet: pullIsSet,
+			},
+			Args: installArgs,
+		}
+
+		return remote.Run(cfg, opts)
+	},
+}
+
 func loadRemoteConfig(cmd *cobra.Command) (*remote.Config, error) {
 	cfg := buildRemoteConfig(cmd)
 	if err := cfg.LoadConfigFromEnv(cfg.ConfigPath); err != nil {
@@ -240,7 +349,7 @@ func loadRemoteConfig(cmd *cobra.Command) (*remote.Config, error) {
 
 func buildRemoteConfig(cmd *cobra.Command) *remote.Config {
 	cfg := remote.NewConfig()
-	
+
 	if remoteHost != "" {
 		cfg.Host = remoteHost
 	}
@@ -256,7 +365,7 @@ func buildRemoteConfig(cmd *cobra.Command) *remote.Config {
 	if remoteRepo != "" {
 		cfg.RepoURL = remoteRepo
 	}
-	
+
 	// Use default config path if not specified
 	if remoteConfigPath == "" {
 		remoteConfigPath = filepath.Join("config", "netcup-kube.env")
@@ -321,6 +430,7 @@ func init() {
 	remoteCmd.AddCommand(remoteBuildCmd)
 	remoteCmd.AddCommand(remoteSmokeCmd)
 	remoteCmd.AddCommand(remoteRunCmd)
+	remoteCmd.AddCommand(remoteInstallCmd)
 
 	// remote run flags (netcup-kube args should go after `--` if they start with `-`)
 	remoteRunCmd.Flags().BoolVar(&runNoTTY, "no-tty", false, "Disable forced TTY (default: forces a TTY for prompts)")
@@ -329,4 +439,12 @@ func init() {
 	remoteRunCmd.Flags().StringVar(&runRef, "ref", "", "Git ref (commit/tag)")
 	remoteRunCmd.Flags().BoolVar(&runPull, "pull", false, "Pull latest changes (ff-only)")
 	remoteRunCmd.Flags().Bool("no-pull", false, "Do not pull changes")
+
+	// remote install flags
+	remoteInstallCmd.Flags().BoolVar(&runNoTTY, "no-tty", false, "Disable forced TTY (default: forces a TTY for prompts)")
+	remoteInstallCmd.Flags().StringVar(&runEnvFile, "env-file", "", "Upload and source an env file before running installer")
+	remoteInstallCmd.Flags().StringVar(&runBranch, "branch", "", "Git branch name")
+	remoteInstallCmd.Flags().StringVar(&runRef, "ref", "", "Git ref (commit/tag)")
+	remoteInstallCmd.Flags().BoolVar(&runPull, "pull", false, "Pull latest changes (ff-only)")
+	remoteInstallCmd.Flags().Bool("no-pull", false, "Do not pull changes")
 }

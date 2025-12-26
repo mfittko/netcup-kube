@@ -9,7 +9,7 @@ import (
 
 func TestNewSSHClient(t *testing.T) {
 	client := NewSSHClient("example.com", "testuser")
-	
+
 	if client.Host != "example.com" {
 		t.Errorf("Host = %s, want example.com", client.Host)
 	}
@@ -105,7 +105,7 @@ func TestBuildRemoteCommand(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := client.buildRemoteCommand(tt.command, tt.args, tt.env)
-			
+
 			// Check that all expected parts are in the result
 			if !strings.Contains(got, shellEscape(tt.command)) {
 				t.Errorf("buildRemoteCommand result missing command %q", tt.command)
@@ -130,7 +130,7 @@ func TestFindPublicKey(t *testing.T) {
 	// Create both private and public key
 	privKeyPath := filepath.Join(sshDir, "id_ed25519")
 	pubKeyPath := filepath.Join(sshDir, "id_ed25519.pub")
-	
+
 	if err := os.WriteFile(privKeyPath, []byte("fake private key"), 0600); err != nil {
 		t.Fatalf("Failed to create private key: %v", err)
 	}

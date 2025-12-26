@@ -33,7 +33,7 @@ func runWithClient(client Client, cfg *Config, opts RunOptions) error {
 	// Keep this list intentionally small: `remote run` is meant for the main lifecycle commands
 	// that are safe and commonly used over SSH. If new top-level commands are added to netcup-kube,
 	// update this allowlist accordingly.
-	supportedCmds := []string{"bootstrap", "join", "pair", "dns", "help", "-h", "--help"}
+	supportedCmds := []string{"bootstrap", "join", "pair", "dns", "install", "ssh", "help", "-h", "--help"}
 	cmdValid := false
 	for _, cmd := range supportedCmds {
 		if opts.Args[0] == cmd {
@@ -42,7 +42,7 @@ func runWithClient(client Client, cfg *Config, opts RunOptions) error {
 		}
 	}
 	if !cmdValid {
-		return fmt.Errorf("unsupported netcup-kube command for remote run: %s (supported: %v)", 
+		return fmt.Errorf("unsupported netcup-kube command for remote run: %s (supported: %v)",
 			opts.Args[0], supportedCmds)
 	}
 
@@ -101,7 +101,7 @@ exec "${bin}" "$@"
 	//   when we join the command string and feed it to `ssh`.
 	// - The remote runner then execs the remote binary with the original argv preserved.
 	cmdParts := []string{"sudo", "-E", "bash", "-lc", shellEscape(runnerScript), "bash", remoteEnv, remoteBin}
-	
+
 	// Escape each user argument for safe shell execution
 	for _, arg := range opts.Args {
 		cmdParts = append(cmdParts, shellEscape(arg))
@@ -110,7 +110,7 @@ exec "${bin}" "$@"
 	// Build the full command string
 	cmdString := strings.Join(cmdParts, " ")
 
-	fmt.Printf("[local] Running on %s@%s: netcup-kube %s\n", cfg.User, cfg.Host, 
+	fmt.Printf("[local] Running on %s@%s: netcup-kube %s\n", cfg.User, cfg.Host,
 		joinArgs(opts.Args))
 
 	return client.RunCommandString(cmdString, opts.ForceTTY)

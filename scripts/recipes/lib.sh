@@ -50,3 +50,37 @@ recipe_kdelete() {
   # Usage: recipe_kdelete <args...>
   k delete --ignore-not-found=true "$@"
 }
+
+recipe_helm_repo_add() {
+  # Add a Helm repository if it doesn't already exist, then update.
+  # Usage: recipe_helm_repo_add <name> <url> [--force-update]
+  local repo_name="$1"
+  local repo_url="$2"
+  local force_update="${3:-}"
+
+  [[ -n "${repo_name}" ]] || die "Helm repo name is required"
+  [[ -n "${repo_url}" ]] || die "Helm repo URL is required"
+
+  log "Adding Helm repository: ${repo_name}"
+  # Use word boundary to ensure exact repo name match
+  if ! helm repo list 2> /dev/null | grep -q "^${repo_name}[[:space:]]"; then
+    if [[ "${force_update}" == "--force-update" ]]; then
+      helm repo add "${repo_name}" "${repo_url}" --force-update
+    else
+      helm repo add "${repo_name}" "${repo_url}"
+    fi
+  fi
+  helm repo update "${repo_name}"
+}
+
+recipe_check_kubeconfig() {
+  # Ensure KUBECONFIG is set or fall back to default location
+  local kubeconfig="${KUBECONFIG:-}"
+  if [[ -z "${kubeconfig}" ]]; then
+    if [[ -f "/etc/rancher/k3s/k3s.yaml" ]]; then
+      export KUBECONFIG="/etc/rancher/k3s/k3s.yaml"
+    else
+      die "KUBECONFIG not set and /etc/rancher/k3s/k3s.yaml not found"
+    fi
+  fi
+}

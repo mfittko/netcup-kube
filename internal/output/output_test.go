@@ -77,7 +77,7 @@ func TestFormatter_PrintText(t *testing.T) {
 			}
 
 			got := buf.String()
-			
+
 			// For data results, just verify output is not empty and contains expected keys
 			if len(tt.result.Data) > 0 {
 				if got == "" {
@@ -90,7 +90,7 @@ func TestFormatter_PrintText(t *testing.T) {
 				}
 				return
 			}
-			
+
 			// For message/error results, check exact match
 			if tt.want != "" && got != tt.want {
 				t.Errorf("Print() output = %q, want %q", got, tt.want)
@@ -212,7 +212,7 @@ func TestFormatter_PrintValidationText(t *testing.T) {
 			}
 
 			got := buf.String()
-			
+
 			if tt.result.Valid {
 				if got != tt.want {
 					t.Errorf("PrintValidation() output = %q, want %q", got, tt.want)
@@ -350,4 +350,3 @@ func TestParseFormat(t *testing.T) {
 		})
 	}
 }
-

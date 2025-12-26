@@ -531,5 +531,3 @@ func TestSmokeWithClient_CoversSmokePaths(t *testing.T) {
 		t.Fatalf("expected remote run calls")
 	}
 }
-
-

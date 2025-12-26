@@ -13,7 +13,7 @@ usage() {
 Install Redis on the cluster using Helm (Bitnami chart).
 
 Usage:
-  netcup-kube-install redis [--namespace platform] [--password <pass>] [--storage <size>] [--uninstall]
+  netcup-kube install redis [--namespace platform] [--password <pass>] [--storage <size>] [--uninstall]
 
 Options:
   --namespace <name>   Namespace to install into (default: platform).
@@ -94,11 +94,7 @@ log "Installing Redis into namespace: ${NAMESPACE}"
 recipe_ensure_namespace "${NAMESPACE}"
 
 # Add Bitnami Helm repo
-log "Adding Bitnami Helm repository"
-if ! helm repo list 2> /dev/null | grep -q "^bitnami"; then
-  helm repo add bitnami https://charts.bitnami.com/bitnami
-fi
-helm repo update
+recipe_helm_repo_add "bitnami" "https://charts.bitnami.com/bitnami"
 
 # Prepare Helm values
 VALUES_FILE="${SCRIPT_DIR}/values.yaml"

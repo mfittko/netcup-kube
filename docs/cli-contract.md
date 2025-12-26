@@ -23,9 +23,9 @@ This document specifies the current CLI contract for `netcup-kube` to ensure com
 The `netcup-kube` project provides four primary CLI entrypoints:
 
 1. **`netcup-kube`** — Main orchestrator for k3s cluster bootstrapping and configuration
-2. **`netcup-kube-install`** — Recipe dispatcher for installing optional components
+2. **`netcup-kube install`** — Recipe dispatcher for installing optional components
 3. **`netcup-kube remote`** — Remote bootstrap and command execution
-4. **`netcup-kube-tunnel`** — SSH tunnel manager for local kubectl access
+4. **`netcup-kube ssh`** — SSH shell and tunnel manager for local kubectl access
 
 All scripts follow bash `set -euo pipefail` semantics: they exit on any error, undefined variable access, or pipeline failure.
 
@@ -33,39 +33,42 @@ All scripts follow bash `set -euo pipefail` semantics: they exit on any error, u
 
 ## CLI Entrypoints
 
-### 1. `netcup-kube`
+### 1. `netcup-kube bootstrap|join|dns|pair|install|tunnel|validate|remote`
 
-**Location:** `bin/netcup-kube` (wrapper) → `scripts/main.sh` (implementation)
+**Location:** Go CLI binary: `bin/netcup-kube`
 
-**Purpose:** Install and configure k3s, Traefik, Caddy, Dashboard, and related components.
+**Purpose:** Unified CLI for all netcup-kube operations.
 
 **Usage:**
 ```bash
-netcup-kube <command>
+netcup-kube <command> [options]
 ```
 
 **Commands:**
 - `bootstrap` — Install and configure k3s server + Traefik + optional Caddy & Dashboard
-- `join` — Same as bootstrap but with `MODE=join` (requires `SERVER_URL` and `TOKEN`/`TOKEN_FILE`)
+- `join` — Join a k3s worker node to an existing cluster
 - `dns` — Configure edge TLS via Caddy
 - `pair` — Print copy/paste join command for worker nodes
+- `install` — Install optional components (recipes) onto the cluster
+- `ssh` — Open SSH shell or manage SSH tunnel for kubectl access
+- `validate` — Validate configuration
+- `remote` — Execute commands on remote hosts
 - `help`, `-h`, `--help` — Show usage information
 
 **Requirements:**
-- Must run as root (via `sudo` or as root user)
+- Commands that modify the cluster (`bootstrap`, `join`, `dns`, `pair`) must run as root (via `sudo` or as root user)
+- Commands that interact with the cluster (`install`) require KUBECONFIG or SSH access to fetch it
 - Requires Debian-based system (tested on Debian 13)
 
 ---
 
-### 2. `netcup-kube-install`
-
-**Location:** `bin/netcup-kube-install`
+### 2. `netcup-kube install`
 
 **Purpose:** Install optional components (recipes) onto the k3s cluster.
 
 **Usage:**
 ```bash
-netcup-kube-install <recipe> [recipe-options]
+netcup-kube install <recipe> [recipe-options]
 ```
 
 **Available Recipes:**
@@ -144,48 +147,18 @@ netcup-kube remote run [--no-tty] [--env-file <path>] [--branch <name>] [--ref <
 - `--pull` — Pull from remote before running
 - `--no-pull` — Skip pull
 - `--` — Stop parsing remote flags (pass remaining args to netcup-kube)
-- `<netcup-kube-args...>` — Arguments to pass to netcup-kube (supported: `bootstrap`, `join`, `pair`, `dns`, `help`)
+- `<netcup-kube-args...>` — Arguments to pass to netcup-kube (supported: `bootstrap`, `join`, `pair`, `dns`, `install`, `ssh`, `help`)
+
+**Command: `install`**
+```bash
+netcup-kube remote install [--no-tty] [--env-file <path>] [--branch <name>] [--ref <ref>] [--pull|--no-pull] <recipe> [recipe-options]
+```
+- Runs the `netcup-kube install` command on the remote management node
+- Same options as `run` command
+- Supports all recipe names and options
 
 **Environment:**
 - `ROOT_PASS` — Pre-set root password for provision (avoids prompt)
-
----
-
-### 4. `netcup-kube-tunnel`
-
-**Location:** `bin/netcup-kube-tunnel`
-
-**Purpose:** Manage SSH tunnel for local kubectl access.
-
-**Usage:**
-```bash
-netcup-kube-tunnel [start|stop|status] [options]
-```
-
-**Commands:**
-- `start` — Start SSH tunnel (default command)
-- `stop` — Stop SSH tunnel
-- `status` — Check tunnel status
-
-**Options:**
-- `--host <host>` — Target SSH host (default: `mfittko.com` or `$TUNNEL_HOST` - note: this is the upstream project's default, users should configure via env file)
-- `--user <user>` — SSH user (default: `ops` or `$TUNNEL_USER`)
-- `--local-port <port>` — Local port to bind (default: `6443` or `$TUNNEL_LOCAL_PORT`)
-- `--remote-host <host>` — Remote host to forward to (default: `127.0.0.1` or `$TUNNEL_REMOTE_HOST`)
-- `--remote-port <port>` — Remote port to forward to (default: `6443` or `$TUNNEL_REMOTE_PORT`)
-- `--env-file <path>` — Load env file (default: `config/netcup-kube.env` or `.env`)
-- `--no-env` — Skip loading env file
-
-**Behavior:**
-- Uses SSH ControlMaster for reliable start/stop/status
-- Socket location: `${XDG_RUNTIME_DIR:-/tmp}/netcup-kube-tunnel-${user}_${host}-${local_port}.ctl`
-  - Where `${user}`, `${host}`, and `${local_port}` are the actual runtime values (e.g., `ops_example.com-6443`)
-- Checks port availability before starting (fails if port in use)
-- SSH options: `-fN -M -S <socket> -L <local>:<remote-host>:<remote-port> -o ControlPersist=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3`
-
-**Exit Codes:**
-- `0` — Success (for `status`: tunnel is running)
-- `1` — Failure (for `status`: tunnel is not running)
 
 ---
 
@@ -649,12 +622,12 @@ These elements define the public CLI contract and **must not change** without a 
 
 1. **Command Names and Hierarchy**
    - `netcup-kube bootstrap|join|dns|pair|help`
-   - `netcup-kube-install <recipe>`
+   - `netcup-kube install <recipe>`
    - `netcup-kube remote provision|git|run`
-   - `netcup-kube-tunnel start|stop|status`
+   - `netcup-kube ssh tunnel start|stop|status`
 
 2. **Required Arguments**
-   - `netcup-kube-install` requires `<recipe>` positional argument
+   - `netcup-kube install` requires `<recipe>` positional argument
    - `netcup-kube dns --type edge-http` requires `--domains` (unless `--add-domains`)
    - `netcup-kube join` requires `SERVER_URL` and `TOKEN`/`TOKEN_FILE` env vars
 
@@ -693,7 +666,7 @@ These elements define the public CLI contract and **must not change** without a 
    - Non-TTY mode returns defaults without prompting
    - `DRY_RUN=true` logs commands without executing
    - `netcup-kube remote run` forces TTY by default (unless `--no-tty`)
-   - `netcup-kube-install` auto-fetches kubeconfig and starts tunnel if needed
+   - `netcup-kube install` auto-fetches kubeconfig and starts tunnel if needed
 
 ### May Change (Non-Breaking Enhancements)
 
