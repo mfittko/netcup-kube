@@ -94,9 +94,8 @@ func (m *Manager) Stop() error {
 	exitCmd := exec.Command("ssh", "-S", ctlSocket, "-O", "exit", fmt.Sprintf("%s@%s", m.User, m.Host))
 	exitCmd.Stdout = nil
 	exitCmd.Stderr = nil
-	exitCmd.Run() // Ignore errors
 
-	return nil
+	return exitCmd.Run()
 }
 
 // Status returns information about the tunnel status
