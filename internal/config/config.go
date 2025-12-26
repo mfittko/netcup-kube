@@ -11,15 +11,26 @@ import (
 
 // LoadEnvFileToMap loads environment variables from a file and returns them as a map.
 // This is a convenience function for cases where a simple map is needed instead of a Config object.
-// Returns an empty map if the file doesn't exist (not an error).
+//
+// File format:
+//   - Lines should be in KEY=value format
+//   - Empty lines and lines starting with # are skipped (comments)
+//   - Leading/trailing whitespace is trimmed from both keys and values
+//   - Quotes (single or double) around values are removed if present
+//   - Returns an error if the file doesn't exist or can't be read
+//
+// Example:
+//   # This is a comment
+//   BASE_DOMAIN=example.com
+//   MGMT_USER="ops"
+//
+// Note: This function does NOT perform variable expansion like ${VAR}.
+// For variable expansion support, use Config.LoadEnvFile() instead.
 func LoadEnvFileToMap(path string) (map[string]string, error) {
 	result := make(map[string]string)
 
 	file, err := os.Open(path)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return result, nil // File doesn't exist, return empty map
-		}
 		return result, fmt.Errorf("failed to open env file: %w", err)
 	}
 	defer file.Close()
