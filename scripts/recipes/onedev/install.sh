@@ -194,5 +194,3 @@ else
   echo "  Port-forward: kubectl -n ${NAMESPACE} port-forward svc/onedev-ssh 6611:6611"
 fi
 echo
-
-
