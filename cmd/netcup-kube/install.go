@@ -34,15 +34,13 @@ Examples:
   netcup-kube install redis --namespace platform --storage 20Gi`,
 	DisableFlagParsing: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// Check for help flag first
-		for _, arg := range args {
-			if arg == "-h" || arg == "--help" || arg == "help" {
-				return cmd.Help()
-			}
-		}
-
 		// Need at least the recipe name
 		if len(args) < 1 {
+			return cmd.Help()
+		}
+
+		// Check for help flag on the install command itself (not the recipe)
+		if args[0] == "-h" || args[0] == "--help" || args[0] == "help" {
 			return cmd.Help()
 		}
 
@@ -76,6 +74,15 @@ Examples:
 		localKubeconfig := filepath.Join(configDir, "k3s.yaml")
 		envFile := filepath.Join(configDir, "netcup-kube.env")
 
+		// Check if this is a help request - if so, skip kubeconfig setup
+		isHelpRequest := false
+		for _, arg := range recipeArgs {
+			if arg == "-h" || arg == "--help" || arg == "help" {
+				isHelpRequest = true
+				break
+			}
+		}
+
 		// Parse --host flag for automatic domain management
 		hostArg := ""
 		for i, arg := range recipeArgs {
@@ -88,9 +95,9 @@ Examples:
 			}
 		}
 
-		// Ensure kubeconfig is available
+		// Ensure kubeconfig is available (unless just showing help)
 		kubeconfig := os.Getenv("KUBECONFIG")
-		if kubeconfig == "" {
+		if !isHelpRequest && kubeconfig == "" {
 			// Check if on the server
 			if _, err := os.Stat("/etc/rancher/k3s/k3s.yaml"); err != nil {
 				// Not on server; fetch from remote if not already cached locally
@@ -108,8 +115,8 @@ Examples:
 			}
 		}
 
-		// Check if tunnel is needed and running (when using local kubeconfig)
-		if kubeconfig == localKubeconfig {
+		// Check if tunnel is needed and running (when using local kubeconfig, and not just showing help)
+		if !isHelpRequest && kubeconfig == localKubeconfig {
 			if err := ensureTunnelRunning(envFile, projectRoot); err != nil {
 				return err
 			}
