@@ -265,13 +265,18 @@ Examples:
 				if i+1 >= len(args) {
 					return fmt.Errorf("flag %s requires a value", arg)
 				}
+				val := args[i+1]
+				// Prevent interpreting another flag as the value
+				if len(val) > 0 && val[0] == '-' {
+					return fmt.Errorf("flag %s requires a value, but got another flag %q", arg, val)
+				}
 				switch arg {
 				case "--env-file":
-					runEnvFile = args[i+1]
+					runEnvFile = val
 				case "--branch":
-					runBranch = args[i+1]
+					runBranch = val
 				case "--ref":
-					runRef = args[i+1]
+					runRef = val
 				}
 				i += 2
 				continue

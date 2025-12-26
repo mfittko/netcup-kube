@@ -205,8 +205,8 @@ func (c *SSHClient) buildRemoteCommand(command string, args []string, env map[st
 //
 // We wrap the entire string in single quotes so the shell treats it as a literal and does not
 // expand spaces or metacharacters. To embed a literal single quote inside a single-quoted string
-// in POSIX shells, the sequence must be: end the quote, insert '\”, then reopen the quote.
-// Concretely, "foo'bar" becomes 'foo'\”bar'.
+// in POSIX shells, the sequence must be: end the quote, insert '\'' (i.e., end quote, escaped
+// single quote, start quote), then reopen the quote. Concretely, "foo'bar" becomes 'foo'\'\''bar'.
 func shellEscape(s string) string {
 	// Use single quotes for simplicity and safety
 	// Replace any single quotes in the string with '\''

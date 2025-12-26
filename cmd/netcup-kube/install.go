@@ -269,7 +269,9 @@ func ensureTunnelRunning(envFile, projectRoot string) error {
 
 		// Use the Go tunnel implementation
 		if err := startTunnelViaGo(remoteHost, remoteUser, tunnelPort); err != nil {
-			return fmt.Errorf("failed to start SSH tunnel: %w\n\nTroubleshooting:\n  - Verify MGMT_HOST=%s and MGMT_USER=%s are correct\n  - Check SSH access: ssh %s@%s\n  - Start tunnel manually: netcup-kube ssh tunnel start", err, remoteHost, remoteUser, remoteUser, remoteHost)
+			troubleshooting := fmt.Sprintf("\n\nTroubleshooting:\n  - Verify MGMT_HOST=%s and MGMT_USER=%s are correct\n  - Check SSH access: ssh %s@%s\n  - Start tunnel manually: netcup-kube ssh tunnel start",
+				remoteHost, remoteUser, remoteUser, remoteHost)
+			return fmt.Errorf("failed to start SSH tunnel: %w%s", err, troubleshooting)
 		}
 
 		// Give tunnel a moment to establish
@@ -278,7 +280,9 @@ func ensureTunnelRunning(envFile, projectRoot string) error {
 		// Verify tunnel is now running
 		checkCmd := exec.Command("ssh", "-S", ctlSocket, "-O", "check", fmt.Sprintf("%s@%s", remoteUser, remoteHost))
 		if err := checkCmd.Run(); err != nil {
-			return fmt.Errorf("tunnel failed to start (verify SSH access and known_hosts)\n\nTroubleshooting:\n  - Check SSH access: ssh %s@%s\n  - View tunnel status: netcup-kube ssh tunnel status\n  - Start tunnel manually: netcup-kube ssh tunnel start", remoteUser, remoteHost)
+			troubleshooting := fmt.Sprintf("\n\nTroubleshooting:\n  - Check SSH access: ssh %s@%s\n  - View tunnel status: netcup-kube ssh tunnel status\n  - Start tunnel manually: netcup-kube ssh tunnel start",
+				remoteUser, remoteHost)
+			return fmt.Errorf("tunnel failed to start (verify SSH access and known_hosts)%s", troubleshooting)
 		}
 	}
 

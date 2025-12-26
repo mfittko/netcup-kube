@@ -22,24 +22,25 @@ func getTunnelControlSocket(user, host, localPort string) string {
 	return filepath.Join(base, fmt.Sprintf("netcup-kube-tunnel-%s.ctl", key))
 }
 
-// loadEnvFile loads key=value pairs from an environment file
 // isValidEnvKey checks if a string is a valid environment variable name
 func isValidEnvKey(key string) bool {
 	if len(key) == 0 {
 		return false
 	}
 	// Must start with letter or underscore
-	if !(key[0] >= 'A' && key[0] <= 'Z' || key[0] == '_' || key[0] >= 'a' && key[0] <= 'z') {
+	if !((key[0] >= 'A' && key[0] <= 'Z') || key[0] == '_' || (key[0] >= 'a' && key[0] <= 'z')) {
 		return false
 	}
 	// Subsequent characters can be letters, digits, or underscore
 	for _, c := range key {
-		if !(c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '_') {
+		if !((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_') {
 			return false
 		}
 	}
 	return true
 }
+
+// loadEnvFile loads key=value pairs from an environment file
 
 func loadEnvFile(path string) (map[string]string, error) {
 	env := make(map[string]string)
