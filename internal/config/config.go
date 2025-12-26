@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/mfittko/netcup-kube/internal/validation"
 )
 
 // Config holds the configuration for netcup-kube commands
@@ -159,3 +161,112 @@ func (c *Config) ToEnvSlice() []string {
 	}
 	return env
 }
+
+// Validate validates the configuration based on the mode and other settings
+func (c *Config) Validate() error {
+	var errs validation.Errors
+
+	mode := c.Env["MODE"]
+	
+	// Validate MODE
+	if mode != "" {
+		if err := validation.OneOf("MODE", mode, []string{"bootstrap", "join"}); err != nil {
+			errs = append(errs, err)
+		}
+	}
+
+	// Validate CIDRs
+	if err := validation.CIDR("SERVICE_CIDR", c.Env["SERVICE_CIDR"]); err != nil {
+		errs = append(errs, err)
+	}
+	if err := validation.CIDR("CLUSTER_CIDR", c.Env["CLUSTER_CIDR"]); err != nil {
+		errs = append(errs, err)
+	}
+	if err := validation.CIDR("PRIVATE_CIDR", c.Env["PRIVATE_CIDR"]); err != nil {
+		errs = append(errs, err)
+	}
+	if err := validation.CIDR("ADMIN_SRC_CIDR", c.Env["ADMIN_SRC_CIDR"]); err != nil {
+		errs = append(errs, err)
+	}
+
+	// Validate ports
+	if err := validation.Port("TRAEFIK_NODEPORT_HTTP", c.Env["TRAEFIK_NODEPORT_HTTP"]); err != nil {
+		errs = append(errs, err)
+	}
+	if err := validation.Port("TRAEFIK_NODEPORT_HTTPS", c.Env["TRAEFIK_NODEPORT_HTTPS"]); err != nil {
+		errs = append(errs, err)
+	}
+
+	// Validate IPs
+	if err := validation.IP("NODE_IP", c.Env["NODE_IP"]); err != nil {
+		errs = append(errs, err)
+	}
+	if err := validation.IP("NODE_EXTERNAL_IP", c.Env["NODE_EXTERNAL_IP"]); err != nil {
+		errs = append(errs, err)
+	}
+
+	// Validate hostnames/domains
+	if err := validation.Hostname("BASE_DOMAIN", c.Env["BASE_DOMAIN"]); err != nil {
+		errs = append(errs, err)
+	}
+	if err := validation.Hostname("DASH_HOST", c.Env["DASH_HOST"]); err != nil {
+		errs = append(errs, err)
+	}
+
+	// Validate URLs
+	if err := validation.URL("SERVER_URL", c.Env["SERVER_URL"]); err != nil {
+		errs = append(errs, err)
+	}
+	if err := validation.URL("EDGE_UPSTREAM", c.Env["EDGE_UPSTREAM"]); err != nil {
+		errs = append(errs, err)
+	}
+
+	// Validate required combinations
+	if c.Env["ENABLE_VLAN_NAT"] == "true" {
+		if err := validation.RequiredWith("PRIVATE_CIDR", c.Env["PRIVATE_CIDR"], map[string]string{
+			"ENABLE_VLAN_NAT": c.Env["ENABLE_VLAN_NAT"],
+		}); err != nil {
+			errs = append(errs, err)
+		}
+		if err := validation.RequiredWith("PUBLIC_IFACE", c.Env["PUBLIC_IFACE"], map[string]string{
+			"ENABLE_VLAN_NAT": c.Env["ENABLE_VLAN_NAT"],
+		}); err != nil {
+			errs = append(errs, err)
+		}
+	}
+
+	// Mode-specific validation
+	if mode == "join" {
+		// Join mode requires SERVER_URL and either TOKEN or TOKEN_FILE
+		if err := validation.Required("SERVER_URL", c.Env["SERVER_URL"]); err != nil {
+			errs = append(errs, err)
+		}
+		if c.Env["TOKEN"] == "" && c.Env["TOKEN_FILE"] == "" {
+			errs = append(errs, &validation.Error{
+				Field:       "TOKEN or TOKEN_FILE",
+				Message:     "at least one is required for join mode",
+				Remediation: "Set TOKEN=<value> or TOKEN_FILE=<path> when MODE=join",
+			})
+		}
+	}
+
+	// Validate CADDY_CERT_MODE
+	if c.Env["CADDY_CERT_MODE"] != "" {
+		if err := validation.OneOf("CADDY_CERT_MODE", c.Env["CADDY_CERT_MODE"], []string{"dns01_wildcard", "http01"}); err != nil {
+			errs = append(errs, err)
+		}
+	}
+
+	// Validate EDGE_PROXY
+	if c.Env["EDGE_PROXY"] != "" {
+		if err := validation.OneOf("EDGE_PROXY", c.Env["EDGE_PROXY"], []string{"none", "caddy"}); err != nil {
+			errs = append(errs, err)
+		}
+	}
+
+	if errs.HasErrors() {
+		return errs
+	}
+	return nil
+}
+

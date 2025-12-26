@@ -337,3 +337,169 @@ func TestToEnvSlice(t *testing.T) {
 		t.Errorf("ToEnvSlice() missing expected entries, got %v", slice)
 	}
 }
+
+func TestValidate(t *testing.T) {
+	tests := []struct {
+		name    string
+		env     map[string]string
+		wantErr bool
+	}{
+		{
+			name: "valid bootstrap config with defaults",
+			env: map[string]string{
+				"MODE":                    "bootstrap",
+				"SERVICE_CIDR":            "10.43.0.0/16",
+				"CLUSTER_CIDR":            "10.42.0.0/16",
+				"TRAEFIK_NODEPORT_HTTP":   "30080",
+				"TRAEFIK_NODEPORT_HTTPS":  "30443",
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid join config",
+			env: map[string]string{
+				"MODE":       "join",
+				"SERVER_URL": "https://192.168.1.1:6443",
+				"TOKEN":      "dummytoken",
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid join config with TOKEN_FILE",
+			env: map[string]string{
+				"MODE":       "join",
+				"SERVER_URL": "https://192.168.1.1:6443",
+				"TOKEN_FILE": "/path/to/token",
+			},
+			wantErr: false,
+		},
+		{
+			name: "join mode missing SERVER_URL",
+			env: map[string]string{
+				"MODE":  "join",
+				"TOKEN": "dummytoken",
+			},
+			wantErr: true,
+		},
+		{
+			name: "join mode missing TOKEN and TOKEN_FILE",
+			env: map[string]string{
+				"MODE":       "join",
+				"SERVER_URL": "https://192.168.1.1:6443",
+			},
+			wantErr: true,
+		},
+		{
+			name: "invalid CIDR",
+			env: map[string]string{
+				"SERVICE_CIDR": "invalid-cidr",
+			},
+			wantErr: true,
+		},
+		{
+			name: "invalid port",
+			env: map[string]string{
+				"TRAEFIK_NODEPORT_HTTP": "99999",
+			},
+			wantErr: true,
+		},
+		{
+			name: "invalid IP",
+			env: map[string]string{
+				"NODE_IP": "999.999.999.999",
+			},
+			wantErr: true,
+		},
+		{
+			name: "invalid hostname",
+			env: map[string]string{
+				"BASE_DOMAIN": "-invalid.com",
+			},
+			wantErr: true,
+		},
+		{
+			name: "invalid URL",
+			env: map[string]string{
+				"SERVER_URL": "not-a-url",
+			},
+			wantErr: true,
+		},
+		{
+			name: "ENABLE_VLAN_NAT without PRIVATE_CIDR",
+			env: map[string]string{
+				"ENABLE_VLAN_NAT": "true",
+				"PUBLIC_IFACE":    "eth0",
+			},
+			wantErr: true,
+		},
+		{
+			name: "ENABLE_VLAN_NAT without PUBLIC_IFACE",
+			env: map[string]string{
+				"ENABLE_VLAN_NAT": "true",
+				"PRIVATE_CIDR":    "10.10.0.0/24",
+			},
+			wantErr: true,
+		},
+		{
+			name: "ENABLE_VLAN_NAT with all required fields",
+			env: map[string]string{
+				"ENABLE_VLAN_NAT": "true",
+				"PRIVATE_CIDR":    "10.10.0.0/24",
+				"PUBLIC_IFACE":    "eth0",
+			},
+			wantErr: false,
+		},
+		{
+			name: "invalid MODE",
+			env: map[string]string{
+				"MODE": "invalid",
+			},
+			wantErr: true,
+		},
+		{
+			name: "invalid CADDY_CERT_MODE",
+			env: map[string]string{
+				"CADDY_CERT_MODE": "invalid",
+			},
+			wantErr: true,
+		},
+		{
+			name: "invalid EDGE_PROXY",
+			env: map[string]string{
+				"EDGE_PROXY": "invalid",
+			},
+			wantErr: true,
+		},
+		{
+			name: "valid CADDY_CERT_MODE",
+			env: map[string]string{
+				"CADDY_CERT_MODE": "dns01_wildcard",
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid EDGE_PROXY",
+			env: map[string]string{
+				"EDGE_PROXY": "caddy",
+			},
+			wantErr: false,
+		},
+		{
+			name: "empty config",
+			env: map[string]string{},
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := New()
+			cfg.Env = tt.env
+			err := cfg.Validate()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
