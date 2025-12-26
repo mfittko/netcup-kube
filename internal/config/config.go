@@ -9,6 +9,91 @@ import (
 	"github.com/mfittko/netcup-kube/internal/validation"
 )
 
+// isValidEnvKey checks if a string is a valid environment variable name.
+// Valid names start with a letter or underscore, and contain only letters, digits, or underscores.
+func isValidEnvKey(key string) bool {
+	if len(key) == 0 {
+		return false
+	}
+	// Must start with letter or underscore
+	if !((key[0] >= 'A' && key[0] <= 'Z') || key[0] == '_' || (key[0] >= 'a' && key[0] <= 'z')) {
+		return false
+	}
+	// Subsequent characters can be letters, digits, or underscore
+	for _, c := range key {
+		if !((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_') {
+			return false
+		}
+	}
+	return true
+}
+
+// LoadEnvFileToMap loads environment variables from a file and returns them as a map.
+// This is a convenience function for cases where a simple map is needed instead of a Config object.
+//
+// File format:
+//   - Lines should be in KEY=value format
+//   - Empty lines and lines starting with # are skipped (comments)
+//   - Leading/trailing whitespace is trimmed from both keys and values
+//   - Quotes (single or double) around values are removed if present
+//   - Keys must be valid environment variable names (start with letter/underscore, contain only letters/digits/underscores)
+//   - Lines with invalid keys are silently skipped
+//   - Returns an error if the file doesn't exist or can't be read
+//
+// Example:
+//   # This is a comment
+//   BASE_DOMAIN=example.com
+//   MGMT_USER="ops"
+//   123INVALID=skipped    # Invalid key, will be skipped
+//
+// Note: This function does NOT perform variable expansion like ${VAR}.
+// For variable expansion support, use Config.LoadEnvFile() instead.
+func LoadEnvFileToMap(path string) (map[string]string, error) {
+	result := make(map[string]string)
+
+	file, err := os.Open(path)
+	if err != nil {
+		return result, fmt.Errorf("failed to open env file: %w", err)
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+
+		// Skip empty lines and comments
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		// Parse KEY=value format
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+
+		key := strings.TrimSpace(parts[0])
+		value := strings.TrimSpace(parts[1])
+
+		// Validate key name (must be valid environment variable name)
+		if !isValidEnvKey(key) {
+			continue
+		}
+
+		// Remove quotes if present (for backward compatibility with simpler parser)
+		if len(value) >= 2 {
+			if (value[0] == '"' && value[len(value)-1] == '"') ||
+				(value[0] == '\'' && value[len(value)-1] == '\'') {
+				value = value[1 : len(value)-1]
+			}
+		}
+
+		result[key] = value
+	}
+
+	return result, scanner.Err()
+}
+
 // Config holds the configuration for netcup-kube commands
 type Config struct {
 	// Environment variables to pass to scripts

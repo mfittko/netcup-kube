@@ -338,6 +338,258 @@ func TestToEnvSlice(t *testing.T) {
 	}
 }
 
+func TestLoadEnvFileToMap(t *testing.T) {
+	tests := []struct {
+		name        string
+		fileContent string
+		want        map[string]string
+		wantErr     bool
+	}{
+		{
+			name: "simple key-value pairs",
+			fileContent: `KEY1=value1
+KEY2=value2
+KEY3=value3`,
+			want: map[string]string{
+				"KEY1": "value1",
+				"KEY2": "value2",
+				"KEY3": "value3",
+			},
+			wantErr: false,
+		},
+		{
+			name: "with comments and empty lines",
+			fileContent: `# This is a comment
+KEY1=value1
+
+# Another comment
+KEY2=value2
+`,
+			want: map[string]string{
+				"KEY1": "value1",
+				"KEY2": "value2",
+			},
+			wantErr: false,
+		},
+		{
+			name: "with quotes",
+			fileContent: `KEY1="quoted value"
+KEY2='single quoted'`,
+			want: map[string]string{
+				"KEY1": "quoted value",
+				"KEY2": "single quoted",
+			},
+			wantErr: false,
+		},
+		{
+			name: "with whitespace",
+			fileContent: `  KEY1  =  value1  
+KEY2=value2`,
+			want: map[string]string{
+				"KEY1": "value1",
+				"KEY2": "value2",
+			},
+			wantErr: false,
+		},
+		{
+			name:        "empty file",
+			fileContent: "",
+			want:        map[string]string{},
+			wantErr:     false,
+		},
+		{
+			name: "malformed lines are skipped",
+			fileContent: `KEY1=value1
+INVALID_LINE_NO_EQUALS
+KEY2=value2`,
+			want: map[string]string{
+				"KEY1": "value1",
+				"KEY2": "value2",
+			},
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create temp file
+			tmpDir := t.TempDir()
+			tmpFile := filepath.Join(tmpDir, "test.env")
+			if err := os.WriteFile(tmpFile, []byte(tt.fileContent), 0644); err != nil {
+				t.Fatalf("Failed to create temp file: %v", err)
+			}
+
+			got, err := LoadEnvFileToMap(tmpFile)
+
+			if (err != nil) != tt.wantErr {
+				t.Errorf("LoadEnvFileToMap() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+
+			if len(got) != len(tt.want) {
+				t.Errorf("LoadEnvFileToMap() returned %d keys, want %d", len(got), len(tt.want))
+			}
+
+			for key, expectedValue := range tt.want {
+				if gotValue, exists := got[key]; !exists {
+					t.Errorf("Expected key %s not found", key)
+				} else if gotValue != expectedValue {
+					t.Errorf("Key %s: got value %q, want %q", key, gotValue, expectedValue)
+				}
+			}
+
+			// Check no unexpected keys
+			for key := range got {
+				if _, expected := tt.want[key]; !expected {
+					t.Errorf("Unexpected key %s", key)
+				}
+			}
+		})
+	}
+}
+
+func TestLoadEnvFileToMap_NonExistent(t *testing.T) {
+	_, err := LoadEnvFileToMap("/nonexistent/file.env")
+	if err == nil {
+		t.Error("LoadEnvFileToMap() with non-existent file should return error")
+	}
+}
+
+func TestLoadEnvFileToMap_NoVariableExpansion(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpFile := filepath.Join(tmpDir, "test.env")
+	content := `BASE=/tmp
+SUBDIR=${BASE}/data`
+	if err := os.WriteFile(tmpFile, []byte(content), 0644); err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+
+	got, err := LoadEnvFileToMap(tmpFile)
+	if err != nil {
+		t.Fatalf("LoadEnvFileToMap() error = %v", err)
+	}
+
+	// Should NOT expand variables (unlike Config.LoadEnvFile)
+	if got["SUBDIR"] != "${BASE}/data" {
+		t.Errorf("LoadEnvFileToMap() should NOT expand variables, got %q, want ${BASE}/data", got["SUBDIR"])
+	}
+}
+
+func TestLoadEnvFileToMap_InvalidKeys(t *testing.T) {
+	tests := []struct {
+		name        string
+		fileContent string
+		want        map[string]string
+	}{
+		{
+			name: "keys starting with numbers are skipped",
+			fileContent: `VALID_KEY=value1
+123INVALID=skipped
+ANOTHER_VALID=value2`,
+			want: map[string]string{
+				"VALID_KEY":     "value1",
+				"ANOTHER_VALID": "value2",
+			},
+		},
+		{
+			name: "keys with dashes are skipped",
+			fileContent: `VALID_KEY=value1
+KEY-WITH-DASH=skipped
+VALID_KEY2=value2`,
+			want: map[string]string{
+				"VALID_KEY":  "value1",
+				"VALID_KEY2": "value2",
+			},
+		},
+		{
+			name: "keys with special characters are skipped",
+			fileContent: `VALID_KEY=value1
+KEY@SPECIAL=skipped
+KEY$DOLLAR=skipped
+_UNDERSCORE_START=valid`,
+			want: map[string]string{
+				"VALID_KEY":         "value1",
+				"_UNDERSCORE_START": "valid",
+			},
+		},
+		{
+			name: "empty keys are skipped",
+			fileContent: `VALID_KEY=value1
+=no_key_here
+KEY2=value2`,
+			want: map[string]string{
+				"VALID_KEY": "value1",
+				"KEY2":      "value2",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			tmpFile := filepath.Join(tmpDir, "test.env")
+			if err := os.WriteFile(tmpFile, []byte(tt.fileContent), 0644); err != nil {
+				t.Fatalf("Failed to create temp file: %v", err)
+			}
+
+			got, err := LoadEnvFileToMap(tmpFile)
+			if err != nil {
+				t.Fatalf("LoadEnvFileToMap() error = %v", err)
+			}
+
+			if len(got) != len(tt.want) {
+				t.Errorf("LoadEnvFileToMap() returned %d keys, want %d. Got: %v", len(got), len(tt.want), got)
+			}
+
+			for key, expectedValue := range tt.want {
+				if gotValue, exists := got[key]; !exists {
+					t.Errorf("Expected key %s not found", key)
+				} else if gotValue != expectedValue {
+					t.Errorf("Key %s: got value %q, want %q", key, gotValue, expectedValue)
+				}
+			}
+
+			// Check no unexpected keys
+			for key := range got {
+				if _, expected := tt.want[key]; !expected {
+					t.Errorf("Unexpected key %s with value %q", key, got[key])
+				}
+			}
+		})
+	}
+}
+
+func TestIsValidEnvKey(t *testing.T) {
+	tests := []struct {
+		name string
+		key  string
+		want bool
+	}{
+		{"valid uppercase", "VALID_KEY", true},
+		{"valid lowercase", "valid_key", true},
+		{"valid mixed case", "Valid_Key", true},
+		{"valid with numbers", "KEY123", true},
+		{"valid underscore start", "_PRIVATE", true},
+		{"valid all underscores", "___", true},
+		{"empty string", "", false},
+		{"starts with number", "123KEY", false},
+		{"contains dash", "KEY-NAME", false},
+		{"contains dot", "KEY.NAME", false},
+		{"contains space", "KEY NAME", false},
+		{"contains special char", "KEY@NAME", false},
+		{"contains dollar", "$KEY", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isValidEnvKey(tt.key)
+			if got != tt.want {
+				t.Errorf("isValidEnvKey(%q) = %v, want %v", tt.key, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestValidate(t *testing.T) {
 	tests := []struct {
 		name    string
