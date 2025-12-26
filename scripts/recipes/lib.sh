@@ -57,10 +57,10 @@ recipe_helm_repo_add() {
   local repo_name="$1"
   local repo_url="$2"
   local force_update="${3:-}"
-  
+
   [[ -n "${repo_name}" ]] || die "Helm repo name is required"
   [[ -n "${repo_url}" ]] || die "Helm repo URL is required"
-  
+
   log "Adding Helm repository: ${repo_name}"
   # Use word boundary to ensure exact repo name match
   if ! helm repo list 2> /dev/null | grep -q "^${repo_name}[[:space:]]"; then
