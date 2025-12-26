@@ -9,7 +9,15 @@ import (
 	"strings"
 )
 
-// hostnameRegex is a pre-compiled regex for RFC 1123 hostname validation
+// hostnameRegex is a pre-compiled regex for RFC 1123 hostname validation.
+// Pattern enforces:
+// - Total length <= 253 characters (checked separately)
+// - Labels separated by dots
+// - Each label:
+//   - Starts with alphanumeric [a-zA-Z0-9]
+//   - May contain alphanumeric and hyphens [a-zA-Z0-9-]
+//   - Ends with alphanumeric [a-zA-Z0-9]
+//   - Max 63 characters (enforced by {0,61} allowing start+middle+end)
 var hostnameRegex = regexp.MustCompile(`^([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)*[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$`)
 
 // Error represents a validation error with an actionable remediation hint

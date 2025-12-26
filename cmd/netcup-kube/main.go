@@ -256,6 +256,7 @@ Examples:
   netcup-kube validate --output json
   BASE_DOMAIN=example.com netcup-kube validate
   netcup-kube validate --env-file config/netcup-kube.env`,
+	SilenceErrors: true, // We handle error output ourselves
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Parse and validate output format
 		format, err := output.ParseFormat(outputFormat)
@@ -292,8 +293,8 @@ Examples:
 				if format != output.FormatJSON {
 					return fmt.Errorf("validation failed")
 				}
-				// For JSON mode, just exit with error code without additional message
-				os.Exit(1)
+				// For JSON mode, return an ExitCodeError to exit cleanly without additional output
+				return executor.ExitCodeError{Code: 1}
 			}
 			return err
 		}
