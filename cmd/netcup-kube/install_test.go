@@ -4,63 +4,54 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/mfittko/netcup-kube/internal/tunnel"
 )
 
 func TestFetchKubeconfig(t *testing.T) {
-	// Create temporary directories for test
-	tmpDir, err := os.MkdirTemp("", "test-kubeconfig-*")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(tmpDir)
+	// Create temporary environment file
+	tmpDir := t.TempDir()
+	envFile := filepath.Join(tmpDir, "test.env")
 
-	configDir := filepath.Join(tmpDir, "config")
-	if err := os.MkdirAll(configDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-
-	// Create a mock env file
-	envFile := filepath.Join(configDir, "netcup-kube.env")
-	envContent := `MGMT_HOST=test.example.com
-MGMT_USER=testuser`
-	if err := os.WriteFile(envFile, []byte(envContent), 0644); err != nil {
+	// Write test env file content
+	content := `MGMT_HOST=test.example.com
+MGMT_USER=testuser
+`
+	if err := os.WriteFile(envFile, []byte(content), 0644); err != nil {
 		t.Fatal(err)
 	}
 
-	localKubeconfig := filepath.Join(configDir, "k3s.yaml")
+	localKubeconfig := filepath.Join(tmpDir, "k3s.yaml")
 
-	// Test that the function requires scp to be available
-	// We can't test actual SSH without a real server, but we can test validation
-	err = fetchKubeconfig(envFile, localKubeconfig, configDir)
-	// Error expected since we don't have actual SSH access
-	if err == nil {
-		t.Log("fetchKubeconfig() completed (may have failed at SSH step, which is expected in test)")
-	}
+	// This test will fail at the scp step (expected), but tests the env file loading
+	err := fetchKubeconfig(envFile, localKubeconfig, tmpDir)
+	t.Logf("fetchKubeconfig returned (scp failure expected): %v", err)
 }
 
-func TestStartTunnelViaGo(t *testing.T) {
-	// Test validation - should fail without actual SSH access
-	err := startTunnelViaGo("test.example.com", "testuser", "6443")
-	// Error expected since we can't actually start a tunnel in tests
-	if err == nil {
-		t.Log("startTunnelViaGo() completed (may have failed at SSH step, which is expected in test)")
+func TestTunnelManager(t *testing.T) {
+	// Test the tunnel manager creation
+	mgr := tunnel.New("testuser", "test.example.com", "6443", "127.0.0.1", "6443")
+
+	if mgr == nil {
+		t.Fatal("tunnel.New() returned nil")
 	}
+
+	// Check that we can get the control socket path
+	socket := mgr.GetControlSocket()
+	if socket == "" {
+		t.Error("GetControlSocket() returned empty string")
+	}
+
+	t.Logf("Control socket: %s", socket)
 }
 
 func TestEnsureTunnelRunning_NoEnvFile(t *testing.T) {
-	// Create a temporary directory
-	tmpDir, err := os.MkdirTemp("", "test-tunnel-*")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
+	envFile := filepath.Join(tmpDir, "nonexistent.env")
 
-	// Test with non-existent env file - should handle gracefully
-	nonExistentEnv := filepath.Join(tmpDir, "nonexistent.env")
-	err = ensureTunnelRunning(nonExistentEnv, tmpDir)
-
-	// Should return nil or an error, but not crash
+	// Should not error if env file doesn't exist (uses defaults)
+	err := ensureTunnelRunning(envFile, tmpDir)
 	if err != nil {
-		t.Logf("ensureTunnelRunning() returned error (expected): %v", err)
+		t.Logf("ensureTunnelRunning() returned: %v (expected when env values missing)", err)
 	}
 }
