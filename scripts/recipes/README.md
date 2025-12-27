@@ -44,6 +44,7 @@ NAMESPACE=prod-db STORAGE=50Gi netcup-kube install postgres
 - **sealed-secrets**: Encrypted secrets management
 - **dashboard**: Kubernetes Dashboard
 - **redisinsight**: Redis GUI for development
+- **llm-proxy**: Install llm-proxy from its Helm chart (Secret-backed config)
 
 ## Usage
 
