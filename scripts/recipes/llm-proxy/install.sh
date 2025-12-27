@@ -264,7 +264,7 @@ log "Creating/Updating Kubernetes Secret '${SECRET_NAME}' in namespace '${NAMESP
 # SECURITY: Avoid passing secrets via process arguments (e.g., --from-literal) to reduce accidental exposure.
 # Apply a Secret manifest via stdin instead.
 if [[ -n "${DATABASE_URL}" ]]; then
-  cat <<EOF | k apply -f -
+  cat << EOF | k apply -f -
 apiVersion: v1
 kind: Secret
 metadata:
@@ -278,7 +278,7 @@ stringData:
     ${DATABASE_URL}
 EOF
 else
-  cat <<EOF | k apply -f -
+  cat << EOF | k apply -f -
 apiVersion: v1
 kind: Secret
 metadata:
