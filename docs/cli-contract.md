@@ -75,6 +75,7 @@ netcup-kube install <recipe> [recipe-options]
 - `argo-cd` — Install Argo CD (GitOps continuous delivery tool)
 - `postgres` — Install PostgreSQL (Bitnami Helm chart)
 - `redis` — Install Redis (Bitnami Helm chart)
+- `llm-proxy` — Install llm-proxy (Helm chart; Secret-backed config)
 - `sealed-secrets` — Install Sealed Secrets (encrypt secrets for Git)
 - `redisinsight` — Install RedisInsight (Redis GUI)
 - `kube-prometheus-stack` — Install Grafana + Prometheus + Alertmanager

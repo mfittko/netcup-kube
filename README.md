@@ -56,6 +56,12 @@ Commands
   - Optional dashboard host in HTTP-01 mode: `sudo ./bin/netcup-kube dns --type edge-http --domains "abc.com,abc.org" --dash-host "kube.abc.com"`
   - Safety: this overwrites `/etc/caddy/Caddyfile` and restarts Caddy (requires TTY confirmation or `CONFIRM=true`)
 
+Contributing: install recipes
+- Install recipes live under `scripts/recipes/<name>/` and are dispatched via `netcup-kube install <name>`.
+- When adding a new recipe, follow the checklist in `AGENTS.md` and update both:
+  - `scripts/recipes/README.md` (human-facing list)
+  - `docs/cli-contract.md` (CLI contract/spec)
+
 Environment variables (selected)
 - MODE=bootstrap|join (default bootstrap)
 - CHANNEL=stable (or set K3S_VERSION)
