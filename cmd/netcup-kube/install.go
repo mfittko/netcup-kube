@@ -87,38 +87,35 @@ Examples:
 		}
 
 		// Parse --host flag for automatic domain management
-		hostArg := ""
-		for i, arg := range recipeArgs {
-			if strings.HasPrefix(arg, "--host=") {
-				hostArg = strings.TrimPrefix(arg, "--host=")
-				break
-			} else if arg == "--host" && i+1 < len(recipeArgs) {
-				hostArg = recipeArgs[i+1]
-				break
-			}
-		}
+		hostArg, adminHostArg := parseRecipeHostArgs(recipeArgs)
 
 		// Ensure kubeconfig is available (unless just showing help)
 		kubeconfig := os.Getenv("KUBECONFIG")
-		if !isHelpRequest && kubeconfig == "" {
-			// Check if on the server
-			if _, err := os.Stat("/etc/rancher/k3s/k3s.yaml"); err != nil {
-				// Not on server; fetch from remote if not already cached locally
-				if _, err := os.Stat(localKubeconfig); err != nil {
-					fmt.Println("KUBECONFIG not set and local kubeconfig not found. Fetching from remote...")
+		if !isHelpRequest {
+			// If KUBECONFIG isn't set, default to the repo's ./config/k3s.yaml when running locally.
+			// When running on the server, prefer the node-local kubeconfig.
+			if kubeconfig == "" {
+				if _, err := os.Stat("/etc/rancher/k3s/k3s.yaml"); err == nil {
+					kubeconfig = "/etc/rancher/k3s/k3s.yaml"
+				} else {
+					kubeconfig = localKubeconfig
+				}
+			}
 
-					if err := fetchKubeconfig(envFile, localKubeconfig, configDir); err != nil {
+			// If we are using a local kubeconfig path and it's missing, fetch it via scp.
+			// This also covers the case where the user set KUBECONFIG explicitly to a local path.
+			if kubeconfig != "/etc/rancher/k3s/k3s.yaml" {
+				if _, err := os.Stat(kubeconfig); err != nil {
+					fmt.Printf("Kubeconfig %s not found. Fetching from remote...\n", kubeconfig)
+					if err := fetchKubeconfig(envFile, kubeconfig, filepath.Dir(kubeconfig)); err != nil {
 						return err
 					}
-
-					fmt.Printf("Kubeconfig saved to %s\n", localKubeconfig)
+					fmt.Printf("Kubeconfig saved to %s\n", kubeconfig)
 				}
-
-				kubeconfig = localKubeconfig
 			}
 		}
 
-		// Check if tunnel is needed and running (when using local kubeconfig, and not just showing help)
+		// Check if tunnel is needed and running (when using the default local kubeconfig, and not just showing help)
 		if !isHelpRequest && kubeconfig == localKubeconfig {
 			if err := ensureTunnelRunning(envFile, projectRoot); err != nil {
 				return err
@@ -143,38 +140,50 @@ Examples:
 			return fmt.Errorf("recipe execution failed: %w", err)
 		}
 
-		// If recipe succeeded and --host was specified, auto-add domain to Caddy
-		if hostArg != "" {
+		// If recipe succeeded and --host/--admin-host were specified, auto-add domain(s) to Caddy
+		domainsToAdd := uniqueNonEmptyStrings([]string{hostArg, adminHostArg})
+		if len(domainsToAdd) > 0 {
 			// Only do this when running locally (not on the server)
 			if _, err := os.Stat("/etc/caddy/Caddyfile"); err != nil {
 				remoteBin := filepath.Join(projectRoot, "bin", "netcup-kube")
 				if _, err := os.Stat(remoteBin); err == nil {
-					fmt.Printf("\nAdding %s to Caddy edge-http domains...\n", hostArg)
-
 					// Create temp env file with CONFIRM=true
 					tmpEnv, err := os.CreateTemp("", "netcup-kube-install.env.*")
-					if err == nil {
-						defer func() {
-							tmpEnv.Close()
-							os.Remove(tmpEnv.Name())
-						}()
+					if err != nil {
+						fmt.Fprintf(os.Stderr, "Warning: failed to create temp env file: %v\n", err)
+						return nil
+					}
+					defer func() {
+						if closeErr := tmpEnv.Close(); closeErr != nil {
+							fmt.Fprintf(os.Stderr, "Warning: failed to close temp env file: %v\n", closeErr)
+						}
+						if removeErr := os.Remove(tmpEnv.Name()); removeErr != nil {
+							fmt.Fprintf(os.Stderr, "Warning: failed to remove temp env file: %v\n", removeErr)
+						}
+					}()
 
-						if _, err := tmpEnv.WriteString("CONFIRM=true\n"); err != nil {
-							fmt.Fprintf(os.Stderr, "Warning: failed to write temp env file: %v\n", err)
+					if _, err := tmpEnv.WriteString("CONFIRM=true\n"); err != nil {
+						fmt.Fprintf(os.Stderr, "Warning: failed to write temp env file: %v\n", err)
+						return nil
+					}
+					if closeErr := tmpEnv.Close(); closeErr != nil {
+						fmt.Fprintf(os.Stderr, "Warning: failed to close temp env file: %v\n", closeErr)
+						return nil
+					}
+
+					for _, domain := range domainsToAdd {
+						fmt.Printf("\nAdding %s to Caddy edge-http domains...\n", domain)
+
+						// Run the domain add command
+						dnsCmd := exec.Command(remoteBin, buildRemoteDNSAddDomainsArgs(tmpEnv.Name(), domain)...)
+						dnsCmd.Stdout = os.Stdout
+						dnsCmd.Stderr = os.Stderr
+
+						if err := dnsCmd.Run(); err == nil {
+							fmt.Println("✓ Domain added successfully!")
 						} else {
-							tmpEnv.Close()
-
-							// Run the domain add command
-							dnsCmd := exec.Command(remoteBin, "remote", "run", "--no-tty", "--env-file", tmpEnv.Name(), "dns", "--type", "edge-http", "--add-domains", hostArg)
-							dnsCmd.Stdout = os.Stdout
-							dnsCmd.Stderr = os.Stderr
-
-							if err := dnsCmd.Run(); err == nil {
-								fmt.Println("✓ Domain added successfully!")
-							} else {
-								fmt.Printf("⚠ Failed to add domain automatically. Run manually:\n")
-								fmt.Printf("  CONFIRM=true bin/netcup-kube remote run --no-tty dns --type edge-http --add-domains \"%s\"\n", hostArg)
-							}
+							fmt.Printf("⚠ Failed to add domain automatically. Run manually:\n")
+							fmt.Printf("  CONFIRM=true bin/netcup-kube remote run --no-tty -- dns --type edge-http --add-domains \"%s\"\n", domain)
 						}
 					}
 				}
@@ -183,6 +192,44 @@ Examples:
 
 		return nil
 	},
+}
+
+func buildRemoteDNSAddDomainsArgs(envFile string, domain string) []string {
+	return []string{"remote", "run", "--no-tty", "--env-file", envFile, "--", "dns", "--type", "edge-http", "--add-domains", domain}
+}
+
+func parseRecipeHostArgs(recipeArgs []string) (host string, adminHost string) {
+	for i, arg := range recipeArgs {
+		switch {
+		case strings.HasPrefix(arg, "--host="):
+			host = strings.TrimPrefix(arg, "--host=")
+		case arg == "--host" && i+1 < len(recipeArgs):
+			host = recipeArgs[i+1]
+		case strings.HasPrefix(arg, "--admin-host="):
+			adminHost = strings.TrimPrefix(arg, "--admin-host=")
+		case arg == "--admin-host" && i+1 < len(recipeArgs):
+			adminHost = recipeArgs[i+1]
+		}
+	}
+
+	return host, adminHost
+}
+
+func uniqueNonEmptyStrings(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	unique := make([]string, 0, len(values))
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			continue
+		}
+		if _, ok := seen[trimmed]; ok {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		unique = append(unique, trimmed)
+	}
+	return unique
 }
 
 func fetchKubeconfig(envFile, localKubeconfig, configDir string) error {
