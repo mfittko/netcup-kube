@@ -44,12 +44,16 @@ TUNNEL_USER=testuser`,
 				if err != nil {
 					t.Fatal(err)
 				}
-				defer os.Remove(tmpfile.Name())
+				t.Cleanup(func() {
+					_ = os.Remove(tmpfile.Name())
+				})
 
 				if _, err := tmpfile.Write([]byte(tt.content)); err != nil {
 					t.Fatal(err)
 				}
-				tmpfile.Close()
+				if err := tmpfile.Close(); err != nil {
+					t.Fatalf("failed to close temp file: %v", err)
+				}
 
 				// Set the env file path
 				oldEnvFile := sshEnvFile
@@ -71,14 +75,18 @@ func TestLoadSSHEnv_DefaultLocations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	t.Cleanup(func() {
+		_ = os.RemoveAll(tmpDir)
+	})
 
 	// Save current directory
 	oldWd, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.Chdir(oldWd)
+	t.Cleanup(func() {
+		_ = os.Chdir(oldWd)
+	})
 
 	// Change to temp directory
 	if err := os.Chdir(tmpDir); err != nil {

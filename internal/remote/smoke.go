@@ -32,13 +32,13 @@ func smokeWithClient(client Client, cfg *Config, opts GitOptions, projectRoot st
 	if err != nil {
 		return fmt.Errorf("failed to create smoke env file: %w", err)
 	}
-	defer os.Remove(tmpEnv)
+	defer func() { _ = os.Remove(tmpEnv) }()
 
 	tmpEnvJoin, err := createSmokeJoinEnvFile()
 	if err != nil {
 		return fmt.Errorf("failed to create smoke join env file: %w", err)
 	}
-	defer os.Remove(tmpEnvJoin)
+	defer func() { _ = os.Remove(tmpEnvJoin) }()
 
 	fmt.Printf("[local] Running DRY_RUN smoke test on %s@%s (non-interactive)\n", cfg.User, cfg.Host)
 
@@ -106,10 +106,9 @@ CONFIRM=true
 	if err != nil {
 		return "", err
 	}
-	defer tmpFile.Close()
-
+	defer func() { _ = tmpFile.Close() }()
 	if _, err := tmpFile.WriteString(content); err != nil {
-		os.Remove(tmpFile.Name())
+		_ = os.Remove(tmpFile.Name())
 		return "", err
 	}
 
@@ -131,10 +130,10 @@ TOKEN=dummytoken
 	if err != nil {
 		return "", err
 	}
-	defer tmpFile.Close()
+	defer func() { _ = tmpFile.Close() }()
 
 	if _, err := tmpFile.WriteString(content); err != nil {
-		os.Remove(tmpFile.Name())
+		_ = os.Remove(tmpFile.Name())
 		return "", err
 	}
 

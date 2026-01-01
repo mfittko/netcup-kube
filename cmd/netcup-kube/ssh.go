@@ -166,7 +166,9 @@ func loadSSHEnv() error {
 	// Set environment variables
 	for k, v := range env {
 		if os.Getenv(k) == "" {
-			os.Setenv(k, v)
+			if err := os.Setenv(k, v); err != nil {
+				return fmt.Errorf("failed to set env var %s: %w", k, err)
+			}
 		}
 	}
 

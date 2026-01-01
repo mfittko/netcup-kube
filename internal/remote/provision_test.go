@@ -85,7 +85,7 @@ func TestEnsureRootAccess_SshpassButMissingRootPass(t *testing.T) {
 	oldLook := lookPath
 	defer func() { lookPath = oldLook }()
 	lookPath = func(file string) (string, error) { return "/usr/bin/sshpass", nil }
-	os.Unsetenv("ROOT_PASS")
+	_ = os.Unsetenv("ROOT_PASS")
 
 	fc := &fakeClient{testConnErr: exec.ErrNotFound}
 	err := ensureRootAccess(fc, "example.com", "/tmp/key.pub")
@@ -105,8 +105,10 @@ func TestEnsureRootAccess_SshpassWithRootPass_UnsetsEnv(t *testing.T) {
 	// sshpass+ssh-copy-id succeeds
 	execCommand = func(_ string, _ ...string) *exec.Cmd { return exec.Command("true") }
 	lookPath = func(file string) (string, error) { return "/usr/bin/sshpass", nil }
-	os.Setenv("ROOT_PASS", "secret")
-	t.Cleanup(func() { os.Unsetenv("ROOT_PASS") })
+	if err := os.Setenv("ROOT_PASS", "secret"); err != nil {
+		t.Fatalf("Setenv(ROOT_PASS) failed: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Unsetenv("ROOT_PASS") })
 
 	fc := &fakeClient{testConnErr: exec.ErrNotFound}
 	if err := ensureRootAccess(fc, "example.com", "/tmp/key.pub"); err != nil {

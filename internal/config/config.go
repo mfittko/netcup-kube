@@ -16,12 +16,14 @@ func isValidEnvKey(key string) bool {
 		return false
 	}
 	// Must start with letter or underscore
-	if !((key[0] >= 'A' && key[0] <= 'Z') || key[0] == '_' || (key[0] >= 'a' && key[0] <= 'z')) {
+	startsOK := (key[0] >= 'A' && key[0] <= 'Z') || key[0] == '_' || (key[0] >= 'a' && key[0] <= 'z')
+	if !startsOK {
 		return false
 	}
 	// Subsequent characters can be letters, digits, or underscore
 	for _, c := range key {
-		if !((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_') {
+		isAlphaNumOrUnderscore := (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_'
+		if !isAlphaNumOrUnderscore {
 			return false
 		}
 	}
@@ -41,10 +43,11 @@ func isValidEnvKey(key string) bool {
 //   - Returns an error if the file doesn't exist or can't be read
 //
 // Example:
-//   # This is a comment
-//   BASE_DOMAIN=example.com
-//   MGMT_USER="ops"
-//   123INVALID=skipped    # Invalid key, will be skipped
+//
+//	# This is a comment
+//	BASE_DOMAIN=example.com
+//	MGMT_USER="ops"
+//	123INVALID=skipped    # Invalid key, will be skipped
 //
 // Note: This function does NOT perform variable expansion like ${VAR}.
 // For variable expansion support, use Config.LoadEnvFile() instead.
@@ -55,7 +58,7 @@ func LoadEnvFileToMap(path string) (map[string]string, error) {
 	if err != nil {
 		return result, fmt.Errorf("failed to open env file: %w", err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
@@ -118,7 +121,7 @@ func (c *Config) LoadEnvFile(path string) error {
 		}
 		return fmt.Errorf("failed to open env file: %w", err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
