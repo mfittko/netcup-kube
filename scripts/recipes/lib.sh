@@ -82,24 +82,21 @@ recipe_check_kubeconfig() {
   #   via scp from the management host using ./config/netcup-kube.env.
   local kubeconfig="${KUBECONFIG:-}"
 
+  # SCRIPTS_DIR points at <repo>/scripts; infer repo root.
+  local project_root
+  project_root="$(cd "${SCRIPTS_DIR}/.." && pwd)"
+
   if [[ -z "${kubeconfig}" ]]; then
     if [[ -f "/etc/rancher/k3s/k3s.yaml" ]]; then
       export KUBECONFIG="/etc/rancher/k3s/k3s.yaml"
       return 0
     fi
-
-    # SCRIPTS_DIR points at <repo>/scripts; infer repo root.
-    local project_root
-    project_root="$(cd "${SCRIPTS_DIR}/.." && pwd)"
     kubeconfig="${project_root}/config/k3s.yaml"
     export KUBECONFIG="${kubeconfig}"
   fi
 
   # If kubeconfig points to a local path and doesn't exist, fetch it.
   if [[ "${KUBECONFIG}" != "/etc/rancher/k3s/k3s.yaml" ]] && [[ ! -f "${KUBECONFIG}" ]]; then
-    local project_root
-    project_root="$(cd "${SCRIPTS_DIR}/.." && pwd)"
-
     local env_file
     env_file="${project_root}/config/netcup-kube.env"
     [[ -f "${env_file}" ]] || die "${env_file} not found. Please create it from the example."

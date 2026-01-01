@@ -59,6 +59,7 @@ Environment:
   LLM_PROXY_GIT_REF          Alternative to --git-ref.
   LLM_PROXY_MANAGEMENT_TOKEN Alternative to --management-token.
   LLM_PROXY_DATABASE_URL     Alternative to --database-url.
+  LLM_PROXY_POSTGRES_SSLMODE sslmode for auto-detected platform Postgres DATABASE_URL (default: require).
   LLM_PROXY_CREATE_SECRET    true|false (default: false) - create/update the Secret (otherwise it must already exist).
   LLM_PROXY_USE_PLATFORM_POSTGRES  true|false (default: true)
   LLM_PROXY_USE_PLATFORM_REDIS     true|false (default: false)
@@ -98,6 +99,7 @@ IMAGE_TAG=""
 
 MANAGEMENT_TOKEN="${LLM_PROXY_MANAGEMENT_TOKEN:-}"
 DATABASE_URL="${LLM_PROXY_DATABASE_URL:-}"
+POSTGRES_SSLMODE="${LLM_PROXY_POSTGRES_SSLMODE:-require}"
 
 USE_PLATFORM_POSTGRES="${LLM_PROXY_USE_PLATFORM_POSTGRES:-true}"
 USE_PLATFORM_REDIS="${LLM_PROXY_USE_PLATFORM_REDIS:-false}"
@@ -319,7 +321,7 @@ if [[ -z "${DATABASE_URL}" && "${USE_PLATFORM_POSTGRES}" == "true" ]]; then
     # Bitnami postgresql chart stores app user password in .data.password
     pg_pass="$(k get secret postgres-postgresql -n "${PLATFORM_NS}" -o jsonpath='{.data.password}' 2> /dev/null | base64 -d 2> /dev/null || true)"
     if [[ -n "${pg_pass}" ]]; then
-      DATABASE_URL="postgres://app:${pg_pass}@postgres-postgresql.${PLATFORM_NS}.svc.cluster.local:5432/app?sslmode=disable"
+      DATABASE_URL="postgres://app:${pg_pass}@postgres-postgresql.${PLATFORM_NS}.svc.cluster.local:5432/app?sslmode=${POSTGRES_SSLMODE}"
       log "Detected platform Postgres; configuring DATABASE_URL from existing install"
     else
       log "Detected platform Postgres, but could not read app password from Secret; leaving DATABASE_URL unset"
@@ -425,9 +427,8 @@ else
     fi
 
     redis_events_addr="${RELEASE}-redis-events-master.${NAMESPACE}.svc.cluster.local:6379"
-    redis_cache_addr="${RELEASE}-redis-cache-master.${NAMESPACE}.svc.cluster.local:6379"
     event_bus_backend="redis-streams"
-    redis_cache_url="redis://${redis_cache_addr}/0"
+    redis_cache_url="redis://${RELEASE}-redis-cache-master.${NAMESPACE}.svc.cluster.local:6379/0"
     log "Using dedicated Redis events (${RELEASE}-redis-events) for Redis Streams event bus"
     log "Using dedicated Redis cache (${RELEASE}-redis-cache) for Redis HTTP cache"
   fi

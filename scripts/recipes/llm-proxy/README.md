@@ -103,8 +103,9 @@ To use Redis, either:
 
 This enables:
 - `env.LLM_PROXY_EVENT_BUS=redis-streams`
-- `env.REDIS_ADDR=<release>-redis-master.<namespace>.svc.cluster.local:6379`
+- `env.REDIS_ADDR=<release>-redis-events-master.<namespace>.svc.cluster.local:6379`
 - Redis-backed HTTP cache (`env.HTTP_CACHE_BACKEND=redis`)
+- `env.REDIS_CACHE_URL=redis://<release>-redis-cache-master.<namespace>.svc.cluster.local:6379/0`
 
 ### Platform dependencies (optional)
 
