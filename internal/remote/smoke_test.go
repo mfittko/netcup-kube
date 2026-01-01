@@ -11,7 +11,7 @@ func TestCreateSmokeEnvFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("createSmokeEnvFile() error = %v", err)
 	}
-	defer os.Remove(tmpFile)
+	t.Cleanup(func() { _ = os.Remove(tmpFile) })
 
 	// Check that file exists
 	if _, err := os.Stat(tmpFile); err != nil {
@@ -48,7 +48,7 @@ func TestCreateSmokeJoinEnvFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("createSmokeJoinEnvFile() error = %v", err)
 	}
-	defer os.Remove(tmpFile)
+	t.Cleanup(func() { _ = os.Remove(tmpFile) })
 
 	// Check that file exists
 	if _, err := os.Stat(tmpFile); err != nil {

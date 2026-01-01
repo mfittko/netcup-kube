@@ -84,7 +84,7 @@ func ensureRootAccess(client Client, host string, pubKeyPath string) error {
 
 		// Best-effort cleanup: clears the env var for subsequent commands in this process.
 		// Note: this does not guarantee the value is removed from memory.
-		os.Unsetenv("ROOT_PASS")
+		_ = os.Unsetenv("ROOT_PASS")
 		return nil
 	}
 

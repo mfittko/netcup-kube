@@ -140,8 +140,10 @@ func TestFindPublicKey(t *testing.T) {
 
 	// Save and restore HOME
 	oldHome := os.Getenv("HOME")
-	defer os.Setenv("HOME", oldHome)
-	os.Setenv("HOME", tmpDir)
+	t.Cleanup(func() { _ = os.Setenv("HOME", oldHome) })
+	if err := os.Setenv("HOME", tmpDir); err != nil {
+		t.Fatalf("Setenv(HOME) failed: %v", err)
+	}
 
 	client := NewSSHClient("example.com", "testuser")
 	if client.IdentityFile == "" {

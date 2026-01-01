@@ -234,7 +234,7 @@ func RemoteBuildAndUpload(client Client, cfg *Config, projectRoot string, opts G
 	if err != nil {
 		return fmt.Errorf("failed to create temp dir: %w", err)
 	}
-	defer removeAll(tmpDir)
+	defer func() { _ = removeAll(tmpDir) }()
 
 	out := filepath.Join(tmpDir, "netcup-kube")
 	fmt.Printf("[local] Building netcup-kube for linux/%s\n", goarch)

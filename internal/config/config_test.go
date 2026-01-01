@@ -155,10 +155,16 @@ func TestLoadEnvFile_Precedence(t *testing.T) {
 
 func TestLoadFromEnvironment(t *testing.T) {
 	// Set test environment variables
-	os.Setenv("TEST_VAR_1", "value1")
-	os.Setenv("TEST_VAR_2", "value2")
-	defer os.Unsetenv("TEST_VAR_1")
-	defer os.Unsetenv("TEST_VAR_2")
+	if err := os.Setenv("TEST_VAR_1", "value1"); err != nil {
+		t.Fatalf("Setenv(TEST_VAR_1) failed: %v", err)
+	}
+	if err := os.Setenv("TEST_VAR_2", "value2"); err != nil {
+		t.Fatalf("Setenv(TEST_VAR_2) failed: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Unsetenv("TEST_VAR_1")
+		_ = os.Unsetenv("TEST_VAR_2")
+	})
 
 	cfg := New()
 	cfg.LoadFromEnvironment()
@@ -177,8 +183,12 @@ func TestLoadFromEnvironment(t *testing.T) {
 }
 
 func TestLoadFromEnvironment_Precedence(t *testing.T) {
-	os.Setenv("TEST_VAR", "from_env")
-	defer os.Unsetenv("TEST_VAR")
+	if err := os.Setenv("TEST_VAR", "from_env"); err != nil {
+		t.Fatalf("Setenv(TEST_VAR) failed: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Unsetenv("TEST_VAR")
+	})
 
 	cfg := New()
 	cfg.Env["TEST_VAR"] = "pre_existing"
@@ -284,8 +294,12 @@ func TestExpandVars(t *testing.T) {
 }
 
 func TestExpandVars_FromOsEnv(t *testing.T) {
-	os.Setenv("TEST_EXPAND_VAR", "from_os")
-	defer os.Unsetenv("TEST_EXPAND_VAR")
+	if err := os.Setenv("TEST_EXPAND_VAR", "from_os"); err != nil {
+		t.Fatalf("Setenv(TEST_EXPAND_VAR) failed: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Unsetenv("TEST_EXPAND_VAR")
+	})
 
 	cfg := New()
 	got := cfg.expandVars("${TEST_EXPAND_VAR}")
@@ -326,9 +340,10 @@ func TestToEnvSlice(t *testing.T) {
 	// Check that both entries are present (order may vary)
 	found := make(map[string]bool)
 	for _, entry := range slice {
-		if entry == "KEY1=value1" {
+		switch entry {
+		case "KEY1=value1":
 			found["KEY1"] = true
-		} else if entry == "KEY2=value2" {
+		case "KEY2=value2":
 			found["KEY2"] = true
 		}
 	}

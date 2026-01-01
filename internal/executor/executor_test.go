@@ -38,7 +38,9 @@ func TestNew_FindsScript(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to get working directory: %v", err)
 	}
-	defer os.Chdir(origDir)
+	t.Cleanup(func() {
+		_ = os.Chdir(origDir)
+	})
 
 	// Create a temporary directory structure
 	tmpDir := t.TempDir()
@@ -76,7 +78,9 @@ func TestNew_FindsScriptRelativeToExecutable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to get working directory: %v", err)
 	}
-	defer os.Chdir(origDir)
+	t.Cleanup(func() {
+		_ = os.Chdir(origDir)
+	})
 
 	// Create a temporary directory structure that doesn't have scripts/main.sh
 	tmpDir := t.TempDir()
@@ -102,7 +106,9 @@ func TestNew_FromBinDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to get working directory: %v", err)
 	}
-	defer os.Chdir(origDir)
+	t.Cleanup(func() {
+		_ = os.Chdir(origDir)
+	})
 
 	// Create a temporary directory structure
 	tmpDir := t.TempDir()
