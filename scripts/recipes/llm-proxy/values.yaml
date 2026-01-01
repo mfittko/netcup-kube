@@ -1,0 +1,62 @@
+# llm-proxy recipe defaults (non-sensitive)
+#
+# This file is intentionally free of secrets.
+# Secrets are always provided via existing Kubernetes Secrets created by the recipe.
+
+replicaCount: 8
+
+image:
+  repository: ghcr.io/sofatutor/llm-proxy
+  # Keep tag explicit so installs work out-of-the-box.
+  # For production, pin to a released version and set LLM_PROXY_CHART_VERSION accordingly.
+  tag: latest
+
+service:
+  type: ClusterIP
+  port: 8080
+
+ingress:
+  enabled: false
+
+admin:
+  enabled: false
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 1000m
+    memory: 512Mi
+
+env:
+  LOG_LEVEL: info
+  # Enable metrics endpoints (/metrics + /metrics/prometheus)
+  ENABLE_METRICS: "true"
+  # Redis HTTP cache client tuning (llm-proxy)
+  # Helps avoid connection pool contention under concurrency.
+  REDIS_CACHE_POOL_SIZE: "200"
+  REDIS_CACHE_TIMEOUT: "1s"
+
+# Enable Prometheus scraping by default.
+# - If you run kube-prometheus-stack, the recipe can enable ServiceMonitor automatically.
+# - If you run vanilla Prometheus, service annotations are sufficient.
+metrics:
+  enabled: true
+  grafanaDashboard:
+    enabled: true
+  serviceMonitor:
+    enabled: false
+    labels:
+      release: kube-prometheus-stack
+
+autoscaling:
+  enabled: false
+
+# Optional dispatcher (off by default). If enabled, dispatcher API keys must be provided via existing secrets.
+dispatcher:
+  enabled: false
+  # service: file
+  # persistence:
+  #   enabled: true
+
