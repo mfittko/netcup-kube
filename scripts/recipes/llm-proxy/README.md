@@ -18,12 +18,10 @@ kubectl apply -f - << 'EOF'
 apiVersion: v1
 kind: Secret
 metadata:
-
   name: llm-proxy-secrets
   namespace: platform
 type: Opaque
 stringData:
-
   MANAGEMENT_TOKEN: "..."
 EOF
 ```
