@@ -13,6 +13,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
+func manualRemoteDNSAddDomainsCommand(domain string) string {
+	return fmt.Sprintf("CONFIRM=true bin/netcup-kube remote run --no-tty -- dns --type edge-http --add-domains \"%s\"", domain)
+}
+
 var installCmd = &cobra.Command{
 	Use:   "install <recipe> [recipe-options]",
 	Short: "Install optional components and tools onto the k3s cluster",
@@ -183,7 +187,7 @@ Examples:
 							fmt.Println("✓ Domain added successfully!")
 						} else {
 							fmt.Printf("⚠ Failed to add domain automatically. Run manually:\n")
-							fmt.Printf("  CONFIRM=true bin/netcup-kube remote run --no-tty -- dns --type edge-http --add-domains \"%s\"\n", domain)
+							fmt.Printf("  %s\n", manualRemoteDNSAddDomainsCommand(domain))
 						}
 					}
 				}

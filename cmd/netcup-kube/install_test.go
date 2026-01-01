@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/mfittko/netcup-kube/internal/tunnel"
@@ -123,6 +124,15 @@ func TestBuildRemoteDNSAddDomainsArgs(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestManualRemoteDNSAddDomainsCommand_UsesSeparator(t *testing.T) {
+	host := "llm-proxy.example.com"
+	cmd := manualRemoteDNSAddDomainsCommand(host)
+
+	if !strings.Contains(cmd, " remote run --no-tty -- dns ") {
+		t.Fatalf("expected manual command to include '--' separator: %q", cmd)
 	}
 }
 
