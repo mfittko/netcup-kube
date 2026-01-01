@@ -51,6 +51,19 @@ Conventions
 - Files: use `write_file <path> <mode> <content>` to avoid partial writes.
 - Kubernetes: use `kctl()` with KUBECONFIG pointing to k3s default.
 
+Kubectl access (SSH tunnel)
+- Many setups keep the k3s API server (port 6443) private. In that case, `kubectl` from your laptop typically talks to `https://localhost:6443` and requires an SSH tunnel.
+- Start/stop/check the tunnel with:
+  - `netcup-kube ssh tunnel start`
+  - `netcup-kube ssh tunnel status`
+  - `netcup-kube ssh tunnel stop`
+- Tunnel configuration is read from `config/netcup-kube.env` (or `--env-file`), using:
+  - `MGMT_HOST`, `MGMT_USER` (or explicit `TUNNEL_HOST`, `TUNNEL_USER`)
+  - `TUNNEL_LOCAL_PORT` (default 6443)
+  - `TUNNEL_REMOTE_HOST` (default 127.0.0.1)
+  - `TUNNEL_REMOTE_PORT` (default 6443)
+- Workflow: start tunnel → verify `kubectl cluster-info` works → run `netcup-kube install ...` recipes.
+
 Recipe authoring ("add a recipe for installing X")
 
 When someone asks to "add an install recipe", the expected change is:
