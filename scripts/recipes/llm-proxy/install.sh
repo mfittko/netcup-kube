@@ -12,13 +12,6 @@ source "${SCRIPTS_DIR}/recipes/lib.sh"
 usage() {
   cat << 'EOF'
 
-  # Local chart installs require dependencies to be present if Chart.yaml declares them.
-  # OCI releases package deps; local checkouts need `helm dependency build`.
-  if grep -q "^dependencies:" "${CHART_DIR}/Chart.yaml"; then
-    log "Building Helm chart dependencies"
-    helm dependency build "${CHART_DIR}" > /dev/null
-  fi
-
 Install llm-proxy on the cluster using the official OCI Helm chart from ghcr.io.
 
 By default, uses the published OCI chart. For development/testing, you can use
@@ -43,6 +36,7 @@ Options:
   --database-url <url>       DATABASE_URL value (WARNING: may leak via shell history).
   --use-platform-postgres    If a Postgres install exists in the platform namespace, use it automatically (default: true).
   --use-platform-redis       Use an existing Redis install in the platform namespace when safe (default: false).
+  --allow-insecure-redis-no-auth  Allow installing dedicated Redis with AUTH disabled (default: false).
   --force-redis-upgrade      Force upgrading the dedicated Redis release even if it already exists (default: false).
   --enable-metrics           Enable Prometheus metrics endpoint and ServiceMonitor (default: false).
   --enable-dispatcher        Enable the llm-proxy dispatcher workload (file backend) (default: false).
@@ -68,6 +62,7 @@ Environment:
   LLM_PROXY_CREATE_SECRET    true|false (default: false) - create/update the Secret (otherwise it must already exist).
   LLM_PROXY_USE_PLATFORM_POSTGRES  true|false (default: true)
   LLM_PROXY_USE_PLATFORM_REDIS     true|false (default: false)
+  LLM_PROXY_ALLOW_INSECURE_REDIS_NO_AUTH true|false (default: false)
   LLM_PROXY_FORCE_REDIS_UPGRADE true|false (default: false)
   LLM_PROXY_ENABLE_METRICS   true|false (default: false) - enable Prometheus metrics.
   LLM_PROXY_ENABLE_DISPATCHER true|false (default: false) - enable dispatcher workload.
@@ -78,9 +73,10 @@ Environment:
 Notes:
   - Recommended: provide secrets via env vars or interactive prompts (not CLI flags).
   - If DATABASE_URL is set, this recipe also sets env.DB_DRIVER=postgres.
-  - Redis (default): this recipe installs a dedicated Redis instance with AUTH disabled (cluster-internal only).
   - Redis (platform): llm-proxy currently does not support Redis AUTH for the event bus; platform Redis will only be used
     when it does not require a password.
+  - Redis (dedicated): installing dedicated Redis with AUTH disabled is insecure and must be explicitly enabled with
+    --allow-insecure-redis-no-auth / LLM_PROXY_ALLOW_INSECURE_REDIS_NO_AUTH=true.
   - Prometheus: When enabled, configures ServiceMonitor (if Prometheus Operator is available) and service annotations.
 EOF
 }
@@ -105,6 +101,7 @@ DATABASE_URL="${LLM_PROXY_DATABASE_URL:-}"
 
 USE_PLATFORM_POSTGRES="${LLM_PROXY_USE_PLATFORM_POSTGRES:-true}"
 USE_PLATFORM_REDIS="${LLM_PROXY_USE_PLATFORM_REDIS:-false}"
+ALLOW_INSECURE_REDIS_NO_AUTH="${LLM_PROXY_ALLOW_INSECURE_REDIS_NO_AUTH:-false}"
 FORCE_REDIS_UPGRADE="${LLM_PROXY_FORCE_REDIS_UPGRADE:-false}"
 ENABLE_METRICS="${LLM_PROXY_ENABLE_METRICS:-false}"
 ENABLE_DISPATCHER="${LLM_PROXY_ENABLE_DISPATCHER:-false}"
@@ -244,6 +241,9 @@ while [[ $# -gt 0 ]]; do
     --use-platform-redis)
       USE_PLATFORM_REDIS="true"
       ;;
+    --allow-insecure-redis-no-auth)
+      ALLOW_INSECURE_REDIS_NO_AUTH="true"
+      ;;
     --force-redis-upgrade)
       FORCE_REDIS_UPGRADE="true"
       ;;
@@ -331,10 +331,10 @@ fi
 
 # Redis (safe-by-default).
 # llm-proxy's event bus uses REDIS_ADDR without password support, so platform Redis can only be used when it has no AUTH.
-# Default behavior: install a dedicated Redis instance with AUTH disabled.
+# Dedicated Redis with AUTH disabled is insecure and must be explicitly enabled.
 redis_events_addr=""
 redis_cache_url=""
-event_bus_backend=""
+event_bus_backend="in-memory"
 
 redis_helm_monitoring_args=()
 if k get crd servicemonitors.monitoring.coreos.com > /dev/null 2>&1; then
@@ -368,64 +368,69 @@ if [[ "${USE_PLATFORM_REDIS}" == "true" ]]; then
     event_bus_backend="in-memory"
   fi
 else
-  recipe_helm_repo_add "bitnami" "https://charts.bitnami.com/bitnami"
-  log "Installing dedicated Redis (no AUTH) for llm-proxy into namespace: ${NAMESPACE}"
-
-  log "Installing/Upgrading dedicated Redis for events (Redis Streams event bus): ${RELEASE}-redis-events"
-  if helm status "${RELEASE}-redis-events" --namespace "${NAMESPACE}" > /dev/null 2>&1 && [[ "${FORCE_REDIS_UPGRADE}" != "true" ]]; then
-    log "Dedicated Redis events release '${RELEASE}-redis-events' already exists; skipping upgrade (use --force-redis-upgrade to force)."
+  if [[ "${ALLOW_INSECURE_REDIS_NO_AUTH}" != "true" ]]; then
+    log "No platform Redis selected; using in-memory event bus and no Redis HTTP cache by default."
+    log "To install dedicated Redis with AUTH disabled (insecure), re-run with: --allow-insecure-redis-no-auth"
   else
-    helm upgrade --install "${RELEASE}-redis-events" bitnami/redis \
-      --namespace "${NAMESPACE}" \
-      --version "${CHART_VERSION_REDIS}" \
-      --set architecture=standalone \
-      --set auth.enabled=false \
-      --set metrics.enabled=true \
-      --set master.persistence.enabled=true \
-      --set master.persistence.size="${DEFAULT_STORAGE_REDIS}" \
-      --set master.resources.requests.cpu="${DEFAULT_REDIS_CPU_REQUEST}" \
-      --set master.resources.requests.memory="${DEFAULT_REDIS_MEMORY_REQUEST}" \
-      --set master.resources.limits.cpu="${DEFAULT_REDIS_CPU_LIMIT}" \
-      --set master.resources.limits.memory="${DEFAULT_REDIS_MEMORY_LIMIT}" \
-      --set metrics.resources.requests.cpu="${DEFAULT_REDIS_EXPORTER_CPU_REQUEST}" \
-      --set metrics.resources.requests.memory="${DEFAULT_REDIS_EXPORTER_MEMORY_REQUEST}" \
-      --set metrics.resources.limits.cpu="${DEFAULT_REDIS_EXPORTER_CPU_LIMIT}" \
-      --set metrics.resources.limits.memory="${DEFAULT_REDIS_EXPORTER_MEMORY_LIMIT}" \
-      "${redis_helm_monitoring_args[@]}" \
-      --wait \
-      --timeout 5m
-  fi
+    recipe_helm_repo_add "bitnami" "https://charts.bitnami.com/bitnami"
+    log "Installing dedicated Redis (no AUTH, insecure) for llm-proxy into namespace: ${NAMESPACE}"
 
-  log "Installing/Upgrading dedicated Redis for HTTP cache: ${RELEASE}-redis-cache"
-  if helm status "${RELEASE}-redis-cache" --namespace "${NAMESPACE}" > /dev/null 2>&1 && [[ "${FORCE_REDIS_UPGRADE}" != "true" ]]; then
-    log "Dedicated Redis cache release '${RELEASE}-redis-cache' already exists; skipping upgrade (use --force-redis-upgrade to force)."
-  else
-    helm upgrade --install "${RELEASE}-redis-cache" bitnami/redis \
-      --namespace "${NAMESPACE}" \
-      --version "${CHART_VERSION_REDIS}" \
-      --set architecture=standalone \
-      --set auth.enabled=false \
-      --set metrics.enabled=true \
-      --set master.persistence.enabled=false \
-      --set master.resources.requests.cpu="${DEFAULT_REDIS_CPU_REQUEST}" \
-      --set master.resources.requests.memory="${DEFAULT_REDIS_MEMORY_REQUEST}" \
-      --set master.resources.limits.cpu="${DEFAULT_REDIS_CPU_LIMIT}" \
-      --set master.resources.limits.memory="${DEFAULT_REDIS_MEMORY_LIMIT}" \
-      --set metrics.resources.requests.cpu="${DEFAULT_REDIS_EXPORTER_CPU_REQUEST}" \
-      --set metrics.resources.requests.memory="${DEFAULT_REDIS_EXPORTER_MEMORY_REQUEST}" \
-      --set metrics.resources.limits.cpu="${DEFAULT_REDIS_EXPORTER_CPU_LIMIT}" \
-      --set metrics.resources.limits.memory="${DEFAULT_REDIS_EXPORTER_MEMORY_LIMIT}" \
-      "${redis_helm_monitoring_args[@]}" \
-      --wait \
-      --timeout 5m
-  fi
+    log "Installing/Upgrading dedicated Redis for events (Redis Streams event bus): ${RELEASE}-redis-events"
+    if helm status "${RELEASE}-redis-events" --namespace "${NAMESPACE}" > /dev/null 2>&1 && [[ "${FORCE_REDIS_UPGRADE}" != "true" ]]; then
+      log "Dedicated Redis events release '${RELEASE}-redis-events' already exists; skipping upgrade (use --force-redis-upgrade to force)."
+    else
+      helm upgrade --install "${RELEASE}-redis-events" bitnami/redis \
+        --namespace "${NAMESPACE}" \
+        --version "${CHART_VERSION_REDIS}" \
+        --set architecture=standalone \
+        --set auth.enabled=false \
+        --set metrics.enabled=true \
+        --set master.persistence.enabled=true \
+        --set master.persistence.size="${DEFAULT_STORAGE_REDIS}" \
+        --set master.resources.requests.cpu="${DEFAULT_REDIS_CPU_REQUEST}" \
+        --set master.resources.requests.memory="${DEFAULT_REDIS_MEMORY_REQUEST}" \
+        --set master.resources.limits.cpu="${DEFAULT_REDIS_CPU_LIMIT}" \
+        --set master.resources.limits.memory="${DEFAULT_REDIS_MEMORY_LIMIT}" \
+        --set metrics.resources.requests.cpu="${DEFAULT_REDIS_EXPORTER_CPU_REQUEST}" \
+        --set metrics.resources.requests.memory="${DEFAULT_REDIS_EXPORTER_MEMORY_REQUEST}" \
+        --set metrics.resources.limits.cpu="${DEFAULT_REDIS_EXPORTER_CPU_LIMIT}" \
+        --set metrics.resources.limits.memory="${DEFAULT_REDIS_EXPORTER_MEMORY_LIMIT}" \
+        "${redis_helm_monitoring_args[@]}" \
+        --wait \
+        --timeout 5m
+    fi
 
-  redis_events_addr="${RELEASE}-redis-events-master.${NAMESPACE}.svc.cluster.local:6379"
-  redis_cache_addr="${RELEASE}-redis-cache-master.${NAMESPACE}.svc.cluster.local:6379"
-  event_bus_backend="redis-streams"
-  redis_cache_url="redis://${redis_cache_addr}/0"
-  log "Using dedicated Redis events (${RELEASE}-redis-events) for Redis Streams event bus"
-  log "Using dedicated Redis cache (${RELEASE}-redis-cache) for Redis HTTP cache"
+    log "Installing/Upgrading dedicated Redis for HTTP cache: ${RELEASE}-redis-cache"
+    if helm status "${RELEASE}-redis-cache" --namespace "${NAMESPACE}" > /dev/null 2>&1 && [[ "${FORCE_REDIS_UPGRADE}" != "true" ]]; then
+      log "Dedicated Redis cache release '${RELEASE}-redis-cache' already exists; skipping upgrade (use --force-redis-upgrade to force)."
+    else
+      helm upgrade --install "${RELEASE}-redis-cache" bitnami/redis \
+        --namespace "${NAMESPACE}" \
+        --version "${CHART_VERSION_REDIS}" \
+        --set architecture=standalone \
+        --set auth.enabled=false \
+        --set metrics.enabled=true \
+        --set master.persistence.enabled=false \
+        --set master.resources.requests.cpu="${DEFAULT_REDIS_CPU_REQUEST}" \
+        --set master.resources.requests.memory="${DEFAULT_REDIS_MEMORY_REQUEST}" \
+        --set master.resources.limits.cpu="${DEFAULT_REDIS_CPU_LIMIT}" \
+        --set master.resources.limits.memory="${DEFAULT_REDIS_MEMORY_LIMIT}" \
+        --set metrics.resources.requests.cpu="${DEFAULT_REDIS_EXPORTER_CPU_REQUEST}" \
+        --set metrics.resources.requests.memory="${DEFAULT_REDIS_EXPORTER_MEMORY_REQUEST}" \
+        --set metrics.resources.limits.cpu="${DEFAULT_REDIS_EXPORTER_CPU_LIMIT}" \
+        --set metrics.resources.limits.memory="${DEFAULT_REDIS_EXPORTER_MEMORY_LIMIT}" \
+        "${redis_helm_monitoring_args[@]}" \
+        --wait \
+        --timeout 5m
+    fi
+
+    redis_events_addr="${RELEASE}-redis-events-master.${NAMESPACE}.svc.cluster.local:6379"
+    redis_cache_addr="${RELEASE}-redis-cache-master.${NAMESPACE}.svc.cluster.local:6379"
+    event_bus_backend="redis-streams"
+    redis_cache_url="redis://${redis_cache_addr}/0"
+    log "Using dedicated Redis events (${RELEASE}-redis-events) for Redis Streams event bus"
+    log "Using dedicated Redis cache (${RELEASE}-redis-cache) for Redis HTTP cache"
+  fi
 fi
 
 tmp_dir=""

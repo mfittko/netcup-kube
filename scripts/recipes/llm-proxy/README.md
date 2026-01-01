@@ -18,11 +18,13 @@ kubectl apply -f - << 'EOF'
 apiVersion: v1
 kind: Secret
 metadata:
-	name: llm-proxy-secrets
-	namespace: platform
+
+  name: llm-proxy-secrets
+  namespace: platform
 type: Opaque
 stringData:
-	MANAGEMENT_TOKEN: "..."
+
+  MANAGEMENT_TOKEN: "..."
 EOF
 ```
 
@@ -47,10 +49,10 @@ This recipe does not create DNS records. If you want an Ingress, pass hostnames 
 
 ```bash
 netcup-kube install llm-proxy \
-	--namespace platform \
-	--release llm-proxy \
-	--host llm-proxy.mfittko.com \
-	--admin-host llm-proxy-admin.mfittko.com
+  --namespace platform \
+  --release llm-proxy \
+  --host llm-proxy.mfittko.com \
+  --admin-host llm-proxy-admin.mfittko.com
 ```
 
 Use an external Postgres:
@@ -89,7 +91,15 @@ netcup-kube install llm-proxy
 
 ### Redis (default)
 
-By default, this recipe installs a **dedicated Redis** instance alongside llm-proxy (in the same namespace) with **AUTH disabled**.
+By default, this recipe does **not** install or configure Redis.
+
+This means:
+- `env.LLM_PROXY_EVENT_BUS=in-memory`
+- No Redis-backed HTTP cache
+
+To use Redis, either:
+- Enable platform Redis usage via `LLM_PROXY_USE_PLATFORM_REDIS=true` (only works when it does **not** require AUTH), or
+- Explicitly allow installing dedicated Redis with AUTH disabled (insecure) via `LLM_PROXY_ALLOW_INSECURE_REDIS_NO_AUTH=true`.
 
 This enables:
 - `env.LLM_PROXY_EVENT_BUS=redis-streams`
@@ -103,15 +113,15 @@ This recipe can also use cluster-scoped dependencies installed via other recipes
 - **PostgreSQL**: If `svc/postgres-postgresql` + `secret/postgres-postgresql` exist, the recipe builds a `DATABASE_URL` and stores it in the llm-proxy Secret.
 
 - **Redis** (only when `LLM_PROXY_USE_PLATFORM_REDIS=true`): If `svc/redis-master` exists and Redis does **not** require AUTH, the recipe configures:
-	- `env.LLM_PROXY_EVENT_BUS=redis-streams`
-	- `env.REDIS_ADDR=redis-master.platform.svc.cluster.local:6379`
-	- Redis-backed HTTP cache (`env.HTTP_CACHE_BACKEND=redis`)
-- **Prometheus**: If `kube-prometheus-stack` is installed and `LLM_PROXY_ENABLE_METRICS=true`, the recipe enables:
-	- Prometheus metrics at `/metrics/prometheus`
-	- ServiceMonitor for automatic scraping (when Prometheus Operator is available)
-	- Service annotations for vanilla Prometheus scraping
 
-If Redis appears to require AUTH (Bitnami Redis `secret/redis` exists), the recipe keeps `env.LLM_PROXY_EVENT_BUS=in-memory` because llm-proxy currently cannot authenticate to Redis for the event bus.
+  - `env.LLM_PROXY_EVENT_BUS=redis-streams`
+  - `env.REDIS_ADDR=redis-master.platform.svc.cluster.local:6379`
+  - Redis-backed HTTP cache (`env.HTTP_CACHE_BACKEND=redis`)
+- **Prometheus**: If `kube-prometheus-stack` is installed and `LLM_PROXY_ENABLE_METRICS=true`, the recipe enables:
+
+  - Prometheus metrics at `/metrics/prometheus`
+  - ServiceMonitor for automatic scraping (when Prometheus Operator is available)
+  - Service annotations for vanilla Prometheus scraping
 
 If Redis appears to require AUTH (Bitnami Redis `secret/redis` exists), the recipe keeps `env.LLM_PROXY_EVENT_BUS=in-memory` because llm-proxy currently cannot authenticate to Redis for the event bus.
 
