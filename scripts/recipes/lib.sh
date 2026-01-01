@@ -74,13 +74,46 @@ recipe_helm_repo_add() {
 }
 
 recipe_check_kubeconfig() {
-  # Ensure KUBECONFIG is set or fall back to default location
+  # Ensure KUBECONFIG is set.
+  #
+  # Behavior:
+  # - On the server: default to /etc/rancher/k3s/k3s.yaml.
+  # - Locally: default to ./config/k3s.yaml (repo-relative), and if missing fetch it
+  #   via scp from the management host using ./config/netcup-kube.env.
   local kubeconfig="${KUBECONFIG:-}"
+
   if [[ -z "${kubeconfig}" ]]; then
     if [[ -f "/etc/rancher/k3s/k3s.yaml" ]]; then
       export KUBECONFIG="/etc/rancher/k3s/k3s.yaml"
-    else
-      die "KUBECONFIG not set and /etc/rancher/k3s/k3s.yaml not found"
+      return 0
     fi
+
+    # SCRIPTS_DIR points at <repo>/scripts; infer repo root.
+    local project_root
+    project_root="$(cd "${SCRIPTS_DIR}/.." && pwd)"
+    kubeconfig="${project_root}/config/k3s.yaml"
+    export KUBECONFIG="${kubeconfig}"
+  fi
+
+  # If kubeconfig points to a local path and doesn't exist, fetch it.
+  if [[ "${KUBECONFIG}" != "/etc/rancher/k3s/k3s.yaml" ]] && [[ ! -f "${KUBECONFIG}" ]]; then
+    local project_root
+    project_root="$(cd "${SCRIPTS_DIR}/.." && pwd)"
+
+    local env_file
+    env_file="${project_root}/config/netcup-kube.env"
+    [[ -f "${env_file}" ]] || die "${env_file} not found. Please create it from the example."
+
+    # shellcheck disable=SC1090
+    source "${env_file}"
+
+    local remote_host="${MGMT_HOST:-${MGMT_IP:-}}"
+    [[ -n "${remote_host}" ]] || die "MGMT_HOST not set in ${env_file}"
+    local remote_user="${MGMT_USER:-ops}"
+
+    need_cmd scp
+    run mkdir -p "$(dirname "${KUBECONFIG}")"
+    log "Fetching kubeconfig from ${remote_user}@${remote_host}:/etc/rancher/k3s/k3s.yaml -> ${KUBECONFIG}"
+    run scp "${remote_user}@${remote_host}:/etc/rancher/k3s/k3s.yaml" "${KUBECONFIG}"
   fi
 }
