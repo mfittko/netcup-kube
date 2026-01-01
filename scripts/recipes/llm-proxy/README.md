@@ -61,6 +61,11 @@ LLM_PROXY_DATABASE_URL="postgres://user:pass@host:5432/db?sslmode=require" \
 netcup-kube install llm-proxy --create-secret
 ```
 
+Platform Postgres auto-detection (Bitnami `svc/postgres-postgresql`):
+
+- By default, this recipe builds a `DATABASE_URL` using `sslmode=disable`.
+- If your in-cluster Postgres is configured for TLS, override with `LLM_PROXY_POSTGRES_SSLMODE=require`.
+
 Enable Prometheus metrics with kube-prometheus-stack:
 
 ```bash

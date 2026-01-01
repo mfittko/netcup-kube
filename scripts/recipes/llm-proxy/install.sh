@@ -59,7 +59,7 @@ Environment:
   LLM_PROXY_GIT_REF          Alternative to --git-ref.
   LLM_PROXY_MANAGEMENT_TOKEN Alternative to --management-token.
   LLM_PROXY_DATABASE_URL     Alternative to --database-url.
-  LLM_PROXY_POSTGRES_SSLMODE sslmode for auto-detected platform Postgres DATABASE_URL (default: require).
+  LLM_PROXY_POSTGRES_SSLMODE sslmode for auto-detected platform Postgres DATABASE_URL (default: disable).
   LLM_PROXY_CREATE_SECRET    true|false (default: false) - create/update the Secret (otherwise it must already exist).
   LLM_PROXY_USE_PLATFORM_POSTGRES  true|false (default: true)
   LLM_PROXY_USE_PLATFORM_REDIS     true|false (default: false)
@@ -99,7 +99,7 @@ IMAGE_TAG=""
 
 MANAGEMENT_TOKEN="${LLM_PROXY_MANAGEMENT_TOKEN:-}"
 DATABASE_URL="${LLM_PROXY_DATABASE_URL:-}"
-POSTGRES_SSLMODE="${LLM_PROXY_POSTGRES_SSLMODE:-require}"
+POSTGRES_SSLMODE="${LLM_PROXY_POSTGRES_SSLMODE:-disable}"
 
 USE_PLATFORM_POSTGRES="${LLM_PROXY_USE_PLATFORM_POSTGRES:-true}"
 USE_PLATFORM_REDIS="${LLM_PROXY_USE_PLATFORM_REDIS:-false}"
@@ -529,6 +529,10 @@ stringData:
     ${MANAGEMENT_TOKEN}
 EOF
   fi
+
+  # Ensure pods pick up any updated Secret values (env vars from Secrets are read at pod start).
+  # We pass this via Helm so `--wait` covers the resulting rollout.
+  POD_RESTART_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 else
   if [[ -n "${MANAGEMENT_TOKEN}" || -n "${DATABASE_URL}" ]]; then
     die "Refusing to accept secret values without --create-secret. Either pre-create Secret '${SECRET_NAME}' or re-run with --create-secret."
@@ -553,6 +557,12 @@ HELM_ARGS=(
   --set-string "env.LLM_PROXY_EVENT_BUS=${event_bus_backend}"
   --set "admin.enabled=true"
 )
+
+if [[ -n "${POD_RESTART_AT:-}" ]]; then
+  HELM_ARGS+=(
+    --set-string "podAnnotations.kubectl\\.kubernetes\\.io/restartedAt=${POD_RESTART_AT}"
+  )
+fi
 
 if [[ "${ENABLE_DISPATCHER}" == "true" ]]; then
   HELM_ARGS+=(
