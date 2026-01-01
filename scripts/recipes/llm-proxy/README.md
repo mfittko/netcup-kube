@@ -46,11 +46,32 @@ Control this behavior:
 LLM_PROXY_USE_PLATFORM_POSTGRES=false \
 LLM_PROXY_USE_PLATFORM_REDIS=false \
 netcup-kube install llm-proxy
+
+# Or via flags
+netcup-kube install llm-proxy \
+  --no-use-platform-postgres \
+  --no-use-platform-redis
+```
+
+## Postgres TLS (sslmode)
+
+When the recipe auto-detects the platform Postgres install, it builds a `DATABASE_URL` with a configurable `sslmode`.
+
+- Default: `prefer` (use TLS if available, otherwise fall back)
+- Recommended for production: `require` (enforce TLS)
+
+Configure via:
+
+```bash
+LLM_PROXY_POSTGRES_SSLMODE=require \
+netcup-kube install llm-proxy
 ```
 
 ## Testing a specific llm-proxy branch (e.g. a PR)
 
 If you do not provide `--chart-dir` / `LLM_PROXY_CHART_DIR`, the recipe clones llm-proxy and uses `deploy/helm/llm-proxy`.
+
+By default, it uses an immutable tag (`v0.1.0`). Prefer immutable refs (tags or commit SHAs) over mutable branches (like `main`).
 
 ```bash
 CONFIRM=true \

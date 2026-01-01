@@ -26,13 +26,16 @@ Options:
   --secret-name <name>       Kubernetes Secret name to create/use (default: <release>-secrets).
   --chart-dir <path>         Local path to the llm-proxy chart directory.
   --git-url <url>            Git URL to clone llm-proxy from (default: https://github.com/sofatutor/llm-proxy.git).
-  --git-ref <ref>            Git ref/branch to use when cloning (default: main).
+  --git-ref <ref>            Git ref/tag/commit to use when cloning (default: v0.1.0).
   --image-repo <repo>        Override image.repository.
   --image-tag <tag>          Override image.tag.
   --management-token <tok>   MANAGEMENT_TOKEN value (WARNING: may leak via shell history).
   --database-url <url>       DATABASE_URL value (WARNING: may leak via shell history).
+  --postgres-sslmode <mode>  Postgres sslmode for auto-detected DATABASE_URL (default: prefer).
   --use-platform-postgres     If a Postgres install exists in the platform namespace, use it automatically (default: true).
+  --no-use-platform-postgres  Disable auto-usage of platform Postgres.
   --use-platform-redis        If a Redis install exists in the platform namespace, use it automatically when safe (default: true).
+  --no-use-platform-redis     Disable auto-usage of platform Redis.
   --uninstall                Uninstall llm-proxy (Helm release in the namespace).
   -h, --help                 Show this help.
 
@@ -44,6 +47,7 @@ Environment:
   LLM_PROXY_GIT_REF          Alternative to --git-ref.
   LLM_PROXY_MANAGEMENT_TOKEN Alternative to --management-token.
   LLM_PROXY_DATABASE_URL     Alternative to --database-url.
+  LLM_PROXY_POSTGRES_SSLMODE Alternative to --postgres-sslmode (default: prefer)
   LLM_PROXY_USE_PLATFORM_POSTGRES  true|false (default: true)
   LLM_PROXY_USE_PLATFORM_REDIS     true|false (default: true)
 
@@ -61,13 +65,14 @@ SECRET_NAME=""
 
 CHART_DIR="${LLM_PROXY_CHART_DIR:-}"
 GIT_URL="${LLM_PROXY_GIT_URL:-https://github.com/sofatutor/llm-proxy.git}"
-GIT_REF="${LLM_PROXY_GIT_REF:-main}"
+GIT_REF="${LLM_PROXY_GIT_REF:-v0.1.0}"
 
 IMAGE_REPO=""
 IMAGE_TAG=""
 
 MANAGEMENT_TOKEN="${LLM_PROXY_MANAGEMENT_TOKEN:-}"
 DATABASE_URL="${LLM_PROXY_DATABASE_URL:-}"
+POSTGRES_SSLMODE="${LLM_PROXY_POSTGRES_SSLMODE:-prefer}"
 
 USE_PLATFORM_POSTGRES="${LLM_PROXY_USE_PLATFORM_POSTGRES:-true}"
 USE_PLATFORM_REDIS="${LLM_PROXY_USE_PLATFORM_REDIS:-true}"
@@ -146,11 +151,30 @@ while [[ $# -gt 0 ]]; do
     --database-url=*)
       DATABASE_URL="${1#*=}"
       ;;
+    --postgres-sslmode)
+      shift
+      POSTGRES_SSLMODE="${1:-}"
+      ;;
+    --postgres-sslmode=*)
+      POSTGRES_SSLMODE="${1#*=}"
+      ;;
     --use-platform-postgres)
       USE_PLATFORM_POSTGRES="true"
       ;;
+    --use-platform-postgres=*)
+      USE_PLATFORM_POSTGRES="${1#*=}"
+      ;;
+    --no-use-platform-postgres)
+      USE_PLATFORM_POSTGRES="false"
+      ;;
     --use-platform-redis)
       USE_PLATFORM_REDIS="true"
+      ;;
+    --use-platform-redis=*)
+      USE_PLATFORM_REDIS="${1#*=}"
+      ;;
+    --no-use-platform-redis)
+      USE_PLATFORM_REDIS="false"
       ;;
     --uninstall)
       UNINSTALL="true"
@@ -170,6 +194,7 @@ done
 
 [[ -n "${NAMESPACE}" ]] || die "Namespace is required"
 [[ -n "${RELEASE}" ]] || die "Release name is required"
+[[ -n "${POSTGRES_SSLMODE}" ]] || die "Postgres sslmode is required"
 
 if [[ -z "${SECRET_NAME}" ]]; then
   SECRET_NAME="${RELEASE}-secrets"
@@ -196,7 +221,7 @@ if [[ -z "${DATABASE_URL}" && "${USE_PLATFORM_POSTGRES}" == "true" ]]; then
     # Bitnami postgresql chart stores app user password in .data.password
     pg_pass="$(k get secret postgres-postgresql -n "${PLATFORM_NS}" -o jsonpath='{.data.password}' 2> /dev/null | base64 -d 2> /dev/null || true)"
     if [[ -n "${pg_pass}" ]]; then
-      DATABASE_URL="postgres://app:${pg_pass}@postgres-postgresql.${PLATFORM_NS}.svc.cluster.local:5432/app?sslmode=disable"
+      DATABASE_URL="postgres://app:${pg_pass}@postgres-postgresql.${PLATFORM_NS}.svc.cluster.local:5432/app?sslmode=${POSTGRES_SSLMODE}"
       log "Detected platform Postgres; configuring DATABASE_URL from existing install"
     else
       log "Detected platform Postgres, but could not read app password from Secret; leaving DATABASE_URL unset"
@@ -245,6 +270,9 @@ if [[ -z "${CHART_DIR}" ]]; then
   need_cmd git
   tmp_dir="$(mktemp -d)"
   log "Cloning llm-proxy chart from ${GIT_URL} (${GIT_REF})"
+  if [[ "${GIT_REF}" == "main" || "${GIT_REF}" == "master" ]]; then
+    log "WARNING: Using mutable git ref '${GIT_REF}'. Prefer an immutable tag (e.g., vX.Y.Z) or commit SHA."
+  fi
   git clone --depth 1 --branch "${GIT_REF}" "${GIT_URL}" "${tmp_dir}/llm-proxy" > /dev/null
   CHART_DIR="${tmp_dir}/llm-proxy/deploy/helm/llm-proxy"
 fi
