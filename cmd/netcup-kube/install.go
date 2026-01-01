@@ -172,8 +172,7 @@ Examples:
 						return nil
 					}
 					if closeErr := tmpEnv.Close(); closeErr != nil {
-						fmt.Fprintf(os.Stderr, "Warning: failed to close temp env file: %v\n", closeErr)
-						return nil
+						fmt.Fprintf(os.Stderr, "Warning: failed to close temp env file: %v (continuing)\n", closeErr)
 					}
 
 					for _, domain := range domainsToAdd {
