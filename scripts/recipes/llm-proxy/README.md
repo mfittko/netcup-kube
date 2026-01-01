@@ -69,6 +69,14 @@ LLM_PROXY_ENABLE_METRICS=true \
 netcup-kube install llm-proxy
 ```
 
+Enable the Redis metrics Grafana dashboard (chart-provided):
+
+```bash
+CONFIRM=true \
+LLM_PROXY_ENABLE_REDIS_DASHBOARD=true \
+netcup-kube install llm-proxy
+```
+
 Disable metrics (if you don’t want Prometheus scraping):
 
 ```bash
