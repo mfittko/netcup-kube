@@ -46,7 +46,7 @@ Options:
   --force-redis-upgrade      Force upgrading the dedicated Redis release even if it already exists (default: false).
   --enable-metrics           Enable Prometheus metrics endpoint and ServiceMonitor (default: false).
   --enable-dispatcher        Enable the llm-proxy dispatcher workload (file backend) (default: false).
-  --enable-redis-dashboard   Create a Grafana dashboard ConfigMap for Redis exporter metrics (default: false).
+  --enable-redis-dashboard   Enable the chart's Redis metrics Grafana dashboard ConfigMap (default: false).
   --host <hostname>          Enable Ingress for llm-proxy and set the primary hostname.
   --admin-host <hostname>    Enable Ingress for llm-proxy admin UI and set the admin hostname.
   --uninstall                Uninstall llm-proxy (Helm release in the namespace).
@@ -71,7 +71,7 @@ Environment:
   LLM_PROXY_FORCE_REDIS_UPGRADE true|false (default: false)
   LLM_PROXY_ENABLE_METRICS   true|false (default: false) - enable Prometheus metrics.
   LLM_PROXY_ENABLE_DISPATCHER true|false (default: false) - enable dispatcher workload.
-  LLM_PROXY_ENABLE_REDIS_DASHBOARD true|false (default: false) - create Redis metrics dashboard ConfigMap.
+  LLM_PROXY_ENABLE_REDIS_DASHBOARD true|false (default: false) - enable Redis metrics Grafana dashboard (chart-provided).
   LLM_PROXY_HOST             Alternative to --host.
   LLM_PROXY_ADMIN_HOST       Alternative to --admin-host.
 
@@ -602,21 +602,9 @@ if [[ "${ENABLE_METRICS}" == "true" ]]; then
 fi
 
 if [[ "${ENABLE_REDIS_DASHBOARD}" == "true" ]]; then
-  log "Creating Redis metrics Grafana dashboard ConfigMap (sidecar-discovered)"
-  k apply -f - << EOF
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: ${RELEASE}-redis-dashboard
-  namespace: ${NAMESPACE}
-  labels:
-    grafana_dashboard: "1"
-    app.kubernetes.io/instance: ${RELEASE}
-    app.kubernetes.io/name: llm-proxy
-data:
-  llm-proxy-redis.json: |-
-$(sed 's/^/    /' "${SCRIPT_DIR}/redis-dashboard.json")
-EOF
+  HELM_ARGS+=(
+    --set "metrics.redisDashboard.enabled=true"
+  )
 fi
 
 if [[ -n "${IMAGE_REPO}" ]]; then
