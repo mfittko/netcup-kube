@@ -32,10 +32,10 @@ Options:
   --management-token <tok>   MANAGEMENT_TOKEN value (WARNING: may leak via shell history).
   --database-url <url>       DATABASE_URL value (WARNING: may leak via shell history).
   --postgres-sslmode <mode>  Postgres sslmode for auto-detected DATABASE_URL (default: prefer).
-  --use-platform-postgres     If a Postgres install exists in the platform namespace, use it automatically (default: true).
-  --no-use-platform-postgres     Disable auto-usage of platform Postgres.
-  --use-platform-redis        If a Redis install exists in the platform namespace, use it automatically when safe (default: true).
-  --no-use-platform-redis     Disable auto-usage of platform Redis.
+  --use-platform-postgres    If a Postgres install exists in the platform namespace, use it automatically (default: true).
+  --no-use-platform-postgres Disable auto-usage of platform Postgres.
+  --use-platform-redis       If a Redis install exists in the platform namespace, use it automatically when safe (default: true).
+  --no-use-platform-redis    Disable auto-usage of platform Redis.
   --uninstall                Uninstall llm-proxy (Helm release in the namespace).
   -h, --help                 Show this help.
 
