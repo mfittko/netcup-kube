@@ -179,6 +179,12 @@ func TestParseRecipeHostArgs(t *testing.T) {
 			expHost:  "llm-proxy.example.com",
 			expAdmin: "llm-proxy-admin.example.com",
 		},
+		{
+			name:     "missing-host-value-does-not-consume-next-flag",
+			args:     []string{"--host", "--admin-host", "llm-proxy-admin.example.com"},
+			expHost:  "",
+			expAdmin: "llm-proxy-admin.example.com",
+		},
 	}
 
 	for _, tc := range testCases {
