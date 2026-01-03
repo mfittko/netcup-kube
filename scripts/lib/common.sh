@@ -52,8 +52,15 @@ is_tty() {
   return 1
 }
 
-# Bool normalization
-bool_norm() { case "${1,,}" in 1 | true | yes | y | on) echo "true" ;; *) echo "false" ;; esac }
+# Bool normalization (portable: macOS ships Bash 3.2)
+bool_norm() {
+  local v
+  v="$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]')"
+  case "${v}" in
+    1 | true | yes | y | on) echo "true" ;;
+    *) echo "false" ;;
+  esac
+}
 
 # DRY-RUN aware runner
 run() {
