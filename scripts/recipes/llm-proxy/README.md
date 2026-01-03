@@ -59,12 +59,38 @@ Use an external Postgres:
 CONFIRM=true \
 LLM_PROXY_DATABASE_URL="postgres://user:pass@host:5432/db?sslmode=require" \
 netcup-kube install llm-proxy --create-secret
+
+```
+
+Use a dedicated in-cluster MySQL (separate Helm release managed by this recipe):
+
+This installs Bitnami MySQL (pinned to MySQL 8.4.x) as a separate Helm release in the same namespace.
+Note: The Bitnami Helm chart defaults to `docker.io/bitnami/mysql`, but those images may require a Bitnami Secure Images subscription.
+This recipe pulls from `public.ecr.aws/bitnami/mysql` instead and sets `global.security.allowInsecureImages=true` to bypass Bitnami's image verification gate when using a non-default registry.
+
+```bash
+CONFIRM=true \
+LLM_PROXY_DB_DRIVER=mysql \
+LLM_PROXY_CREATE_SECRET=true \
+netcup-kube install llm-proxy
+```
+
+To force upgrading the dedicated MySQL release:
+
+```bash
+CONFIRM=true \
+LLM_PROXY_DB_DRIVER=mysql \
+LLM_PROXY_FORCE_MYSQL_UPGRADE=true \
+netcup-kube install llm-proxy
+```
 ```
 
 Platform Postgres auto-detection (Bitnami `svc/postgres-postgresql`):
 
 - By default, this recipe builds a `DATABASE_URL` using `sslmode=disable`.
 - If your in-cluster Postgres is configured for TLS, override with `LLM_PROXY_POSTGRES_SSLMODE=require`.
+
+If you set `LLM_PROXY_DB_DRIVER=mysql`, platform Postgres auto-detection is disabled.
 
 Enable Prometheus metrics with kube-prometheus-stack:
 

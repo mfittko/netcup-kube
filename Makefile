@@ -31,6 +31,9 @@ build: build-go
 build-go:
 	$(GO_BUILD) -o $(BINARY_PATH) $(GO_MAIN)
 
+build-linux:
+	GOOS=linux GOARCH=$(shell go env GOARCH) $(GO_BUILD) -o $(BINARY_PATH) $(GO_MAIN)
+
 clean:
 	$(GO_CLEAN)
 	rm -f $(BINARY_PATH)
@@ -42,5 +45,5 @@ go-deps:
 	$(GO_MOD) download
 	$(GO_MOD) tidy
 
-test: build-go
+test: build-linux
 	./tests/integration/run.sh
