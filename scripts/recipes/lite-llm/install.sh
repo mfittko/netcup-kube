@@ -269,6 +269,7 @@ EOF
   unset PLATFORM_REDIS_PASSWORD
   
   # Configure chart to use environment secrets and enable Redis caching
+  # Note: Using [0] index as this is the only environmentSecret we're adding
   HELM_ARGS+=(
     --set "environmentSecrets[0].name=litellm-redis-env"
     --set "redis.enabled=false"
