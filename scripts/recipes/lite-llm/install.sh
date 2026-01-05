@@ -175,6 +175,10 @@ EOF
 VALUES_FILE="${SCRIPT_DIR}/values.yaml"
 
 # Build Helm arguments
+# Note: The LiteLLM chart expects masterkey as a direct value (.Values.masterkey)
+# and creates its own Secret. While passing secrets via --set can expose them
+# in process listings, this follows the chart's intended usage pattern.
+# The master key is also stored separately in our litellm-masterkey Secret for reference.
 HELM_ARGS=(
   upgrade --install litellm oci://docker.litellm.ai/berriai/litellm-helm
   --namespace "${NAMESPACE}"
