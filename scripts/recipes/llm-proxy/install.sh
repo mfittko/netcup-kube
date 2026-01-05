@@ -25,6 +25,8 @@ Options:
   --release <name>           Helm release name (default: llm-proxy).
   --secret-name <name>       Kubernetes Secret name to create/use (default: <release>-secrets).
   --create-secret            Create/Update the Kubernetes Secret from provided env/flags (default: false).
+  --restart                  Restart llm-proxy workloads after install/upgrade (rollout restart) (default: false).
+  --db-driver <name>         Database driver: sqlite|postgres|mysql (default: auto: platform Postgres if present, else SQLite).
   --chart-version <ver>      OCI chart version to install (default: latest available).
   --use-oci                  Use OCI Helm chart from ghcr.io (default: true).
   --chart-dir <path>         Local path to the llm-proxy chart directory (disables OCI).
@@ -35,7 +37,10 @@ Options:
   --management-token <tok>   MANAGEMENT_TOKEN value (WARNING: may leak via shell history).
   --database-url <url>       DATABASE_URL value (WARNING: may leak via shell history).
   --use-platform-postgres    If a Postgres install exists in the platform namespace, use it automatically (default: true).
+  --force-mysql-upgrade      Force upgrading the dedicated MySQL release even if it already exists (default: false).
+  --mysql-storage <size>     PVC size for dedicated MySQL (default: ${DEFAULT_STORAGE_MYSQL}).
   --use-platform-redis       Use an existing Redis install in the platform namespace when safe (default: false).
+  --enable-redis             Enable dedicated Redis for event bus + HTTP cache (AUTH disabled; insecure).
   --allow-insecure-redis-no-auth  Allow installing dedicated Redis with AUTH disabled (default: false).
   --force-redis-upgrade      Force upgrading the dedicated Redis release even if it already exists (default: false).
   --enable-metrics           Enable Prometheus metrics endpoint and ServiceMonitor (default: false).
@@ -59,7 +64,11 @@ Environment:
   LLM_PROXY_GIT_REF          Alternative to --git-ref.
   LLM_PROXY_MANAGEMENT_TOKEN Alternative to --management-token.
   LLM_PROXY_DATABASE_URL     Alternative to --database-url.
+  LLM_PROXY_ENCRYPTION_KEY   Encryption key for secrets-at-rest (recommended: openssl rand -base64 32).
+  LLM_PROXY_DB_DRIVER        sqlite|postgres|mysql (default: auto: platform Postgres if present, else SQLite).
   LLM_PROXY_POSTGRES_SSLMODE sslmode for auto-detected platform Postgres DATABASE_URL (default: disable).
+  LLM_PROXY_MYSQL_STORAGE    PVC size for dedicated MySQL (default: ${DEFAULT_STORAGE_MYSQL}).
+  LLM_PROXY_FORCE_MYSQL_UPGRADE true|false (default: false)
   LLM_PROXY_CREATE_SECRET    true|false (default: false) - create/update the Secret (otherwise it must already exist).
   LLM_PROXY_USE_PLATFORM_POSTGRES  true|false (default: true)
   LLM_PROXY_USE_PLATFORM_REDIS     true|false (default: false)
@@ -73,11 +82,13 @@ Environment:
 
 Notes:
   - Recommended: provide secrets via env vars or interactive prompts (not CLI flags).
-  - If DATABASE_URL is set, this recipe also sets env.DB_DRIVER=postgres.
+  - If DATABASE_URL is set, this recipe also sets env.DB_DRIVER based on --db-driver / LLM_PROXY_DB_DRIVER.
+  - Temporary: this recipe currently forces image.pullPolicy=Always to ensure republished image tags are pulled.
+    Once automated patch releases (immutable tags) are in place, we should revert to the chart default (IfNotPresent).
   - Redis (platform): llm-proxy currently does not support Redis AUTH for the event bus; platform Redis will only be used
     when it does not require a password.
   - Redis (dedicated): installing dedicated Redis with AUTH disabled is insecure and must be explicitly enabled with
-    --allow-insecure-redis-no-auth / LLM_PROXY_ALLOW_INSECURE_REDIS_NO_AUTH=true.
+    --enable-redis (preferred) or --allow-insecure-redis-no-auth / LLM_PROXY_ALLOW_INSECURE_REDIS_NO_AUTH=true.
   - Prometheus: When enabled, configures ServiceMonitor (if Prometheus Operator is available) and service annotations.
 EOF
 }
@@ -87,6 +98,8 @@ RELEASE="llm-proxy"
 SECRET_NAME=""
 
 CREATE_SECRET="${LLM_PROXY_CREATE_SECRET:-false}"
+
+RESTART_AFTER_INSTALL="false"
 
 USE_OCI="${LLM_PROXY_USE_OCI:-true}"
 CHART_VERSION="${LLM_PROXY_CHART_VERSION:-}"
@@ -99,10 +112,14 @@ IMAGE_TAG=""
 
 MANAGEMENT_TOKEN="${LLM_PROXY_MANAGEMENT_TOKEN:-}"
 DATABASE_URL="${LLM_PROXY_DATABASE_URL:-}"
+ENCRYPTION_KEY="${LLM_PROXY_ENCRYPTION_KEY:-}"
+DB_DRIVER="${LLM_PROXY_DB_DRIVER:-}"
 POSTGRES_SSLMODE="${LLM_PROXY_POSTGRES_SSLMODE:-disable}"
+MYSQL_STORAGE="${LLM_PROXY_MYSQL_STORAGE:-${DEFAULT_STORAGE_MYSQL}}"
 
 USE_PLATFORM_POSTGRES="${LLM_PROXY_USE_PLATFORM_POSTGRES:-true}"
 USE_PLATFORM_REDIS="${LLM_PROXY_USE_PLATFORM_REDIS:-false}"
+FORCE_MYSQL_UPGRADE="${LLM_PROXY_FORCE_MYSQL_UPGRADE:-false}"
 ALLOW_INSECURE_REDIS_NO_AUTH="${LLM_PROXY_ALLOW_INSECURE_REDIS_NO_AUTH:-false}"
 FORCE_REDIS_UPGRADE="${LLM_PROXY_FORCE_REDIS_UPGRADE:-false}"
 ENABLE_METRICS="${LLM_PROXY_ENABLE_METRICS:-false}"
@@ -150,6 +167,43 @@ PY
   return 1
 }
 
+generate_encryption_key() {
+  if command -v openssl > /dev/null 2>&1; then
+    openssl rand -base64 32
+    return 0
+  fi
+
+  if command -v python3 > /dev/null 2>&1; then
+    python3 - << 'PY'
+import os
+import base64
+print(base64.b64encode(os.urandom(32)).decode())
+PY
+    return 0
+  fi
+
+  return 1
+}
+
+generate_password() {
+  if command -v openssl > /dev/null 2>&1; then
+    # Base64 can include /+; keep only URL-safe-ish characters.
+    openssl rand -base64 48 | tr -dc 'A-Za-z0-9' | head -c 48
+    echo
+    return 0
+  fi
+
+  if command -v python3 > /dev/null 2>&1; then
+    python3 - << 'PY'
+import secrets
+print(secrets.token_urlsafe(48))
+PY
+    return 0
+  fi
+
+  return 1
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --namespace)
@@ -175,6 +229,16 @@ while [[ $# -gt 0 ]]; do
       ;;
     --create-secret)
       CREATE_SECRET="true"
+      ;;
+    --restart)
+      RESTART_AFTER_INSTALL="true"
+      ;;
+    --db-driver)
+      shift
+      DB_DRIVER="${1:-}"
+      ;;
+    --db-driver=*)
+      DB_DRIVER="${1#*=}"
       ;;
     --chart-version)
       shift
@@ -243,6 +307,19 @@ while [[ $# -gt 0 ]]; do
     --use-platform-redis)
       USE_PLATFORM_REDIS="true"
       ;;
+    --force-mysql-upgrade)
+      FORCE_MYSQL_UPGRADE="true"
+      ;;
+    --mysql-storage)
+      shift
+      MYSQL_STORAGE="${1:-}"
+      ;;
+    --mysql-storage=*)
+      MYSQL_STORAGE="${1#*=}"
+      ;;
+    --enable-redis)
+      ALLOW_INSECURE_REDIS_NO_AUTH="true"
+      ;;
     --allow-insecure-redis-no-auth)
       ALLOW_INSECURE_REDIS_NO_AUTH="true"
       ;;
@@ -299,9 +376,10 @@ recipe_check_kubeconfig
 need_cmd helm
 
 if [[ "${UNINSTALL}" == "true" ]]; then
-  recipe_confirm_or_die "Uninstall llm-proxy (Helm release '${RELEASE}') and its dedicated Redis from namespace ${NAMESPACE}"
+  recipe_confirm_or_die "Uninstall llm-proxy (Helm release '${RELEASE}') and its dedicated MySQL and Redis instances from namespace ${NAMESPACE}"
   log "Uninstalling llm-proxy from namespace: ${NAMESPACE}"
   helm uninstall "${RELEASE}" --namespace "${NAMESPACE}" || true
+  helm uninstall "${RELEASE}-mysql" --namespace "${NAMESPACE}" || true
   # Backwards compat: older recipe versions installed a single '${RELEASE}-redis'.
   helm uninstall "${RELEASE}-redis" --namespace "${NAMESPACE}" || true
   # Current recipe installs two dedicated Redis instances: one for events, one for cache.
@@ -311,9 +389,31 @@ if [[ "${UNINSTALL}" == "true" ]]; then
 fi
 
 log "Installing llm-proxy into namespace: ${NAMESPACE}"
+
+log "Temporary measure: forcing image.pullPolicy=Always (until automated patch releases exist)"
 recipe_ensure_namespace "${NAMESPACE}"
 
 PLATFORM_NS="${NAMESPACE_PLATFORM}"
+
+if [[ -n "${DB_DRIVER}" ]]; then
+  DB_DRIVER="$(printf '%s' "${DB_DRIVER}" | tr '[:upper:]' '[:lower:]')"
+  case "${DB_DRIVER}" in
+    sqlite | postgres | mysql) ;;
+    *)
+      die "Invalid --db-driver/LLM_PROXY_DB_DRIVER value: '${DB_DRIVER}' (expected sqlite|postgres|mysql)"
+      ;;
+  esac
+fi
+
+# If MySQL is explicitly selected, do not auto-configure platform Postgres.
+if [[ "${DB_DRIVER}" == "mysql" ]]; then
+  USE_PLATFORM_POSTGRES="false"
+fi
+
+# If SQLite is explicitly selected, disable platform Postgres auto-detection.
+if [[ "${DB_DRIVER}" == "sqlite" ]]; then
+  USE_PLATFORM_POSTGRES="false"
+fi
 
 # Auto-configure Postgres from platform namespace if present and user didn't provide DATABASE_URL.
 if [[ -z "${DATABASE_URL}" && "${USE_PLATFORM_POSTGRES}" == "true" ]]; then
@@ -329,6 +429,87 @@ if [[ -z "${DATABASE_URL}" && "${USE_PLATFORM_POSTGRES}" == "true" ]]; then
   else
     log "No platform Postgres detected; leaving DATABASE_URL unset (SQLite default)"
   fi
+fi
+
+# If MySQL is selected and DATABASE_URL wasn't provided, install a dedicated MySQL release and build DATABASE_URL.
+if [[ -z "${DATABASE_URL}" && "${DB_DRIVER}" == "mysql" ]]; then
+  recipe_helm_repo_add "bitnami" "https://charts.bitnami.com/bitnami"
+
+  mysql_auth_secret="${RELEASE}-mysql-auth"
+  mysql_release="${RELEASE}-mysql"
+
+  mysql_root_password=""
+  mysql_app_password=""
+  mysql_replication_password=""
+  if k get secret -n "${NAMESPACE}" "${mysql_auth_secret}" > /dev/null 2>&1; then
+    mysql_root_password="$(k get secret -n "${NAMESPACE}" "${mysql_auth_secret}" -o jsonpath='{.data.mysql-root-password}' 2> /dev/null | base64 -d 2> /dev/null || true)"
+    mysql_app_password="$(k get secret -n "${NAMESPACE}" "${mysql_auth_secret}" -o jsonpath='{.data.mysql-password}' 2> /dev/null | base64 -d 2> /dev/null || true)"
+    mysql_replication_password="$(k get secret -n "${NAMESPACE}" "${mysql_auth_secret}" -o jsonpath='{.data.mysql-replication-password}' 2> /dev/null | base64 -d 2> /dev/null || true)"
+    if [[ -n "${mysql_root_password}" && -n "${mysql_app_password}" && -n "${mysql_replication_password}" ]]; then
+      log "Reusing existing MySQL credentials from Secret '${mysql_auth_secret}'"
+    fi
+  fi
+
+  if [[ -z "${mysql_root_password}" ]]; then
+    mysql_root_password="$(generate_password || true)"
+  fi
+  if [[ -z "${mysql_app_password}" ]]; then
+    mysql_app_password="$(generate_password || true)"
+  fi
+  if [[ -z "${mysql_replication_password}" ]]; then
+    mysql_replication_password="$(generate_password || true)"
+  fi
+
+  [[ -n "${mysql_root_password}" && -n "${mysql_app_password}" && -n "${mysql_replication_password}" ]] || die "Failed to generate MySQL passwords. Install openssl or python3."
+
+  log "Creating/Updating MySQL auth Secret '${mysql_auth_secret}' in namespace '${NAMESPACE}'"
+  cat << EOF | k apply -f -
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ${mysql_auth_secret}
+  namespace: ${NAMESPACE}
+type: Opaque
+stringData:
+  mysql-root-password: |-
+    ${mysql_root_password}
+  mysql-password: |-
+    ${mysql_app_password}
+  mysql-replication-password: |-
+    ${mysql_replication_password}
+EOF
+
+  log "Installing/Upgrading dedicated MySQL (${mysql_release}) into namespace: ${NAMESPACE}"
+  desired_mysql_chart="mysql-${CHART_VERSION_MYSQL}"
+  installed_mysql_chart=""
+  if helm status "${mysql_release}" --namespace "${NAMESPACE}" > /dev/null 2>&1; then
+    installed_mysql_chart="$(helm status "${mysql_release}" --namespace "${NAMESPACE}" 2> /dev/null | awk -F': ' '/^CHART:/{print $2}' | tr -d '\r' || true)"
+  fi
+
+  if [[ -n "${installed_mysql_chart}" && "${FORCE_MYSQL_UPGRADE}" != "true" && "${installed_mysql_chart}" == "${desired_mysql_chart}" ]]; then
+    log "Dedicated MySQL release '${mysql_release}' already exists (${installed_mysql_chart}); skipping upgrade (use --force-mysql-upgrade to force)."
+  else
+    if [[ -n "${installed_mysql_chart}" && "${installed_mysql_chart}" != "${desired_mysql_chart}" && "${FORCE_MYSQL_UPGRADE}" != "true" ]]; then
+      log "Dedicated MySQL release '${mysql_release}' uses ${installed_mysql_chart}; upgrading to pinned ${desired_mysql_chart}."
+    fi
+    helm upgrade --install "${mysql_release}" bitnami/mysql \
+      --namespace "${NAMESPACE}" \
+      --version "${CHART_VERSION_MYSQL}" \
+      --set global.imageRegistry=public.ecr.aws \
+      --set global.security.allowInsecureImages=true \
+      --set architecture=standalone \
+      --set auth.database=llmproxy \
+      --set auth.username=llmproxy \
+      --set auth.existingSecret="${mysql_auth_secret}" \
+      --set primary.persistence.enabled=true \
+      --set primary.persistence.size="${MYSQL_STORAGE}" \
+      --wait \
+      --timeout 10m
+  fi
+
+  mysql_host="${mysql_release}.${NAMESPACE}.svc.cluster.local"
+  DATABASE_URL="llmproxy:${mysql_app_password}@tcp(${mysql_host}:3306)/llmproxy?parseTime=true"
+  log "Configured DATABASE_URL for dedicated MySQL (${mysql_release})"
 fi
 
 # Redis (safe-by-default).
@@ -372,7 +553,7 @@ if [[ "${USE_PLATFORM_REDIS}" == "true" ]]; then
 else
   if [[ "${ALLOW_INSECURE_REDIS_NO_AUTH}" != "true" ]]; then
     log "No platform Redis selected; using in-memory event bus and no Redis HTTP cache by default."
-    log "To install dedicated Redis with AUTH disabled (insecure), re-run with: --allow-insecure-redis-no-auth"
+    log "To install dedicated Redis with AUTH disabled (insecure), re-run with: --enable-redis"
   else
     recipe_helm_repo_add "bitnami" "https://charts.bitnami.com/bitnami"
     log "Installing dedicated Redis (no AUTH, insecure) for llm-proxy into namespace: ${NAMESPACE}"
@@ -498,6 +679,22 @@ if [[ "${CREATE_SECRET}" == "true" ]]; then
   fi
   [[ -n "${MANAGEMENT_TOKEN}" ]] || die "Failed to generate MANAGEMENT_TOKEN. Install openssl or python3, or provide LLM_PROXY_MANAGEMENT_TOKEN/--management-token."
 
+  if [[ -z "${ENCRYPTION_KEY}" ]]; then
+    if k get secret -n "${NAMESPACE}" "${SECRET_NAME}" > /dev/null 2>&1; then
+      existing_key="$(k get secret -n "${NAMESPACE}" "${SECRET_NAME}" -o jsonpath='{.data.ENCRYPTION_KEY}' 2> /dev/null | base64 -d 2> /dev/null || true)"
+      if [[ -n "${existing_key}" ]]; then
+        log "No ENCRYPTION_KEY provided; reusing existing one from Secret '${SECRET_NAME}'"
+        ENCRYPTION_KEY="${existing_key}"
+      fi
+    fi
+
+    if [[ -z "${ENCRYPTION_KEY}" ]]; then
+      log "No ENCRYPTION_KEY provided; generating one"
+      ENCRYPTION_KEY="$(generate_encryption_key || true)"
+    fi
+  fi
+  [[ -n "${ENCRYPTION_KEY}" ]] || die "Failed to generate ENCRYPTION_KEY. Install openssl or python3, or provide LLM_PROXY_ENCRYPTION_KEY."
+
   log "Creating/Updating Kubernetes Secret '${SECRET_NAME}' in namespace '${NAMESPACE}'"
 
   # SECURITY: Avoid passing secrets via process arguments (e.g., --from-literal) to reduce accidental exposure.
@@ -515,6 +712,8 @@ stringData:
     ${MANAGEMENT_TOKEN}
   DATABASE_URL: |-
     ${DATABASE_URL}
+  ENCRYPTION_KEY: |-
+    ${ENCRYPTION_KEY}
 EOF
   else
     cat << EOF | k apply -f -
@@ -527,6 +726,8 @@ type: Opaque
 stringData:
   MANAGEMENT_TOKEN: |-
     ${MANAGEMENT_TOKEN}
+  ENCRYPTION_KEY: |-
+    ${ENCRYPTION_KEY}
 EOF
   fi
 
@@ -534,11 +735,15 @@ EOF
   # We pass this via Helm so `--wait` covers the resulting rollout.
   POD_RESTART_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 else
-  if [[ -n "${MANAGEMENT_TOKEN}" || -n "${DATABASE_URL}" ]]; then
+  if [[ -n "${MANAGEMENT_TOKEN}" || -n "${DATABASE_URL}" || -n "${ENCRYPTION_KEY}" ]]; then
     die "Refusing to accept secret values without --create-secret. Either pre-create Secret '${SECRET_NAME}' or re-run with --create-secret."
   fi
   if ! k get secret -n "${NAMESPACE}" "${SECRET_NAME}" > /dev/null 2>&1; then
     die "Secret '${SECRET_NAME}' not found in namespace '${NAMESPACE}'. Create it first or re-run with --create-secret."
+  fi
+  existing_key="$(k get secret -n "${NAMESPACE}" "${SECRET_NAME}" -o jsonpath='{.data.ENCRYPTION_KEY}' 2> /dev/null | base64 -d 2> /dev/null || true)"
+  if [[ -z "${existing_key}" ]]; then
+    die "Secret '${SECRET_NAME}' is missing ENCRYPTION_KEY. Add it or re-run with --create-secret to generate it."
   fi
   log "Using existing Kubernetes Secret '${SECRET_NAME}' in namespace '${NAMESPACE}'"
 fi
@@ -549,11 +754,16 @@ HELM_ARGS=(
   --values "${SCRIPT_DIR}/values.yaml"
   --wait
   --timeout 5m
+  --set "image.pullPolicy=Always"
   --set "podSecurityContext.runAsUser=100"
   --set "podSecurityContext.runAsGroup=101"
   --set secrets.create=false
   --set "secrets.managementToken.existingSecret.name=${SECRET_NAME}"
   --set "secrets.managementToken.existingSecret.key=MANAGEMENT_TOKEN"
+  --set "secrets.encryptionKey.required=true"
+  --set "secrets.encryptionKey.existingSecret.name=${SECRET_NAME}"
+  --set "secrets.encryptionKey.existingSecret.key=ENCRYPTION_KEY"
+  --set-string "env.REQUIRE_ENCRYPTION_KEY=true"
   --set-string "env.LLM_PROXY_EVENT_BUS=${event_bus_backend}"
   --set "admin.enabled=true"
 )
@@ -577,10 +787,11 @@ if [[ -n "${CHART_VERSION}" && "${USE_OCI}" == "true" ]]; then
 fi
 
 if [[ -n "${DATABASE_URL}" ]]; then
+  effective_db_driver="${DB_DRIVER:-postgres}"
   HELM_ARGS+=(
     --set "secrets.databaseUrl.existingSecret.name=${SECRET_NAME}"
     --set "secrets.databaseUrl.existingSecret.key=DATABASE_URL"
-    --set-string "env.DB_DRIVER=postgres"
+    --set-string "env.DB_DRIVER=${effective_db_driver}"
   )
 fi
 
@@ -651,6 +862,21 @@ fi
 
 log "Installing/Upgrading llm-proxy via Helm"
 helm "${HELM_ARGS[@]}"
+
+if [[ "${RESTART_AFTER_INSTALL}" == "true" ]]; then
+  log "Restarting llm-proxy workloads (rollout restart)"
+  # Restart all Deployments/StatefulSets created by this Helm release.
+  # Using labels avoids hard-coding chart-specific resource names.
+  while IFS= read -r res; do
+    [[ -n "${res}" ]] || continue
+    run k rollout restart -n "${NAMESPACE}" "${res}"
+  done < <(k get deployment -n "${NAMESPACE}" -l "app.kubernetes.io/instance=${RELEASE}" -o name 2> /dev/null || true)
+
+  while IFS= read -r res; do
+    [[ -n "${res}" ]] || continue
+    run k rollout restart -n "${NAMESPACE}" "${res}"
+  done < <(k get statefulset -n "${NAMESPACE}" -l "app.kubernetes.io/instance=${RELEASE}" -o name 2> /dev/null || true)
+fi
 
 echo
 log "llm-proxy installed successfully."
