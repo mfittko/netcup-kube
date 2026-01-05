@@ -38,6 +38,7 @@ Notes:
 EOF
 }
 
+# Default namespace from recipes.conf (sourced via common.sh)
 NAMESPACE="${NAMESPACE_PLATFORM}"
 MASTERKEY="${MASTERKEY:-}"
 CHART_VERSION="${CHART_VERSION_LITELLM}"
@@ -211,6 +212,9 @@ stringData:
     ${pg_password}
 EOF
     
+    # Clear sensitive variable
+    unset pg_password
+    
     HELM_ARGS+=(
       --set "db.useExisting=true"
       --set "db.endpoint=postgres-postgresql.${PLATFORM_NS}.svc.cluster.local"
@@ -261,6 +265,9 @@ stringData:
 EOF
   fi
   
+  # Clear sensitive variable
+  unset PLATFORM_REDIS_PASSWORD
+  
   # Configure chart to use environment secrets and enable Redis caching
   HELM_ARGS+=(
     --set "environmentSecrets[0].name=litellm-redis-env"
@@ -270,14 +277,17 @@ EOF
   # Enable Redis caching in proxy_config
   # The config uses os.environ references to REDIS_HOST, REDIS_PORT, REDIS_PASSWORD
   HELM_ARGS+=(
-    --set-string "proxy_config.litellm_settings.cache=true"
-    --set-string "proxy_config.cache_params.type=redis"
+    --set "proxy_config.litellm_settings.cache=true"
+    --set "proxy_config.cache_params.type=redis"
   )
 fi
 
 # Install/Upgrade LiteLLM
 log "Installing/Upgrading LiteLLM via Helm"
 helm "${HELM_ARGS[@]}"
+
+# Clear sensitive variables from memory
+unset MASTERKEY
 
 log "LiteLLM installed successfully!"
 
