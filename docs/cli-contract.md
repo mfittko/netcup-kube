@@ -76,6 +76,7 @@ netcup-kube install <recipe> [recipe-options]
 - `postgres` — Install PostgreSQL (Bitnami Helm chart)
 - `redis` — Install Redis (Bitnami Helm chart)
 - `llm-proxy` — Install llm-proxy (Helm chart; Secret-backed config)
+- `lite-llm` — Install LiteLLM proxy (OCI Helm chart; platform Postgres/Redis integration)
 - `sealed-secrets` — Install Sealed Secrets (encrypt secrets for Git)
 - `redisinsight` — Install RedisInsight (Redis GUI)
 - `kube-prometheus-stack` — Install Grafana + Prometheus + Alertmanager

@@ -1,0 +1,19 @@
+# LiteLLM Helm chart values
+# Minimal defaults; prefer environment references over inline secrets
+
+# Proxy configuration for Redis integration
+# Redis env vars (REDIS_HOST, REDIS_PORT, REDIS_PASSWORD) are injected via environmentSecrets
+# when platform Redis is available
+proxy_config:
+  # LiteLLM settings
+  litellm_settings:
+    # Redis caching disabled by default
+    # Will be enabled via --set when platform Redis is detected
+    cache: false
+  
+  # Cache parameters
+  # These will be used when cache is enabled
+  cache_params:
+    type: redis
+    # Redis connection details are read from environment variables:
+    # REDIS_HOST, REDIS_PORT, REDIS_PASSWORD (injected via environmentSecrets)
