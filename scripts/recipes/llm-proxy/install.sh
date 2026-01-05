@@ -25,6 +25,7 @@ Options:
   --release <name>           Helm release name (default: llm-proxy).
   --secret-name <name>       Kubernetes Secret name to create/use (default: <release>-secrets).
   --create-secret            Create/Update the Kubernetes Secret from provided env/flags (default: false).
+  --restart                  Restart llm-proxy workloads after install/upgrade (rollout restart) (default: false).
   --db-driver <name>         Database driver: sqlite|postgres|mysql (default: auto: platform Postgres if present, else SQLite).
   --chart-version <ver>      OCI chart version to install (default: latest available).
   --use-oci                  Use OCI Helm chart from ghcr.io (default: true).
@@ -39,6 +40,7 @@ Options:
   --force-mysql-upgrade      Force upgrading the dedicated MySQL release even if it already exists (default: false).
   --mysql-storage <size>     PVC size for dedicated MySQL (default: ${DEFAULT_STORAGE_MYSQL}).
   --use-platform-redis       Use an existing Redis install in the platform namespace when safe (default: false).
+  --enable-redis             Enable dedicated Redis for event bus + HTTP cache (AUTH disabled; insecure).
   --allow-insecure-redis-no-auth  Allow installing dedicated Redis with AUTH disabled (default: false).
   --force-redis-upgrade      Force upgrading the dedicated Redis release even if it already exists (default: false).
   --enable-metrics           Enable Prometheus metrics endpoint and ServiceMonitor (default: false).
@@ -81,10 +83,12 @@ Environment:
 Notes:
   - Recommended: provide secrets via env vars or interactive prompts (not CLI flags).
   - If DATABASE_URL is set, this recipe also sets env.DB_DRIVER based on --db-driver / LLM_PROXY_DB_DRIVER.
+  - Temporary: this recipe currently forces image.pullPolicy=Always to ensure republished image tags are pulled.
+    Once automated patch releases (immutable tags) are in place, we should revert to the chart default (IfNotPresent).
   - Redis (platform): llm-proxy currently does not support Redis AUTH for the event bus; platform Redis will only be used
     when it does not require a password.
   - Redis (dedicated): installing dedicated Redis with AUTH disabled is insecure and must be explicitly enabled with
-    --allow-insecure-redis-no-auth / LLM_PROXY_ALLOW_INSECURE_REDIS_NO_AUTH=true.
+    --enable-redis (preferred) or --allow-insecure-redis-no-auth / LLM_PROXY_ALLOW_INSECURE_REDIS_NO_AUTH=true.
   - Prometheus: When enabled, configures ServiceMonitor (if Prometheus Operator is available) and service annotations.
 EOF
 }
@@ -94,6 +98,8 @@ RELEASE="llm-proxy"
 SECRET_NAME=""
 
 CREATE_SECRET="${LLM_PROXY_CREATE_SECRET:-false}"
+
+RESTART_AFTER_INSTALL="false"
 
 USE_OCI="${LLM_PROXY_USE_OCI:-true}"
 CHART_VERSION="${LLM_PROXY_CHART_VERSION:-}"
@@ -224,6 +230,9 @@ while [[ $# -gt 0 ]]; do
     --create-secret)
       CREATE_SECRET="true"
       ;;
+    --restart)
+      RESTART_AFTER_INSTALL="true"
+      ;;
     --db-driver)
       shift
       DB_DRIVER="${1:-}"
@@ -308,6 +317,9 @@ while [[ $# -gt 0 ]]; do
     --mysql-storage=*)
       MYSQL_STORAGE="${1#*=}"
       ;;
+    --enable-redis)
+      ALLOW_INSECURE_REDIS_NO_AUTH="true"
+      ;;
     --allow-insecure-redis-no-auth)
       ALLOW_INSECURE_REDIS_NO_AUTH="true"
       ;;
@@ -377,6 +389,8 @@ if [[ "${UNINSTALL}" == "true" ]]; then
 fi
 
 log "Installing llm-proxy into namespace: ${NAMESPACE}"
+
+log "Temporary measure: forcing image.pullPolicy=Always (until automated patch releases exist)"
 recipe_ensure_namespace "${NAMESPACE}"
 
 PLATFORM_NS="${NAMESPACE_PLATFORM}"
@@ -539,7 +553,7 @@ if [[ "${USE_PLATFORM_REDIS}" == "true" ]]; then
 else
   if [[ "${ALLOW_INSECURE_REDIS_NO_AUTH}" != "true" ]]; then
     log "No platform Redis selected; using in-memory event bus and no Redis HTTP cache by default."
-    log "To install dedicated Redis with AUTH disabled (insecure), re-run with: --allow-insecure-redis-no-auth"
+    log "To install dedicated Redis with AUTH disabled (insecure), re-run with: --enable-redis"
   else
     recipe_helm_repo_add "bitnami" "https://charts.bitnami.com/bitnami"
     log "Installing dedicated Redis (no AUTH, insecure) for llm-proxy into namespace: ${NAMESPACE}"
@@ -740,6 +754,7 @@ HELM_ARGS=(
   --values "${SCRIPT_DIR}/values.yaml"
   --wait
   --timeout 5m
+  --set "image.pullPolicy=Always"
   --set "podSecurityContext.runAsUser=100"
   --set "podSecurityContext.runAsGroup=101"
   --set secrets.create=false
@@ -847,6 +862,21 @@ fi
 
 log "Installing/Upgrading llm-proxy via Helm"
 helm "${HELM_ARGS[@]}"
+
+if [[ "${RESTART_AFTER_INSTALL}" == "true" ]]; then
+  log "Restarting llm-proxy workloads (rollout restart)"
+  # Restart all Deployments/StatefulSets created by this Helm release.
+  # Using labels avoids hard-coding chart-specific resource names.
+  while IFS= read -r res; do
+    [[ -n "${res}" ]] || continue
+    run k rollout restart -n "${NAMESPACE}" "${res}"
+  done < <(k get deployment -n "${NAMESPACE}" -l "app.kubernetes.io/instance=${RELEASE}" -o name 2> /dev/null || true)
+
+  while IFS= read -r res; do
+    [[ -n "${res}" ]] || continue
+    run k rollout restart -n "${NAMESPACE}" "${res}"
+  done < <(k get statefulset -n "${NAMESPACE}" -l "app.kubernetes.io/instance=${RELEASE}" -o name 2> /dev/null || true)
+fi
 
 echo
 log "llm-proxy installed successfully."
