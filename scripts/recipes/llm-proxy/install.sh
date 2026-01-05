@@ -376,7 +376,7 @@ recipe_check_kubeconfig
 need_cmd helm
 
 if [[ "${UNINSTALL}" == "true" ]]; then
-  recipe_confirm_or_die "Uninstall llm-proxy (Helm release '${RELEASE}') and its dedicated Redis from namespace ${NAMESPACE}"
+  recipe_confirm_or_die "Uninstall llm-proxy (Helm release '${RELEASE}') and its dedicated MySQL and Redis instances from namespace ${NAMESPACE}"
   log "Uninstalling llm-proxy from namespace: ${NAMESPACE}"
   helm uninstall "${RELEASE}" --namespace "${NAMESPACE}" || true
   helm uninstall "${RELEASE}-mysql" --namespace "${NAMESPACE}" || true
@@ -445,7 +445,7 @@ if [[ -z "${DATABASE_URL}" && "${DB_DRIVER}" == "mysql" ]]; then
     mysql_root_password="$(k get secret -n "${NAMESPACE}" "${mysql_auth_secret}" -o jsonpath='{.data.mysql-root-password}' 2> /dev/null | base64 -d 2> /dev/null || true)"
     mysql_app_password="$(k get secret -n "${NAMESPACE}" "${mysql_auth_secret}" -o jsonpath='{.data.mysql-password}' 2> /dev/null | base64 -d 2> /dev/null || true)"
     mysql_replication_password="$(k get secret -n "${NAMESPACE}" "${mysql_auth_secret}" -o jsonpath='{.data.mysql-replication-password}' 2> /dev/null | base64 -d 2> /dev/null || true)"
-    if [[ -n "${mysql_root_password}" && -n "${mysql_app_password}" ]]; then
+    if [[ -n "${mysql_root_password}" && -n "${mysql_app_password}" && -n "${mysql_replication_password}" ]]; then
       log "Reusing existing MySQL credentials from Secret '${mysql_auth_secret}'"
     fi
   fi

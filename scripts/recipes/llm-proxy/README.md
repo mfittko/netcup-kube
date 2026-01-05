@@ -83,7 +83,6 @@ LLM_PROXY_DB_DRIVER=mysql \
 LLM_PROXY_FORCE_MYSQL_UPGRADE=true \
 netcup-kube install llm-proxy
 ```
-```
 
 Platform Postgres auto-detection (Bitnami `svc/postgres-postgresql`):
 
