@@ -36,6 +36,8 @@ Available recipes:
   redisinsight             Install RedisInsight (Redis GUI)
   kube-prometheus-stack    Install Grafana + Prometheus + Alertmanager
   dashboard                Install Kubernetes Dashboard (official web UI)
+  llm-proxy                Install llm-proxy (Helm chart; Secret-backed config)
+  openclaw                 Install OpenClaw with kernel-level network monitoring
 
 Examples:
   netcup-kube install argo-cd --help
