@@ -348,27 +348,13 @@ if ! command -v hubble > /dev/null 2>&1; then
     log "WARNING: Failed to download Hubble CLI from ${HUBBLE_URL}."
     log "WARNING: Network monitoring verification will require manual installation."
   elif ! run curl -sLO "${HUBBLE_CHECKSUM_URL}"; then
-    log "WARNING: Failed to download Hubble CLI checksum. Skipping verification (security risk)."
-    log "WARNING: Proceeding with installation, but integrity cannot be verified."
-    if ! run tar xzf "hubble-linux-${HUBBLE_ARCH}.tar.gz" 2> /dev/null; then
-      log "WARNING: Failed to extract Hubble CLI."
-      run rm -f "hubble-linux-${HUBBLE_ARCH}.tar.gz" || true
-    else
-      INSTALL_DIR="/usr/local/bin"
-      if [[ ! -w "${INSTALL_DIR}" ]]; then
-        log "WARNING: Cannot write to ${INSTALL_DIR}. Skipping Hubble CLI installation."
-        log "WARNING: Network monitoring verification will require manual installation."
-        run rm -f hubble || true
-      elif ! run mv hubble "${INSTALL_DIR}/"; then
-        log "WARNING: Failed to install Hubble CLI to ${INSTALL_DIR}/"
-      else
-        log "Hubble CLI installed (without checksum verification)"
-      fi
-      run rm -f "hubble-linux-${HUBBLE_ARCH}.tar.gz" || true
-    fi
+    log "ERROR: Failed to download Hubble CLI checksum from ${HUBBLE_CHECKSUM_URL}."
+    log "ERROR: Cannot verify integrity of downloaded binary. Refusing to install unverified binary."
+    log "WARNING: Network monitoring verification will require manual installation."
+    run rm -f "hubble-linux-${HUBBLE_ARCH}.tar.gz" || true
   else
     # Verify checksum
-    if sha256sum -c "hubble-linux-${HUBBLE_ARCH}.tar.gz.sha256sum" 2> /dev/null; then
+    if run sha256sum -c "hubble-linux-${HUBBLE_ARCH}.tar.gz.sha256sum" 2> /dev/null; then
       log "Checksum verification passed"
       if ! run tar xzf "hubble-linux-${HUBBLE_ARCH}.tar.gz" 2> /dev/null; then
         log "WARNING: Failed to extract Hubble CLI."
@@ -416,10 +402,11 @@ persistence:
   size: ${STORAGE}
 
 # Use pre-created secret for credentials
-# NOTE: Verify that serhanekicii/openclaw-helm chart supports 'existingSecret'.
-#       If the chart uses a different parameter (e.g., 'secret.name', 
-#       'credentials.existingSecret'), update this accordingly.
-existingSecret: ${SECRET_NAME}
+# NOTE: The parameter below may need adjustment based on the chart's actual schema.
+#       Common alternatives: secret.name, credentials.existingSecret, auth.existingSecret
+#       If installation fails, check the chart's values.yaml at:
+#       https://github.com/serhanekicii/openclaw-helm
+# existingSecret: ${SECRET_NAME}
 EOF
 else
   log "Using existing values.yaml (preserving customizations)"
@@ -450,13 +437,20 @@ EOF
 
 log "OpenClaw installed successfully!"
 
+# Dynamically determine OpenClaw service name
+OPENCLAW_SVC=$(k -n "${NAMESPACE}" get svc -l app.kubernetes.io/instance=openclaw -o jsonpath='{.items[0].metadata.name}' 2> /dev/null || echo "openclaw")
+
+if ! k -n "${NAMESPACE}" get svc "${OPENCLAW_SVC}" > /dev/null 2>&1; then
+  log "WARNING: Service '${OPENCLAW_SVC}' not found in namespace '${NAMESPACE}'"
+  log "WARNING: Using default service name 'openclaw' for ingress. Update if needed."
+  OPENCLAW_SVC="openclaw"
+else
+  log "Detected OpenClaw service: ${OPENCLAW_SVC}"
+fi
+
 # Create Ingress if host is specified
 if [[ -n "${HOST}" ]]; then
   log "Creating/Updating Traefik ingress for ${HOST}"
-
-  # Note: This assumes the OpenClaw Helm chart creates a service named "openclaw".
-  # If the chart uses a different naming convention (e.g., "openclaw-helm" or
-  # "openclaw-openclaw-helm"), update the service name below accordingly.
 
   cat << EOF | k apply -f -
 apiVersion: networking.k8s.io/v1
@@ -475,7 +469,7 @@ spec:
         pathType: Prefix
         backend:
           service:
-            name: openclaw
+            name: ${OPENCLAW_SVC}
             port:
               number: 80
 EOF
@@ -567,12 +561,11 @@ if [[ -n "${HOST}" ]]; then
 EOF
 fi
 
-# Dynamically determine OpenClaw service name for port-forwarding
-OPENCLAW_SVC=$(k -n "${NAMESPACE}" get svc -l app.kubernetes.io/instance=openclaw -o jsonpath='{.items[0].metadata.name}' 2> /dev/null || echo "openclaw")
-
+# Service name was already determined above (line 441)
+# Verify it still exists before showing port-forward command
 if ! k -n "${NAMESPACE}" get svc "${OPENCLAW_SVC}" > /dev/null 2>&1; then
   log "WARNING: Service '${OPENCLAW_SVC}' not found in namespace '${NAMESPACE}'"
-  log "WARNING: Update the port-forward command below with the correct service name"
+  log "WARNING: Port-forward command may need adjustment with correct service name"
 fi
 
 cat << EOF
