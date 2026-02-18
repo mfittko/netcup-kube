@@ -401,11 +401,10 @@ persistence:
   enabled: true
   size: ${STORAGE}
 
-# Secret reference will be passed via --set flag during Helm install
-# to ensure the pre-created secret is properly wired to the chart.
-# If the chart doesn't support the attempted parameters, installation will
-# fail with a clear error. Check https://github.com/serhanekicii/openclaw-helm
-# for the actual chart schema and adjust the --set flags below if needed.
+# Secret reference is passed via --set-string flag during Helm install using
+# the chart's app-template structure:
+# app-template.controllers.main.containers.main.envFrom[0].secretRef.name
+# This wires the pre-created secret '${SECRET_NAME}' to the OpenClaw pod environment.
 EOF
 else
   log "Using existing values.yaml (preserving customizations)"
@@ -413,18 +412,15 @@ fi
 
 # Install/Upgrade OpenClaw
 log "Installing/Upgrading OpenClaw via Helm"
-log "NOTE: Attempting to wire secret '${SECRET_NAME}' using common chart parameters"
-log "      If installation fails, verify chart schema supports one of: existingSecret, secret.name, auth.existingSecret"
+log "NOTE: Wiring secret '${SECRET_NAME}' to chart via app-template.controllers.main.containers.main.envFrom"
 
-# Try to pass the secret via multiple common parameter names
-# The chart should accept at least one of these patterns
+# Wire the secret using the chart's actual structure (app-template based)
+# The chart expects: app-template.controllers.main.containers.main.envFrom[0].secretRef.name
 helm upgrade --install openclaw openclaw/openclaw-helm \
   --namespace "${NAMESPACE}" \
   --version "${CHART_VERSION_OPENCLAW}" \
   --values "${VALUES_FILE}" \
-  --set existingSecret="${SECRET_NAME}" \
-  --set secret.name="${SECRET_NAME}" \
-  --set auth.existingSecret="${SECRET_NAME}" \
+  --set-string "app-template.controllers.main.containers.main.envFrom[0].secretRef.name=${SECRET_NAME}" \
   --wait \
   --timeout 5m || {
   cat << EOF
@@ -436,11 +432,10 @@ Troubleshooting:
 2. Check pod events: kubectl -n ${NAMESPACE} describe pod -l app.kubernetes.io/instance=openclaw
 3. Verify secret exists: kubectl -n ${NAMESPACE} get secret ${SECRET_NAME}
 4. Check logs: kubectl -n ${NAMESPACE} logs -l app.kubernetes.io/instance=openclaw
-5. If the error mentions unknown fields (existingSecret, secret.name, auth.existingSecret):
-   - The chart may use a different secret parameter name
-   - Check https://github.com/serhanekicii/openclaw-helm for the correct schema
-   - Manually run: helm upgrade --install openclaw openclaw/openclaw-helm \\
-                    --namespace ${NAMESPACE} --set <correct-param>=${SECRET_NAME}
+5. Verify secret is accessible in pod environment:
+   kubectl -n ${NAMESPACE} exec -it <pod-name> -- env | grep -i api
+6. If secret wiring failed, check the chart's app-template structure at:
+   https://github.com/serhanekicii/openclaw-helm
 
 EOF
   exit 1
