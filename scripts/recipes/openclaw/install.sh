@@ -300,11 +300,16 @@ if ! command -v hubble > /dev/null 2>&1; then
     HUBBLE_ARCH="arm64"
   fi
 
-  curl -sLO "https://github.com/cilium/hubble/releases/download/${HUBBLE_VERSION}/hubble-linux-${HUBBLE_ARCH}.tar.gz"
-  tar xzf "hubble-linux-${HUBBLE_ARCH}.tar.gz"
-  mv hubble /usr/local/bin/
-  rm "hubble-linux-${HUBBLE_ARCH}.tar.gz"
-  log "Hubble CLI installed"
+  if ! curl -sLO "https://github.com/cilium/hubble/releases/download/${HUBBLE_VERSION}/hubble-linux-${HUBBLE_ARCH}.tar.gz"; then
+    log "WARNING: Failed to download Hubble CLI. Network monitoring verification will require manual installation."
+  elif ! tar xzf "hubble-linux-${HUBBLE_ARCH}.tar.gz" 2> /dev/null; then
+    log "WARNING: Failed to extract Hubble CLI."
+    rm -f "hubble-linux-${HUBBLE_ARCH}.tar.gz"
+  else
+    mv hubble /usr/local/bin/ 2> /dev/null || log "WARNING: Failed to install Hubble CLI to /usr/local/bin/"
+    rm -f "hubble-linux-${HUBBLE_ARCH}.tar.gz"
+    log "Hubble CLI installed"
+  fi
 fi
 
 log "=== Kernel-level network monitoring installation complete ==="
