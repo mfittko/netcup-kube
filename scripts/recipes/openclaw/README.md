@@ -72,17 +72,23 @@ The monitoring provides complete visibility into:
 
 After installation, verify network monitoring:
 
-1. **Port-forward Hubble relay:**
+1. **Determine Hubble relay service name dynamically:**
    ```bash
-   kubectl -n kube-system port-forward svc/hubble-relay 4245:80 &
+   HUBBLE_RELAY_SVC=$(kubectl -n kube-system get svc -l k8s-app=hubble-relay -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "hubble-relay")
+   echo "Hubble relay service: ${HUBBLE_RELAY_SVC}"
    ```
 
-2. **View real-time flows:**
+2. **Port-forward Hubble relay:**
+   ```bash
+   kubectl -n kube-system port-forward svc/${HUBBLE_RELAY_SVC} 4245:80 &
+   ```
+
+3. **View real-time flows:**
    ```bash
    hubble observe --namespace openclaw
    ```
 
-3. **Monitor outbound connections:**
+4. **Monitor outbound connections:**
    ```bash
    hubble observe --namespace openclaw --type trace --protocol tcp
    ```
@@ -99,7 +105,9 @@ After installation, verify network monitoring:
 
 6. **Access Hubble UI:**
    ```bash
-   kubectl -n kube-system port-forward svc/hubble-ui 12000:80
+   # Determine Hubble UI service name dynamically
+   HUBBLE_UI_SVC=$(kubectl -n kube-system get svc -l k8s-app=hubble-ui -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "hubble-ui")
+   kubectl -n kube-system port-forward svc/${HUBBLE_UI_SVC} 12000:80
    # Open http://localhost:12000
    ```
 

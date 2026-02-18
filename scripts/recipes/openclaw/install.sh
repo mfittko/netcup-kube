@@ -401,12 +401,11 @@ persistence:
   enabled: true
   size: ${STORAGE}
 
-# Use pre-created secret for credentials
-# NOTE: The parameter below may need adjustment based on the chart's actual schema.
-#       Common alternatives: secret.name, credentials.existingSecret, auth.existingSecret
-#       If installation fails, check the chart's values.yaml at:
-#       https://github.com/serhanekicii/openclaw-helm
-# existingSecret: ${SECRET_NAME}
+# Secret reference will be passed via --set flag during Helm install
+# to ensure the pre-created secret is properly wired to the chart.
+# If the chart doesn't support the attempted parameters, installation will
+# fail with a clear error. Check https://github.com/serhanekicii/openclaw-helm
+# for the actual chart schema and adjust the --set flags below if needed.
 EOF
 else
   log "Using existing values.yaml (preserving customizations)"
@@ -414,10 +413,18 @@ fi
 
 # Install/Upgrade OpenClaw
 log "Installing/Upgrading OpenClaw via Helm"
+log "NOTE: Attempting to wire secret '${SECRET_NAME}' using common chart parameters"
+log "      If installation fails, verify chart schema supports one of: existingSecret, secret.name, auth.existingSecret"
+
+# Try to pass the secret via multiple common parameter names
+# The chart should accept at least one of these patterns
 helm upgrade --install openclaw openclaw/openclaw-helm \
   --namespace "${NAMESPACE}" \
   --version "${CHART_VERSION_OPENCLAW}" \
   --values "${VALUES_FILE}" \
+  --set existingSecret="${SECRET_NAME}" \
+  --set secret.name="${SECRET_NAME}" \
+  --set auth.existingSecret="${SECRET_NAME}" \
   --wait \
   --timeout 5m || {
   cat << EOF
@@ -429,7 +436,11 @@ Troubleshooting:
 2. Check pod events: kubectl -n ${NAMESPACE} describe pod -l app.kubernetes.io/instance=openclaw
 3. Verify secret exists: kubectl -n ${NAMESPACE} get secret ${SECRET_NAME}
 4. Check logs: kubectl -n ${NAMESPACE} logs -l app.kubernetes.io/instance=openclaw
-5. Review Helm values: Check if 'existingSecret' parameter is supported by the chart
+5. If the error mentions unknown fields (existingSecret, secret.name, auth.existingSecret):
+   - The chart may use a different secret parameter name
+   - Check https://github.com/serhanekicii/openclaw-helm for the correct schema
+   - Manually run: helm upgrade --install openclaw openclaw/openclaw-helm \\
+                    --namespace ${NAMESPACE} --set <correct-param>=${SECRET_NAME}
 
 EOF
   exit 1
