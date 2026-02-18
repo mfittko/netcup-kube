@@ -45,6 +45,7 @@ NAMESPACE=prod-db STORAGE=50Gi netcup-kube install postgres
 - **dashboard**: Kubernetes Dashboard
 - **redisinsight**: Redis GUI for development
 - **llm-proxy**: Install llm-proxy from its Helm chart (Secret-backed config)
+- **openclaw**: OpenClaw agent with mandatory kernel-level network monitoring
 
 ## Usage
 

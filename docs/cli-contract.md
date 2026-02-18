@@ -80,6 +80,7 @@ netcup-kube install <recipe> [recipe-options]
 - `redisinsight` — Install RedisInsight (Redis GUI)
 - `kube-prometheus-stack` — Install Grafana + Prometheus + Alertmanager
 - `dashboard` — Install Kubernetes Dashboard (official web UI)
+- `openclaw` — Install OpenClaw with mandatory kernel-level network monitoring
 
 **Common Options:**
 - `--help`, `-h` — Show recipe-specific help
