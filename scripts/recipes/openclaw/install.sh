@@ -7,6 +7,8 @@ SCRIPTS_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 source "${SCRIPTS_DIR}/lib/common.sh"
 # shellcheck disable=SC1091
 source "${SCRIPTS_DIR}/recipes/lib.sh"
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/runtime-installers.sh"
 
 usage() {
   cat << 'EOF'
@@ -57,6 +59,7 @@ METORO_NAMESPACE="${NAMESPACE_METORO:-metoro}"
 OTLP_ENDPOINT="${OPENCLAW_OTLP_ENDPOINT:-}"
 OTEL_SERVICE_NAME="${OTEL_SERVICE_NAME:-openclaw}"
 OTEL_RUNTIME_DIR="/home/node/.openclaw/otel-runtime"
+RUNTIME_BIN_DIR="/home/node/.openclaw/bin"
 CA_SECRET_NAME="${OPENCLAW_CA_SECRET:-}"
 CA_SECRET_KEY="${OPENCLAW_CA_SECRET_KEY:-ca.crt}"
 CA_CERTS_MOUNT_DIR="/etc/openclaw-ca"
@@ -441,6 +444,7 @@ recipe_helm_repo_add "openclaw" "https://serhanekicii.github.io/openclaw-helm"
 # Prepare Helm values for OpenClaw
 log "Preparing OpenClaw Helm values"
 VALUES_FILE="${SCRIPT_DIR}/values.yaml"
+SKILLS_VALUES_FILE="${SCRIPT_DIR}/skills-values.yaml"
 HELM_CA_ARGS=()
 
 if [[ -n "${CA_SECRET_NAME}" ]]; then
@@ -461,6 +465,8 @@ if [[ -n "${CA_SECRET_NAME}" ]]; then
     --set-string "app-template.controllers.main.containers.main.env.NODE_EXTRA_CA_CERTS=${NODE_EXTRA_CA_CERTS_PATH}"
   )
 fi
+
+[[ -f "${SKILLS_VALUES_FILE}" ]] || die "Missing skills values file: ${SKILLS_VALUES_FILE}"
 
 # Only create values.yaml if it doesn't exist (preserve user customizations)
 if [[ ! -f "${VALUES_FILE}" ]]; then
@@ -493,7 +499,9 @@ helm upgrade --install openclaw openclaw/openclaw \
   --namespace "${NAMESPACE}" \
   --version "${CHART_VERSION_OPENCLAW}" \
   --values "${VALUES_FILE}" \
+  --values "${SKILLS_VALUES_FILE}" \
   --set-string "app-template.controllers.main.containers.main.envFrom[0].secretRef.name=${SECRET_NAME}" \
+  --set-string "app-template.controllers.main.containers.main.env.PATH=${RUNTIME_BIN_DIR}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
   --set-string "app-template.controllers.main.containers.main.env.NODE_PATH=${OTEL_RUNTIME_DIR}/node_modules" \
   --set-string "app-template.controllers.main.containers.main.env.NODE_OPTIONS=--require @opentelemetry/auto-instrumentations-node/register --use-openssl-ca" \
   --set-string "app-template.controllers.main.containers.main.env.OTEL_NODE_ENABLED_INSTRUMENTATIONS=http,undici" \
@@ -529,51 +537,7 @@ log "OpenClaw installed successfully!"
 OPENCLAW_POD_NAME="$(k -n "${NAMESPACE}" get pods -l app.kubernetes.io/instance=openclaw -o jsonpath='{.items[0].metadata.name}' 2> /dev/null || true)"
 [[ -n "${OPENCLAW_POD_NAME}" ]] || die "Unable to determine OpenClaw pod name for diagnostics plugin setup"
 
-log "Installing diagnostics-otel runtime dependencies into persistent volume (${OTEL_RUNTIME_DIR})"
-if ! k -n "${NAMESPACE}" exec -i "${OPENCLAW_POD_NAME}" -c main -- sh -s -- "${OTEL_RUNTIME_DIR}" << 'EOF'; then
-set -eu
-OTEL_RUNTIME_DIR="$1"
-export HOME=/tmp
-export NPM_CONFIG_CACHE=/tmp/.npm
-
-mkdir -p "${OTEL_RUNTIME_DIR}"
-cd "${OTEL_RUNTIME_DIR}"
-
-if [ ! -f package.json ]; then
-  npm init -y > /dev/null 2>&1
-fi
-
-missing="false"
-for pkg in \
-  @opentelemetry/api \
-  @opentelemetry/resources \
-  @opentelemetry/sdk-node \
-  @opentelemetry/sdk-logs \
-  @opentelemetry/auto-instrumentations-node \
-  @opentelemetry/exporter-trace-otlp-http \
-  @opentelemetry/exporter-logs-otlp-http; do
-  if ! node -e "require.resolve('${pkg}')" > /dev/null 2>&1; then
-    missing="true"
-    break
-  fi
-done
-
-if [[ "${missing}" == "true" ]]; then
-  npm install --no-audit --no-fund --silent \
-    @opentelemetry/api \
-    @opentelemetry/resources \
-    @opentelemetry/sdk-node \
-    @opentelemetry/sdk-logs \
-    @opentelemetry/auto-instrumentations-node \
-    @opentelemetry/exporter-trace-otlp-http \
-    @opentelemetry/exporter-logs-otlp-http > /dev/null 2>&1
-fi
-
-node -e "require.resolve('@opentelemetry/auto-instrumentations-node/register')" > /dev/null 2>&1
-EOF
-  log "WARNING: Failed to install diagnostics-otel runtime dependencies in '${OTEL_RUNTIME_DIR}'."
-  log "WARNING: OpenClaw will still run with eBPF monitoring, but plugin-based OTEL telemetry may be incomplete."
-fi
+openclaw_install_diagnostics_runtime_dependencies "${NAMESPACE}" "${OPENCLAW_POD_NAME}" "${OTEL_RUNTIME_DIR}"
 
 # Dynamically determine OpenClaw service name
 OPENCLAW_SVC=$(k -n "${NAMESPACE}" get svc -l app.kubernetes.io/instance=openclaw -o jsonpath='{.items[0].metadata.name}' 2> /dev/null || echo "openclaw")

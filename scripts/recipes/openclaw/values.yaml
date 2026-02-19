@@ -12,6 +12,7 @@ app-template:
       containers:
         main:
           env:
+            PATH: /home/node/.openclaw/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
             NODE_PATH: /home/node/.openclaw/otel-runtime/node_modules
             NODE_OPTIONS: --require @opentelemetry/auto-instrumentations-node/register --use-openssl-ca
             OTEL_NODE_ENABLED_INSTRUMENTATIONS: http,undici

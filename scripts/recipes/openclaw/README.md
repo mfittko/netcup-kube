@@ -83,6 +83,7 @@ This recipe does not mutate `openclaw.json` or enable OpenClaw plugins.
 
 It wires OTEL environment variables on the OpenClaw pod:
 
+- `PATH=/home/node/.openclaw/bin:...`
 - `OTEL_EXPORTER_OTLP_ENDPOINT`
 - `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`
 - `OTEL_TRACES_EXPORTER=otlp`
@@ -92,6 +93,11 @@ It wires OTEL environment variables on the OpenClaw pod:
 - `NODE_OPTIONS=--require @opentelemetry/auto-instrumentations-node/register --use-openssl-ca`
 - `OTEL_NODE_ENABLED_INSTRUMENTATIONS=http,undici`
 - Optional for custom HTTPS trust: `NODE_EXTRA_CA_CERTS=/etc/openclaw-ca/<key>`
+
+GitHub CLI (`gh`) is installed using the chart-native `app-template.controllers.main.initContainers.init-skills.command` path and persisted to `/home/node/.openclaw/bin`.
+The declarative init-skills values are kept in `scripts/recipes/openclaw/skills-values.yaml`.
+
+Diagnostics runtime dependencies (`@opentelemetry/...`) are installed separately from skills via `scripts/recipes/openclaw/runtime-installers.sh`.
 
 ### Optional: Custom CA for outbound HTTPS
 
