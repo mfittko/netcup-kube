@@ -18,6 +18,15 @@ Usage:
 Options:
   --namespace <name>   Namespace to install into (default: openclaw).
   --secret <name>      Name of pre-created Kubernetes Secret with OpenClaw credentials (required).
+  --metoro-token <v>   Metoro bearer token (required; prefer METORO_BEARER_TOKEN env var).
+  --metoro-namespace <name>
+                       Namespace for Metoro exporter stack (default: metoro).
+  --otlp-endpoint <url>
+                       OTLP/HTTP endpoint for OpenClaw diagnostics plugin (default: in-cluster metoro-otel-collector).
+  --otel-service-name <name>
+                       OTEL service name for OpenClaw telemetry (default: openclaw).
+  --ca-secret <name>   Optional Secret name with custom root CA for outbound HTTPS trust.
+  --ca-secret-key <k>  Key in --ca-secret containing the PEM cert (default: ca.crt).
   --host <fqdn>        Create a Traefik Ingress for this host (entrypoint: web).
   --storage <size>     PVC size for OpenClaw state (default: 10Gi).
   --uninstall          Uninstall OpenClaw and monitoring components.
@@ -29,11 +38,12 @@ Environment:
 Requirements:
   - Kubernetes >= 1.26
   - Pre-created Kubernetes Secret for OpenClaw credentials
+  - Metoro bearer token (METORO_BEARER_TOKEN env var or --metoro-token)
   - Kernel >= 4.9 (for eBPF support)
 
 Notes:
   - This installs OpenClaw from the serhanekicii/openclaw-helm Helm chart.
-  - Kernel-level network monitoring (Cilium Hubble) is REQUIRED and installed automatically.
+  - Kernel-level network monitoring (Metoro exporter + node-agent) is REQUIRED and installed automatically.
   - Network monitoring provides visibility into outbound calls at the kernel/eBPF level.
   - Recipe fails fast if monitoring prerequisites are not met.
   - A persistent volume claim (PVC) will be created for OpenClaw state.
@@ -42,6 +52,14 @@ EOF
 
 NAMESPACE="${NAMESPACE_OPENCLAW}"
 SECRET_NAME=""
+METORO_TOKEN="${METORO_BEARER_TOKEN:-}"
+METORO_NAMESPACE="${NAMESPACE_METORO:-metoro}"
+OTLP_ENDPOINT="${OPENCLAW_OTLP_ENDPOINT:-}"
+OTEL_SERVICE_NAME="${OTEL_SERVICE_NAME:-openclaw}"
+OTEL_RUNTIME_DIR="/home/node/.openclaw/otel-runtime"
+CA_SECRET_NAME="${OPENCLAW_CA_SECRET:-}"
+CA_SECRET_KEY="${OPENCLAW_CA_SECRET_KEY:-ca.crt}"
+CA_CERTS_MOUNT_DIR="/etc/openclaw-ca"
 HOST=""
 STORAGE="${DEFAULT_STORAGE_OPENCLAW}"
 UNINSTALL="false"
@@ -61,6 +79,48 @@ while [[ $# -gt 0 ]]; do
       ;;
     --secret=*)
       SECRET_NAME="${1#*=}"
+      ;;
+    --metoro-token)
+      shift
+      METORO_TOKEN="${1:-}"
+      ;;
+    --metoro-token=*)
+      METORO_TOKEN="${1#*=}"
+      ;;
+    --metoro-namespace)
+      shift
+      METORO_NAMESPACE="${1:-}"
+      ;;
+    --metoro-namespace=*)
+      METORO_NAMESPACE="${1#*=}"
+      ;;
+    --otlp-endpoint)
+      shift
+      OTLP_ENDPOINT="${1:-}"
+      ;;
+    --otlp-endpoint=*)
+      OTLP_ENDPOINT="${1#*=}"
+      ;;
+    --otel-service-name)
+      shift
+      OTEL_SERVICE_NAME="${1:-}"
+      ;;
+    --otel-service-name=*)
+      OTEL_SERVICE_NAME="${1#*=}"
+      ;;
+    --ca-secret)
+      shift
+      CA_SECRET_NAME="${1:-}"
+      ;;
+    --ca-secret=*)
+      CA_SECRET_NAME="${1#*=}"
+      ;;
+    --ca-secret-key)
+      shift
+      CA_SECRET_KEY="${1:-}"
+      ;;
+    --ca-secret-key=*)
+      CA_SECRET_KEY="${1#*=}"
       ;;
     --host)
       shift
@@ -104,8 +164,13 @@ if [[ "${UNINSTALL}" == "true" ]]; then
   log "Removing OpenClaw ingress (if present)"
   recipe_kdelete ingress openclaw-ingress -n "${NAMESPACE}"
 
-  log "NOTE: Cilium/Hubble is shared infrastructure and won't be automatically removed"
-  log "To manually uninstall Cilium: helm uninstall cilium --namespace kube-system"
+  log "Uninstalling Metoro exporter stack from namespace: ${METORO_NAMESPACE}"
+  helm uninstall metoro-exporter --namespace "${METORO_NAMESPACE}" || true
+
+  log "Removing Metoro OTLP collector resources (if present)"
+  recipe_kdelete service metoro-otel-collector -n "${METORO_NAMESPACE}"
+  recipe_kdelete deployment metoro-otel-collector -n "${METORO_NAMESPACE}"
+  recipe_kdelete configmap metoro-otel-collector-config -n "${METORO_NAMESPACE}"
 
   echo
   log "OpenClaw and monitoring components uninstalled. Note: PVCs may remain depending on storage class/reclaim policy."
@@ -114,15 +179,51 @@ if [[ "${UNINSTALL}" == "true" ]]; then
 fi
 
 [[ -n "${SECRET_NAME}" ]] || die "Secret name is required. Use --secret to specify a pre-created Kubernetes Secret."
+[[ -n "${METORO_NAMESPACE}" ]] || die "Metoro namespace is required"
+[[ -n "${METORO_TOKEN}" ]] || die "Metoro token is required. Set METORO_BEARER_TOKEN or pass --metoro-token."
+[[ -n "${OTEL_SERVICE_NAME}" ]] || die "OTEL service name is required"
+if [[ -n "${CA_SECRET_NAME}" ]] && [[ -z "${CA_SECRET_KEY}" ]]; then
+  die "CA secret key cannot be empty when --ca-secret is set"
+fi
 
 log "Installing OpenClaw with mandatory kernel-level network monitoring into namespace: ${NAMESPACE}"
 
 # Verify Kubernetes version >= 1.26
 log "Checking Kubernetes version (required: >= 1.26)"
-K8S_VERSION=$(k version --short 2> /dev/null | grep "Server Version" | sed 's/Server Version: v//' || k version -o json 2> /dev/null | grep -o '"gitVersion":"v[0-9.]*"' | cut -d'"' -f4 | sed 's/v//')
-[[ -n "${K8S_VERSION}" ]] || die "Failed to determine Kubernetes version"
-K8S_MAJOR=$(echo "${K8S_VERSION}" | cut -d. -f1)
-K8S_MINOR=$(echo "${K8S_VERSION}" | cut -d. -f2)
+K8S_MAJOR=""
+K8S_MINOR=""
+K8S_MINOR_RAW=""
+K8S_VERSION=""
+
+# Prefer structured JSON output to avoid parsing issues with suffixes (e.g. +k3s1)
+K8S_VERSION_JSON="$(k version -o json 2> /dev/null || true)"
+if [[ -n "${K8S_VERSION_JSON}" ]]; then
+  if command -v jq > /dev/null 2>&1; then
+    K8S_MAJOR="$(printf '%s' "${K8S_VERSION_JSON}" | jq -r '.serverVersion.major // empty' 2> /dev/null || true)"
+    K8S_MINOR_RAW="$(printf '%s' "${K8S_VERSION_JSON}" | jq -r '.serverVersion.minor // empty' 2> /dev/null || true)"
+  else
+    K8S_MAJOR="$(printf '%s' "${K8S_VERSION_JSON}" | sed -n 's/.*"major":"\([0-9][0-9]*\)".*/\1/p' | head -n1 || true)"
+    K8S_MINOR_RAW="$(printf '%s' "${K8S_VERSION_JSON}" | sed -n 's/.*"minor":"\([^"]*\)".*/\1/p' | head -n1 || true)"
+  fi
+  K8S_MINOR="${K8S_MINOR_RAW%%[^0-9]*}"
+fi
+
+# Fallback for clusters/kubectl versions that don't support jsonpath output above
+if [[ -z "${K8S_MAJOR}" ]] || [[ -z "${K8S_MINOR}" ]]; then
+  K8S_VERSION_RAW="$(k version --short 2> /dev/null | awk -F'[: ]+' '/Server Version/ {print $4}' || true)"
+  K8S_VERSION="${K8S_VERSION_RAW#v}"
+  K8S_MAJOR="${K8S_VERSION%%.*}"
+  K8S_MINOR_PART="${K8S_VERSION#*.}"
+  K8S_MINOR_PART="${K8S_MINOR_PART%%.*}"
+  K8S_MINOR="${K8S_MINOR_PART%%[^0-9]*}"
+fi
+
+if [[ -z "${K8S_MAJOR}" ]] || [[ -z "${K8S_MINOR}" ]] ||
+  [[ ! "${K8S_MAJOR}" =~ ^[0-9]+$ ]] || [[ ! "${K8S_MINOR}" =~ ^[0-9]+$ ]]; then
+  die "Failed to determine Kubernetes version"
+fi
+
+K8S_VERSION="${K8S_MAJOR}.${K8S_MINOR}"
 
 if [[ "${K8S_MAJOR}" -lt 1 ]] || { [[ "${K8S_MAJOR}" -eq 1 ]] && [[ "${K8S_MINOR}" -lt 26 ]]; }; then
   die "Kubernetes version ${K8S_VERSION} is not supported. OpenClaw requires Kubernetes >= 1.26."
@@ -175,211 +276,163 @@ EOF
 fi
 log "Secret '${SECRET_NAME}' verified"
 
-# Install mandatory kernel-level network monitoring (Cilium Hubble)
-log "=== Installing mandatory kernel-level network monitoring (Cilium Hubble) ==="
+# Install mandatory kernel-level network monitoring (Metoro)
+log "=== Installing mandatory kernel-level network monitoring (Metoro) ==="
 
-# Check if Cilium is already installed as CNI
-CILIUM_INSTALLED="false"
-if k get daemonset cilium -n kube-system > /dev/null 2>&1; then
-  log "Cilium CNI is already installed"
-  CILIUM_INSTALLED="true"
-fi
+recipe_ensure_namespace "${METORO_NAMESPACE}"
+recipe_helm_repo_add "metoro-exporter" "https://metoro-io.github.io/metoro-helm-charts/"
 
-# Add Cilium Helm repo
-recipe_helm_repo_add "cilium" "https://helm.cilium.io/"
-
-if [[ "${CILIUM_INSTALLED}" == "false" ]]; then
-  # Install Cilium with Hubble enabled (as lightweight network observer)
-  log "Installing Cilium with Hubble for network monitoring"
-
-  # Best-effort detection of existing CNI to warn about potential incompatibilities
-  EXISTING_CNI="unknown"
-  if k get daemonset -A 2> /dev/null | grep -q "kube-flannel-ds"; then
-    EXISTING_CNI="flannel"
-  fi
-
-  if [[ "${EXISTING_CNI}" == "flannel" ]]; then
-    log "WARNING: Detected Flannel CNI (default in K3s installations)."
-    log "WARNING: Enabling Cilium in generic-veth chaining mode alongside Flannel may cause networking issues."
-    log "WARNING: This configuration is not officially supported. Proceeding with installation."
-  fi
-
-  # Create temporary values file using mktemp for thread safety
-  CILIUM_VALUES_FILE=$(mktemp)
-  trap 'rm -f "${CILIUM_VALUES_FILE}"' EXIT
-
-  cat << 'EOF' > "${CILIUM_VALUES_FILE}"
-# Lightweight Cilium deployment for network monitoring only
-# (not replacing existing CNI)
-# NOTE: This configuration uses CNI chaining (generic-veth) and assumes the
-#       existing CNI plugin is compatible. It may not work correctly on all
-#       clusters (for example, K3s/Flannel setups) and can lead to networking
-#       issues if used in unsupported environments.
-cni:
-  exclusive: false
-  chainingMode: generic-veth
-
-hubble:
-  enabled: true
-  relay:
-    enabled: true
-  ui:
-    enabled: true
-  metrics:
-    enabledMetrics:
-      - dns:query
-      - drop
-      - tcp
-      - flow
-      - port-distribution
-      - icmp
-      - http
-
-operator:
-  enabled: true
-EOF
-
-  helm upgrade --install cilium cilium/cilium \
-    --version "${CHART_VERSION_CILIUM}" \
-    --namespace kube-system \
-    --values "${CILIUM_VALUES_FILE}" \
-    --wait \
-    --timeout 10m || {
-    cat << EOF
-
-ERROR: Failed to install Cilium Hubble for network monitoring.
-
-This is a critical component required for OpenClaw observability.
-
-Remediation steps:
-1. Check kernel compatibility: uname -r (requires >= 4.9)
-2. Ensure eBPF filesystem is mounted: mount | grep bpf
-3. Check for conflicting network policies or CNI configurations
-4. Review Cilium documentation: https://docs.cilium.io/
-
-Cannot proceed without network monitoring.
-EOF
-    exit 1
-  }
-else
-  # Enable Hubble on existing Cilium installation
-  log "Enabling Hubble on existing Cilium installation"
-  log "WARNING: Using --reuse-values may override custom Cilium configuration."
-  log "WARNING: Review existing Cilium settings if you have custom security policies or identity management."
-
-  helm upgrade cilium cilium/cilium \
-    --namespace kube-system \
-    --reuse-values \
-    --set hubble.enabled=true \
-    --set hubble.relay.enabled=true \
-    --set hubble.ui.enabled=true \
-    --set hubble.metrics.enabledMetrics="{dns:query,drop,tcp,flow,port-distribution,icmp,http}" \
-    --wait \
-    --timeout 5m || {
-    cat << EOF
-
-ERROR: Failed to enable Hubble on existing Cilium installation.
-
-Remediation steps:
-1. Check Cilium status: kubectl -n kube-system get pods -l k8s-app=cilium
-2. Review Cilium logs: kubectl -n kube-system logs -l k8s-app=cilium
-3. Ensure Cilium version supports Hubble (>= 1.8)
-
-Cannot proceed without network monitoring.
-EOF
-    exit 1
-  }
-fi
-
-# Verify Hubble relay is running
-log "Verifying Hubble relay is healthy"
-if ! k -n kube-system wait --for=condition=available --timeout=2m deployment/hubble-relay 2> /dev/null; then
+helm upgrade --install metoro-exporter metoro-exporter/metoro-exporter \
+  --namespace "${METORO_NAMESPACE}" \
+  --version "${CHART_VERSION_METORO_EXPORTER}" \
+  --set-string exporter.secret.bearerToken="${METORO_TOKEN}" \
+  --set exporter.replicas=1 \
+  --set exporter.autoscaling.horizontalPodAutoscaler.enabled=false \
+  --set exporter.resources.requests.cpu=100m \
+  --set exporter.resources.requests.memory=256Mi \
+  --set exporter.resources.limits.cpu=500m \
+  --set exporter.resources.limits.memory=1Gi \
+  --set redis.master.resourcesPreset=micro \
+  --wait \
+  --timeout 10m || {
   cat << EOF
 
-WARNING: Hubble relay deployment not found or not ready.
-This may indicate an incomplete monitoring installation.
+ERROR: Failed to install Metoro monitoring stack.
 
-Checking for Hubble relay pod...
-EOF
-
-  if ! k -n kube-system get pods -l k8s-app=hubble-relay | grep -q "Running"; then
-    cat << EOF
-
-ERROR: Hubble relay is not running. Network monitoring is not operational.
+This is a required component for OpenClaw kernel-level observability.
 
 Remediation steps:
-1. Check Hubble relay logs: kubectl -n kube-system logs -l k8s-app=hubble-relay
-2. Check Cilium status: kubectl -n kube-system get pods -l k8s-app=cilium
-3. Review Hubble documentation: https://docs.cilium.io/en/stable/gettingstarted/hubble/
+1. Check pod status: kubectl -n ${METORO_NAMESPACE} get pods
+2. Check exporter logs: kubectl -n ${METORO_NAMESPACE} logs deployment/metoro-exporter
+3. Check cluster resources: kubectl describe nodes
 
-Cannot proceed without operational network monitoring.
+Cannot proceed without network monitoring.
 EOF
-    exit 1
-  fi
+  exit 1
+}
+
+log "Verifying Metoro components are healthy"
+if ! k -n "${METORO_NAMESPACE}" wait --for=condition=available --timeout=3m deployment/metoro-exporter > /dev/null 2>&1; then
+  die "Metoro exporter is not ready in namespace '${METORO_NAMESPACE}'."
 fi
 
-log "Hubble relay is healthy"
-
-# Install Hubble CLI for verification (optional but recommended)
-if ! command -v hubble > /dev/null 2>&1; then
-  log "Installing Hubble CLI for network monitoring verification"
-  HUBBLE_VERSION="${HUBBLE_CLI_VERSION}"
-
-  # Comprehensive architecture detection
-  UNAME_ARCH="$(uname -m)"
-  case "${UNAME_ARCH}" in
-    aarch64 | arm64 | arm64e | armv8*)
-      HUBBLE_ARCH="arm64"
-      ;;
-    x86_64 | amd64 | x64)
-      HUBBLE_ARCH="amd64"
-      ;;
-    *)
-      log "WARNING: Unsupported architecture '${UNAME_ARCH}' for Hubble CLI; defaulting to amd64."
-      HUBBLE_ARCH="amd64"
-      ;;
-  esac
-
-  HUBBLE_URL="https://github.com/cilium/hubble/releases/download/${HUBBLE_VERSION}/hubble-linux-${HUBBLE_ARCH}.tar.gz"
-  HUBBLE_CHECKSUM_URL="https://github.com/cilium/hubble/releases/download/${HUBBLE_VERSION}/hubble-linux-${HUBBLE_ARCH}.tar.gz.sha256sum"
-
-  # Download Hubble CLI with checksum verification
-  if ! run curl -sLO "${HUBBLE_URL}"; then
-    log "WARNING: Failed to download Hubble CLI from ${HUBBLE_URL}."
-    log "WARNING: Network monitoring verification will require manual installation."
-  elif ! run curl -sLO "${HUBBLE_CHECKSUM_URL}"; then
-    log "ERROR: Failed to download Hubble CLI checksum from ${HUBBLE_CHECKSUM_URL}."
-    log "ERROR: Cannot verify integrity of downloaded binary. Refusing to install unverified binary."
-    log "WARNING: Network monitoring verification will require manual installation."
-    run rm -f "hubble-linux-${HUBBLE_ARCH}.tar.gz" || true
-  else
-    # Verify checksum
-    if run sha256sum -c "hubble-linux-${HUBBLE_ARCH}.tar.gz.sha256sum" 2> /dev/null; then
-      log "Checksum verification passed"
-      if ! run tar xzf "hubble-linux-${HUBBLE_ARCH}.tar.gz" 2> /dev/null; then
-        log "WARNING: Failed to extract Hubble CLI."
-        run rm -f "hubble-linux-${HUBBLE_ARCH}.tar.gz" "hubble-linux-${HUBBLE_ARCH}.tar.gz.sha256sum" || true
-      else
-        INSTALL_DIR="/usr/local/bin"
-        if [[ ! -w "${INSTALL_DIR}" ]]; then
-          log "WARNING: Cannot write to ${INSTALL_DIR}. Skipping Hubble CLI installation."
-          log "WARNING: Network monitoring verification will require manual installation."
-          run rm -f hubble || true
-        elif ! run mv hubble "${INSTALL_DIR}/"; then
-          log "WARNING: Failed to install Hubble CLI to ${INSTALL_DIR}/"
-        else
-          log "Hubble CLI installed and verified"
-        fi
-        run rm -f "hubble-linux-${HUBBLE_ARCH}.tar.gz" "hubble-linux-${HUBBLE_ARCH}.tar.gz.sha256sum" || true
-      fi
-    else
-      log "ERROR: Checksum verification failed. The downloaded Hubble CLI binary may be compromised."
-      log "ERROR: Refusing to install potentially malicious binary."
-      run rm -f "hubble-linux-${HUBBLE_ARCH}.tar.gz" "hubble-linux-${HUBBLE_ARCH}.tar.gz.sha256sum" hubble || true
-    fi
-  fi
+if ! k -n "${METORO_NAMESPACE}" wait --for=condition=ready --timeout=3m pod -l app.kubernetes.io/name=redis,app.kubernetes.io/component=master > /dev/null 2>&1; then
+  die "Metoro Redis is not ready in namespace '${METORO_NAMESPACE}'."
 fi
 
+if ! k -n "${METORO_NAMESPACE}" rollout status daemonset/metoro-node-agent --timeout=3m > /dev/null 2>&1; then
+  die "Metoro node-agent daemonset is not ready in namespace '${METORO_NAMESPACE}'."
+fi
+
+log "Deploying in-cluster OTLP collector for OpenClaw telemetry"
+cat << EOF | k -n "${METORO_NAMESPACE}" apply -f -
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: metoro-otel-collector-config
+data:
+  collector.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          http:
+            endpoint: 0.0.0.0:4318
+    processors:
+      batch:
+        timeout: 5s
+        send_batch_size: 1024
+      transform/openclaw_service_attrs:
+        error_mode: ignore
+        trace_statements:
+          - context: span
+            statements:
+              - set(attributes["client.service.name"], "/k8s/${NAMESPACE}/openclaw")
+              - set(attributes["server.service.name"], attributes["service.address"]) where attributes["service.address"] != nil
+              - set(attributes["server.service.name"], resource.attributes["service.address"]) where attributes["server.service.name"] == nil and resource.attributes["service.address"] != nil
+              - set(attributes["server.service.name"], attributes["server.address"]) where attributes["server.service.name"] == nil and attributes["server.address"] != nil
+              - set(attributes["net.peer.name"], attributes["server.address"]) where attributes["net.peer.name"] == nil and attributes["server.address"] != nil
+              - set(attributes["network.protocol.name"], attributes["url.scheme"]) where attributes["network.protocol.name"] == nil and attributes["url.scheme"] != nil
+              - set(attributes["http.scheme"], attributes["url.scheme"]) where attributes["http.scheme"] == nil and attributes["url.scheme"] != nil
+              - set(attributes["rpc.system"], "http") where attributes["rpc.system"] == nil and attributes["url.scheme"] != nil and (attributes["url.scheme"] == "http" or attributes["url.scheme"] == "https")
+              - set(attributes["rpc.service"], attributes["server.service.name"]) where attributes["rpc.service"] == nil and attributes["server.service.name"] != nil
+    exporters:
+      otlphttp/metoro:
+        endpoint: http://metoro-exporter.${METORO_NAMESPACE}.svc.cluster.local/api/v1/custom/otel
+        tls:
+          insecure: true
+    service:
+      pipelines:
+        logs:
+          receivers: [otlp]
+          processors: [batch]
+          exporters: [otlphttp/metoro]
+        traces:
+          receivers: [otlp]
+          processors: [transform/openclaw_service_attrs, batch]
+          exporters: [otlphttp/metoro]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: metoro-otel-collector
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: metoro-otel-collector
+  template:
+    metadata:
+      labels:
+        app: metoro-otel-collector
+    spec:
+      containers:
+      - name: otel-collector
+        image: otel/opentelemetry-collector-contrib:0.102.1
+        args:
+          - --config=/conf/collector.yaml
+        ports:
+          - name: otlp-http
+            containerPort: 4318
+        resources:
+          requests:
+            cpu: 50m
+            memory: 128Mi
+          limits:
+            cpu: 300m
+            memory: 512Mi
+        volumeMounts:
+          - name: config
+            mountPath: /conf
+      volumes:
+        - name: config
+          configMap:
+            name: metoro-otel-collector-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: metoro-otel-collector
+spec:
+  selector:
+    app: metoro-otel-collector
+  ports:
+    - name: otlp-http
+      port: 4318
+      targetPort: 4318
+EOF
+
+if ! k -n "${METORO_NAMESPACE}" rollout status deployment/metoro-otel-collector --timeout=3m > /dev/null 2>&1; then
+  die "Metoro OTLP collector deployment is not ready in namespace '${METORO_NAMESPACE}'."
+fi
+
+if [[ -z "${OTLP_ENDPOINT}" ]]; then
+  OTLP_ENDPOINT="http://metoro-otel-collector.${METORO_NAMESPACE}.svc.cluster.local:4318"
+  log "Using in-cluster OTLP endpoint: ${OTLP_ENDPOINT}"
+fi
+
+OTLP_TRACES_ENDPOINT="${OTLP_ENDPOINT%/}/v1/traces"
+
+log "Metoro monitoring stack is healthy"
 log "=== Kernel-level network monitoring installation complete ==="
 
 # Add OpenClaw Helm repo
@@ -388,6 +441,26 @@ recipe_helm_repo_add "openclaw" "https://serhanekicii.github.io/openclaw-helm"
 # Prepare Helm values for OpenClaw
 log "Preparing OpenClaw Helm values"
 VALUES_FILE="${SCRIPT_DIR}/values.yaml"
+HELM_CA_ARGS=()
+
+if [[ -n "${CA_SECRET_NAME}" ]]; then
+  log "Verifying custom CA secret: ${CA_SECRET_NAME}"
+  if ! k get secret "${CA_SECRET_NAME}" -n "${NAMESPACE}" > /dev/null 2>&1; then
+    die "Custom CA secret '${CA_SECRET_NAME}' not found in namespace '${NAMESPACE}'."
+  fi
+
+  NODE_EXTRA_CA_CERTS_PATH="${CA_CERTS_MOUNT_DIR}/${CA_SECRET_KEY}"
+  HELM_CA_ARGS=(
+    --set-string "app-template.controllers.main.pod.volumes[0].name=openclaw-custom-ca"
+    --set-string "app-template.controllers.main.pod.volumes[0].secret.secretName=${CA_SECRET_NAME}"
+    --set-string "app-template.controllers.main.pod.volumes[0].secret.items[0].key=${CA_SECRET_KEY}"
+    --set-string "app-template.controllers.main.pod.volumes[0].secret.items[0].path=${CA_SECRET_KEY}"
+    --set-string "app-template.controllers.main.containers.main.volumeMounts[0].name=openclaw-custom-ca"
+    --set-string "app-template.controllers.main.containers.main.volumeMounts[0].mountPath=${CA_CERTS_MOUNT_DIR}"
+    --set-string "app-template.controllers.main.containers.main.volumeMounts[0].readOnly=true"
+    --set-string "app-template.controllers.main.containers.main.env.NODE_EXTRA_CA_CERTS=${NODE_EXTRA_CA_CERTS_PATH}"
+  )
+fi
 
 # Only create values.yaml if it doesn't exist (preserve user customizations)
 if [[ ! -f "${VALUES_FILE}" ]]; then
@@ -416,11 +489,21 @@ log "NOTE: Wiring secret '${SECRET_NAME}' to chart via app-template.controllers.
 
 # Wire the secret using the chart's actual structure (app-template based)
 # The chart expects: app-template.controllers.main.containers.main.envFrom[0].secretRef.name
-helm upgrade --install openclaw openclaw/openclaw-helm \
+helm upgrade --install openclaw openclaw/openclaw \
   --namespace "${NAMESPACE}" \
   --version "${CHART_VERSION_OPENCLAW}" \
   --values "${VALUES_FILE}" \
   --set-string "app-template.controllers.main.containers.main.envFrom[0].secretRef.name=${SECRET_NAME}" \
+  --set-string "app-template.controllers.main.containers.main.env.NODE_PATH=${OTEL_RUNTIME_DIR}/node_modules" \
+  --set-string "app-template.controllers.main.containers.main.env.NODE_OPTIONS=--require @opentelemetry/auto-instrumentations-node/register --use-openssl-ca" \
+  --set-string "app-template.controllers.main.containers.main.env.OTEL_NODE_ENABLED_INSTRUMENTATIONS=http,undici" \
+  --set-string "app-template.controllers.main.containers.main.env.OTEL_EXPORTER_OTLP_ENDPOINT=${OTLP_ENDPOINT}" \
+  --set-string "app-template.controllers.main.containers.main.env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=${OTLP_TRACES_ENDPOINT}" \
+  --set-string "app-template.controllers.main.containers.main.env.OTEL_TRACES_EXPORTER=otlp" \
+  --set-string "app-template.controllers.main.containers.main.env.OTEL_METRICS_EXPORTER=none" \
+  --set-string "app-template.controllers.main.containers.main.env.OTEL_SERVICE_NAME=${OTEL_SERVICE_NAME}" \
+  --set-string "app-template.controllers.main.containers.main.env.OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf" \
+  "${HELM_CA_ARGS[@]}" \
   --wait \
   --timeout 5m || {
   cat << EOF
@@ -442,6 +525,55 @@ EOF
 }
 
 log "OpenClaw installed successfully!"
+
+OPENCLAW_POD_NAME="$(k -n "${NAMESPACE}" get pods -l app.kubernetes.io/instance=openclaw -o jsonpath='{.items[0].metadata.name}' 2> /dev/null || true)"
+[[ -n "${OPENCLAW_POD_NAME}" ]] || die "Unable to determine OpenClaw pod name for diagnostics plugin setup"
+
+log "Installing diagnostics-otel runtime dependencies into persistent volume (${OTEL_RUNTIME_DIR})"
+if ! k -n "${NAMESPACE}" exec -i "${OPENCLAW_POD_NAME}" -c main -- sh -s -- "${OTEL_RUNTIME_DIR}" << 'EOF'; then
+set -eu
+OTEL_RUNTIME_DIR="$1"
+export HOME=/tmp
+export NPM_CONFIG_CACHE=/tmp/.npm
+
+mkdir -p "${OTEL_RUNTIME_DIR}"
+cd "${OTEL_RUNTIME_DIR}"
+
+if [ ! -f package.json ]; then
+  npm init -y > /dev/null 2>&1
+fi
+
+missing="false"
+for pkg in \
+  @opentelemetry/api \
+  @opentelemetry/resources \
+  @opentelemetry/sdk-node \
+  @opentelemetry/sdk-logs \
+  @opentelemetry/auto-instrumentations-node \
+  @opentelemetry/exporter-trace-otlp-http \
+  @opentelemetry/exporter-logs-otlp-http; do
+  if ! node -e "require.resolve('${pkg}')" > /dev/null 2>&1; then
+    missing="true"
+    break
+  fi
+done
+
+if [[ "${missing}" == "true" ]]; then
+  npm install --no-audit --no-fund --silent \
+    @opentelemetry/api \
+    @opentelemetry/resources \
+    @opentelemetry/sdk-node \
+    @opentelemetry/sdk-logs \
+    @opentelemetry/auto-instrumentations-node \
+    @opentelemetry/exporter-trace-otlp-http \
+    @opentelemetry/exporter-logs-otlp-http > /dev/null 2>&1
+fi
+
+node -e "require.resolve('@opentelemetry/auto-instrumentations-node/register')" > /dev/null 2>&1
+EOF
+  log "WARNING: Failed to install diagnostics-otel runtime dependencies in '${OTEL_RUNTIME_DIR}'."
+  log "WARNING: OpenClaw will still run with eBPF monitoring, but plugin-based OTEL telemetry may be incomplete."
+fi
 
 # Dynamically determine OpenClaw service name
 OPENCLAW_SVC=$(k -n "${NAMESPACE}" get svc -l app.kubernetes.io/instance=openclaw -o jsonpath='{.items[0].metadata.name}' 2> /dev/null || echo "openclaw")
@@ -506,45 +638,33 @@ fi
 
 cat << EOF
 
-Network Monitoring Verification:
----------------------------------
+Network Monitoring Verification (Metoro):
+-----------------------------------------
 
 EOF
 
-# Dynamically determine Hubble relay service name
-HUBBLE_RELAY_SVC=$(k -n kube-system get svc -l k8s-app=hubble-relay -o jsonpath='{.items[0].metadata.name}' 2> /dev/null || echo "hubble-relay")
-
-# Dynamically determine Hubble UI service name
-HUBBLE_UI_SVC=$(k -n kube-system get svc -l k8s-app=hubble-ui -o jsonpath='{.items[0].metadata.name}' 2> /dev/null || echo "hubble-ui")
-
 cat << EOF
-1. View real-time network flows for OpenClaw:
-   kubectl -n kube-system port-forward svc/${HUBBLE_RELAY_SVC} 4245:80 &
-   hubble observe --namespace ${NAMESPACE}
+1. Confirm monitoring components are ready:
+  kubectl -n ${METORO_NAMESPACE} get pods
 
-2. View outbound connections from OpenClaw pods:
-   hubble observe --namespace ${NAMESPACE} --type trace --protocol tcp
+2. Check exporter ingestion endpoints and delivery status:
+  kubectl -n ${METORO_NAMESPACE} logs deployment/metoro-exporter --tail=100
 
-3. Monitor specific destination IPs/ports:
-   hubble observe --namespace ${NAMESPACE} --to-port 443
-   hubble observe --namespace ${NAMESPACE} --to-ip x.x.x.x
+3. Validate OpenClaw service discovery in collected telemetry:
+  kubectl -n ${METORO_NAMESPACE} logs deployment/metoro-exporter --tail=300 | grep -i openclaw
 
-4. View network flow summary:
-   hubble observe --namespace ${NAMESPACE} --last 100
+4. Verify node-level agent coverage:
+  kubectl -n ${METORO_NAMESPACE} get daemonset metoro-node-agent
 
-5. Access Hubble UI (web-based network monitoring):
-   kubectl -n kube-system port-forward svc/${HUBBLE_UI_SVC} 12000:80
-   Then open: http://localhost:12000
+5. Verify OpenClaw OTLP settings in pod environment:
+  kubectl -n ${NAMESPACE} exec deployment/openclaw -c main -- env | grep '^OTEL_'
 
-6. Query network events with filters:
-   # Show all HTTP requests
-   hubble observe --namespace ${NAMESPACE} --protocol http
-   
-   # Show dropped packets
-   hubble observe --namespace ${NAMESPACE} --verdict DROPPED
-   
-   # Show connections to external IPs
-   hubble observe --namespace ${NAMESPACE} --to-identity world
+6. Open the Metoro dashboard (cloud):
+  https://us-east.metoro.io
+
+OpenClaw OTEL environment configuration:
+- endpoint: ${OTLP_ENDPOINT}
+- service name: ${OTEL_SERVICE_NAME}
 
 Network monitoring logs include:
 - Source pod/workload
@@ -585,11 +705,11 @@ To retrieve credentials from the secret:
 Next steps:
 -----------
 1. Configure OpenClaw skills and tools
-2. Monitor network activity using Hubble commands above
+2. Monitor network activity in the Metoro dashboard and exporter logs above
 3. Set up alerts for unexpected outbound connections
-4. Review Hubble metrics in Prometheus/Grafana
+4. Add dashboards/alerts for OpenClaw egress behavior in Metoro
 
 For more information:
 - OpenClaw: https://openclaw.ai/
-- Hubble: https://docs.cilium.io/en/stable/gettingstarted/hubble/
+- Metoro: https://github.com/metoro-io/metoro
 EOF
