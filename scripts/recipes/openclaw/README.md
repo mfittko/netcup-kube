@@ -1,23 +1,36 @@
 # OpenClaw Recipe
 
-This recipe installs [OpenClaw](https://openclaw.ai/) with mandatory kernel-level network monitoring.
+This recipe installs [OpenClaw](https://openclaw.ai/) with mandatory kernel-level network monitoring via Metoro.
 
 ## Overview
 
-OpenClaw is an autonomous AI agent that can execute tools and make outbound calls. To ensure reliable visibility into its runtime behavior, this recipe enforces kernel-level network monitoring using Cilium Hubble (eBPF-based).
+OpenClaw can execute tools and make outbound calls. This recipe enforces kernel/eBPF telemetry by installing the Metoro exporter + node-agent stack and an in-cluster OTLP collector (`metoro-otel-collector`) alongside OpenClaw. Installation fails fast when monitoring prerequisites are missing.
+
+Collector routing defaults:
+- OTLP logs: `OpenClaw -> metoro-otel-collector -> metoro-exporter (/api/v1/custom/otel)`
+- OTLP traces: `OpenClaw -> metoro-otel-collector -> metoro-exporter (/api/v1/custom/otel)`
+- OTLP metrics are not exported by default.
+- Trace labels are enriched in collector for Metoro UI mapping:
+  - `client.service.name=/k8s/openclaw/openclaw`
+  - `server.service.name=<span.service.address|resource.service.address|span.server.address>`
+  - protocol/peer fallbacks for edge labels:
+    - `net.peer.name=<span.server.address>`
+    - `network.protocol.name=<span.url.scheme>`
+    - `http.scheme=<span.url.scheme>`
+    - `rpc.service=<server.service.name>` (fallback)
 
 ## Requirements
 
 - **Kubernetes**: >= 1.26
 - **Kernel**: >= 4.9 (for eBPF support)
-- **Pre-created Secret**: OpenClaw requires a Kubernetes Secret for credentials/API keys
+- **Pre-created Secret**: Kubernetes Secret for OpenClaw credentials
+- **Metoro Bearer Token**: `METORO_BEARER_TOKEN` (recommended) or `--metoro-token`
+- **OpenClaw OTLP endpoint**: Optional override via `OPENCLAW_OTLP_ENDPOINT` or `--otlp-endpoint` (default: `http://metoro-otel-collector.metoro.svc.cluster.local:4318`)
 - **Helm**: >= 3.0
 
 ## Installation
 
-### 1. Create a Secret for OpenClaw
-
-Before installation, create a Kubernetes Secret with your OpenClaw credentials:
+### 1. Create OpenClaw Secret
 
 ```bash
 kubectl create namespace openclaw
@@ -27,18 +40,10 @@ kubectl create secret generic openclaw-credentials \
   --namespace openclaw
 ```
 
-Or create from a file:
+### 2. Install OpenClaw + mandatory monitoring
 
 ```bash
-kubectl create secret generic openclaw-credentials \
-  --from-file=credentials.json=path/to/credentials.json \
-  --namespace openclaw
-```
-
-### 2. Install OpenClaw
-
-```bash
-netcup-kube install openclaw \
+METORO_BEARER_TOKEN=YOUR_TOKEN netcup-kube install openclaw \
   --secret openclaw-credentials \
   --namespace openclaw \
   --storage 10Gi
@@ -47,155 +52,143 @@ netcup-kube install openclaw \
 With Traefik Ingress:
 
 ```bash
-netcup-kube install openclaw \
+METORO_BEARER_TOKEN=YOUR_TOKEN netcup-kube install openclaw \
   --secret openclaw-credentials \
   --namespace openclaw \
   --host openclaw.example.com \
   --storage 10Gi
 ```
 
-## Network Monitoring
+## Monitoring Verification
 
-This recipe automatically installs and configures Cilium Hubble for kernel-level network monitoring. This is **mandatory** and cannot be disabled.
+After install, verify Metoro is collecting data:
 
-### What is Monitored
+```bash
+kubectl -n metoro get pods
+kubectl -n metoro get daemonset metoro-node-agent
+kubectl -n metoro logs deployment/metoro-exporter --tail=100
+kubectl -n metoro logs deployment/metoro-exporter --tail=300 | grep -i openclaw
+kubectl -n metoro get svc metoro-otel-collector
+```
 
-The monitoring provides complete visibility into:
+Verify OpenClaw OTEL env vars:
 
-- **Source**: Pod/workload making the connection
-- **Destination**: IP address or hostname
-- **Port & Protocol**: TCP/UDP port and protocol (HTTP, DNS, etc.)
-- **Timestamp**: When the connection occurred
-- **Verdict**: Whether connection was allowed or dropped
+```bash
+kubectl -n openclaw exec deployment/openclaw -c main -- env | grep '^OTEL_'
+```
 
-### Verification Commands
+## OpenClaw OTEL Environment Wiring
 
-After installation, verify network monitoring:
+This recipe does not mutate `openclaw.json` or enable OpenClaw plugins.
 
-1. **Determine Hubble relay service name dynamically:**
-   ```bash
-   HUBBLE_RELAY_SVC=$(kubectl -n kube-system get svc -l k8s-app=hubble-relay -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "hubble-relay")
-   echo "Hubble relay service: ${HUBBLE_RELAY_SVC}"
-   ```
+It wires OTEL environment variables on the OpenClaw pod:
 
-2. **Port-forward Hubble relay:**
-   ```bash
-   kubectl -n kube-system port-forward svc/${HUBBLE_RELAY_SVC} 4245:80 &
-   ```
+- `OTEL_EXPORTER_OTLP_ENDPOINT`
+- `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`
+- `OTEL_TRACES_EXPORTER=otlp`
+- `OTEL_METRICS_EXPORTER=none`
+- `OTEL_SERVICE_NAME`
+- `OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf`
+- `NODE_OPTIONS=--require @opentelemetry/auto-instrumentations-node/register --use-openssl-ca`
+- `OTEL_NODE_ENABLED_INSTRUMENTATIONS=http,undici`
+- Optional for custom HTTPS trust: `NODE_EXTRA_CA_CERTS=/etc/openclaw-ca/<key>`
 
-3. **View real-time flows:**
-   ```bash
-   hubble observe --namespace openclaw
-   ```
+### Optional: Custom CA for outbound HTTPS
 
-4. **Monitor outbound connections:**
-   ```bash
-   hubble observe --namespace openclaw --type trace --protocol tcp
-   ```
+If your environment uses TLS interception or private CAs, provide a Secret with the root CA and pass it to the recipe.
 
-4. **Filter by destination port:**
-   ```bash
-   hubble observe --namespace openclaw --to-port 443
-   ```
+```bash
+kubectl -n openclaw create secret generic openclaw-custom-ca \
+  --from-file=ca.crt=./your-root-ca.pem
 
-5. **View HTTP requests:**
-   ```bash
-   hubble observe --namespace openclaw --protocol http
-   ```
+METORO_BEARER_TOKEN=YOUR_TOKEN netcup-kube install openclaw \
+  --secret openclaw-credentials \
+  --namespace openclaw \
+  --ca-secret openclaw-custom-ca \
+  --ca-secret-key ca.crt
+```
 
-6. **Access Hubble UI:**
-   ```bash
-   # Determine Hubble UI service name dynamically
-   HUBBLE_UI_SVC=$(kubectl -n kube-system get svc -l k8s-app=hubble-ui -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "hubble-ui")
-   kubectl -n kube-system port-forward svc/${HUBBLE_UI_SVC} 12000:80
-   # Open http://localhost:12000
-   ```
+For Metoro's eBPF-based Kubernetes monitoring (as in the Metoro blog flow), this is optional telemetry enrichment and not required for kernel-level network visibility.
 
-### Why Kernel-Level Monitoring?
+If you explicitly want to use OpenClaw's `diagnostics-otel` plugin, apply this config yourself (image must include compiled plugin assets at `/app/extensions/diagnostics-otel/dist`):
 
-Application-level logs may not capture all network activity:
-- Tool executions may bypass app logging
-- Direct syscalls aren't visible at app layer
-- Compromised tools could suppress their own logs
+```json
+{
+  "plugins": {
+    "allow": ["diagnostics-otel"]
+  },
+  "diagnostics": {
+    "otel": {
+      "endpoint": "http://<metoro-otel-collector>:4318",
+      "logs": true
+    }
+  }
+}
+```
 
-Kernel/eBPF-level monitoring provides:
-- Complete visibility regardless of app behavior
-- Tamper-resistant audit trail
-- Real-time anomaly detection capability
+Metoro cloud dashboard:
+
+```text
+https://us-east.metoro.io
+```
+
+## What is Monitored
+
+- Source pod/workload
+- Destination IP or hostname
+- Protocol and destination port
+- Event timestamps
+- eBPF-level network telemetry for runtime traffic analysis
 
 ## Options
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--namespace` | Namespace to install into | `openclaw` |
+| `--namespace` | Namespace to install OpenClaw into | `openclaw` |
 | `--secret` | Name of pre-created Kubernetes Secret | **Required** |
+| `--metoro-token` | Metoro bearer token (prefer env var) | **Required** (unless `METORO_BEARER_TOKEN` set) |
+| `--metoro-namespace` | Namespace for Metoro components | `metoro` |
+| `--otlp-endpoint` | OpenClaw OTLP/HTTP endpoint override | `http://metoro-otel-collector.metoro.svc.cluster.local:4318` |
+| `--otel-service-name` | OTEL service name | `openclaw` |
+| `--ca-secret` | Optional Secret with custom root CA for outbound HTTPS | None |
+| `--ca-secret-key` | Key inside `--ca-secret` containing PEM cert | `ca.crt` |
 | `--host` | Create Traefik Ingress for this FQDN | None |
 | `--storage` | PVC size for OpenClaw state | `10Gi` |
-| `--uninstall` | Uninstall OpenClaw and monitoring | N/A |
+| `--uninstall` | Uninstall OpenClaw, Metoro exporter, and OTLP collector resources | N/A |
 
 ## Uninstallation
 
-To uninstall OpenClaw and its network monitoring:
-
 ```bash
-netcup-kube install openclaw --uninstall --namespace openclaw
+netcup-kube install openclaw --uninstall --namespace openclaw --metoro-namespace metoro
 ```
 
 Note: PVCs may remain depending on storage class reclaim policy.
 
 ## Troubleshooting
 
-### Installation Failures
+If monitoring install fails:
 
-If installation fails with monitoring errors:
+```bash
+kubectl -n metoro get pods
+kubectl -n metoro describe pods
+kubectl -n metoro logs deployment/metoro-exporter
+kubectl describe nodes
+```
 
-1. **Check kernel version:**
-   ```bash
-   uname -r
-   # Must be >= 4.9
-   ```
+If OpenClaw service checks fail, verify service name in the namespace:
 
-2. **Verify eBPF support:**
-   ```bash
-   mount | grep bpf
-   # Should show bpf filesystem
-   ```
+```bash
+kubectl -n openclaw get svc
+```
 
-3. **Check Cilium status:**
-   ```bash
-   kubectl -n kube-system get pods -l k8s-app=cilium
-   ```
+## Security Notes
 
-### Monitoring Not Working
-
-If network flows aren't visible:
-
-1. **Check Hubble relay:**
-   ```bash
-   kubectl -n kube-system get pods -l k8s-app=hubble-relay
-   ```
-
-2. **Review logs:**
-   ```bash
-   kubectl -n kube-system logs -l k8s-app=hubble-relay
-   ```
-
-3. **Verify Hubble is enabled:**
-   ```bash
-   kubectl -n kube-system get cm cilium-config -o yaml | grep -i hubble
-   ```
-
-## Security Considerations
-
-- Never pass secrets via CLI arguments
-- Always use pre-created Kubernetes Secrets
-- Review network monitoring logs regularly
-- Set up alerts for unexpected outbound connections
-- Consider network policies to restrict egress
+- Prefer `METORO_BEARER_TOKEN` env var instead of passing token via CLI args
+- Keep OpenClaw credentials in Kubernetes Secrets
+- Review outbound telemetry regularly for unexpected destinations
 
 ## References
 
 - OpenClaw: https://openclaw.ai/
-- Helm Chart: https://github.com/serhanekicii/openclaw-helm
-- Cilium: https://cilium.io/
-- Hubble: https://docs.cilium.io/en/stable/gettingstarted/hubble/
+- OpenClaw Helm chart: https://github.com/serhanekicii/openclaw-helm
+- Metoro chart repo: https://metoro-io.github.io/metoro-helm-charts/
