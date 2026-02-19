@@ -187,8 +187,15 @@ kubectl -n openclaw get svc
 - Keep OpenClaw credentials in Kubernetes Secrets
 - Review outbound telemetry regularly for unexpected destinations
 
+## Credits
+
+- Thanks to Chris Batterbee for OpenClaw Helm chart work and Kubernetes packaging references.
+- Metoro OpenClaw Kubernetes guide: https://metoro.io/blog/openclaw-kubernetes
+
 ## References
 
 - OpenClaw: https://openclaw.ai/
 - OpenClaw Helm chart: https://github.com/serhanekicii/openclaw-helm
+- Chris Batterbee OpenClaw Helm chart: https://github.com/chrisbattarbee/openclaw-helm
 - Metoro chart repo: https://metoro-io.github.io/metoro-helm-charts/
+- Metoro blog article: https://metoro.io/blog/openclaw-kubernetes
