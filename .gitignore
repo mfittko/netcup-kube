@@ -20,6 +20,9 @@ config/k3s.yaml
 
 # Go build artifacts
 bin/netcup-kube
+bin/netcup-claw
+/netcup-kube
+/netcup-claw
 
 # Go test coverage
 *.out
@@ -27,6 +30,15 @@ coverage.html
 
 # temp
 tmp/
+
+# local OpenClaw agent workspace snapshots
+scripts/recipes/openclaw/agent-workspace/backup/
+
+# local OpenClaw approvals snapshots
+scripts/recipes/openclaw/approvals/backup/
+
+# local OpenClaw config snapshots
+scripts/recipes/openclaw/config/backup/
 
 # cache
 .gocache

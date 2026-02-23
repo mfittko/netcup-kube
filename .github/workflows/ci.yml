@@ -30,6 +30,7 @@ jobs:
       - name: Build CLI
         run: |
           go build -v ./cmd/netcup-kube
+          go build -v ./cmd/netcup-claw
       - name: Run Go tests
         run: |
           go test -v -race -coverprofile=coverage.out ./internal/...
