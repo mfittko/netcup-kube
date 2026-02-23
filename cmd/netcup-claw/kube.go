@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 )
 
 // probeKubeAPI checks if the local Kubernetes API is reachable by running
@@ -26,4 +28,16 @@ func runKubectl(args ...string) error {
 		return fmt.Errorf("kubectl error: %w", err)
 	}
 	return nil
+}
+
+// runKubectlOutput runs kubectl and returns combined output bytes.
+func runKubectlOutput(args ...string) ([]byte, error) {
+	cmd := exec.Command("kubectl", args...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("kubectl error: %w (stderr: %s)", err, strings.TrimSpace(stderr.String()))
+	}
+	return out, nil
 }

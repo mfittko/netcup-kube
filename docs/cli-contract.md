@@ -82,6 +82,12 @@ netcup-kube install <recipe> [recipe-options]
 - `dashboard` — Install Kubernetes Dashboard (official web UI)
 - `openclaw` — Install OpenClaw with mandatory kernel-level network monitoring
 
+`openclaw` recipe config management:
+- `--config-file <path>` — Supply an OpenClaw JSON/JSON5 template from repo or local path.
+- `--config-mode <merge|overwrite>` — Control how the chart `init-config` container reconciles persisted `/home/node/.openclaw/openclaw.json`.
+- `--agent-workspace-dir <path>` — Supply agent workspace overrides/backup path (`agents/<agentId>/*.md`, `backup/`).
+- `--workspace-bootstrap-mode <overwrite|off>` — Control backup + override apply behavior for detected agent workspaces.
+
 **Common Options:**
 - `--help`, `-h` — Show recipe-specific help
 - `--host <fqdn>` — Create Traefik Ingress for this host (auto-adds to Caddy domains)

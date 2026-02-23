@@ -36,7 +36,11 @@ Collector routing defaults:
 kubectl create namespace openclaw
 
 kubectl create secret generic openclaw-credentials \
-  --from-literal=api-key=YOUR_API_KEY \
+  --from-literal=OPENCLAW_GATEWAY_TOKEN=YOUR_GATEWAY_TOKEN \
+  --from-literal=DISCORD_BOT_TOKEN=YOUR_DISCORD_BOT_TOKEN \
+  --from-literal=GITHUB_TOKEN=YOUR_GITHUB_TOKEN \
+  --from-literal=ANTHROPIC_API_KEY=YOUR_MODEL_API_KEY \
+  --from-literal=SAG_API_KEY=YOUR_SAG_API_KEY \
   --namespace openclaw
 ```
 
@@ -79,7 +83,42 @@ kubectl -n openclaw exec deployment/openclaw -c main -- env | grep '^OTEL_'
 
 ## OpenClaw OTEL Environment Wiring
 
-This recipe does not mutate `openclaw.json` or enable OpenClaw plugins.
+This recipe does not mutate `openclaw.json` ad-hoc at runtime; it manages config declaratively via Helm values and supports secret placeholder injection.
+
+## Repository-Managed `openclaw.json` + Secret Injection
+
+This recipe now manages OpenClaw config from the repository file:
+
+- `scripts/recipes/openclaw/openclaw.json`
+- `scripts/recipes/openclaw/agent-workspace/` (workspace markdown bootstrap templates)
+
+The file intentionally uses placeholders like `${OPENCLAW_GATEWAY_TOKEN}` and `${DISCORD_BOT_TOKEN}`.
+At runtime, these values come from the Kubernetes Secret wired via:
+
+- `app-template.controllers.main.containers.main.envFrom[0].secretRef.name`
+
+This keeps secrets out of git while making config declarative and reviewable.
+
+You can control reconciliation behavior with:
+
+- `--config-mode merge` (default): merge chart config into existing persisted `openclaw.json`
+- `--config-mode overwrite`: replace persisted `openclaw.json` with the repository-managed config each deploy
+
+You can also provide an alternate config file with:
+
+- `--config-file /path/to/openclaw.json`
+
+Agent workspace bootstrap supports two operations during install/upgrade:
+
+- Backup current in-cluster markdown files per agent into `scripts/recipes/openclaw/agent-workspace/backup/<agentId>/`.
+- Apply overrides from `scripts/recipes/openclaw/agent-workspace/agents/<agentId>/*.md` into each matching agent workspace.
+
+Bootstrap controls:
+
+- `--agent-workspace-dir /path/to/agent-workspace`
+- `--workspace-bootstrap-mode overwrite|off`
+
+The installer discovers runtime agents/workspaces via `openclaw agents list --json` and then writes files into each workspace.
 
 It wires OTEL environment variables on the OpenClaw pod:
 
@@ -152,6 +191,10 @@ https://us-east.metoro.io
 |--------|-------------|---------|
 | `--namespace` | Namespace to install OpenClaw into | `openclaw` |
 | `--secret` | Name of pre-created Kubernetes Secret | **Required** |
+| `--config-file` | Path to OpenClaw JSON/JSON5 config template | `scripts/recipes/openclaw/openclaw.json` |
+| `--config-mode` | OpenClaw config reconciliation mode (`merge` or `overwrite`) | `merge` |
+| `--agent-workspace-dir` | Path to agent overrides/backup tree (`agents/<id>/*.md`, `backup/`) | `scripts/recipes/openclaw/agent-workspace` |
+| `--workspace-bootstrap-mode` | Agent workspace bootstrap mode (`overwrite`, `off`) | `overwrite` |
 | `--metoro-token` | Metoro bearer token (prefer env var) | **Required** (unless `METORO_BEARER_TOKEN` set) |
 | `--metoro-namespace` | Namespace for Metoro components | `metoro` |
 | `--otlp-endpoint` | OpenClaw OTLP/HTTP endpoint override | `http://metoro-otel-collector.metoro.svc.cluster.local:4318` |

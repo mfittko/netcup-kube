@@ -20,6 +20,12 @@ Usage:
 Options:
   --namespace <name>   Namespace to install into (default: openclaw).
   --secret <name>      Name of pre-created Kubernetes Secret with OpenClaw credentials (required).
+  --config-file <path> Path to OpenClaw JSON/JSON5 config template (default: scripts/recipes/openclaw/openclaw.json).
+  --config-mode <mode> Config reconciliation mode: merge|overwrite (default: merge).
+  --agent-workspace-dir <path>
+                       Path to agent workspace templates/backup (default: scripts/recipes/openclaw/agent-workspace).
+  --workspace-bootstrap-mode <mode>
+                       Agent workspace bootstrap mode: overwrite|off (default: overwrite).
   --metoro-token <v>   Metoro bearer token (required; prefer METORO_BEARER_TOKEN env var).
   --metoro-namespace <name>
                        Namespace for Metoro exporter stack (default: metoro).
@@ -54,6 +60,10 @@ EOF
 
 NAMESPACE="${NAMESPACE_OPENCLAW}"
 SECRET_NAME=""
+OPENCLAW_CONFIG_FILE="${SCRIPT_DIR}/openclaw.json"
+OPENCLAW_CONFIG_MODE="${OPENCLAW_CONFIG_MODE:-merge}"
+AGENT_WORKSPACE_DIR="${OPENCLAW_AGENT_WORKSPACE_DIR:-${SCRIPT_DIR}/agent-workspace}"
+WORKSPACE_BOOTSTRAP_MODE="${OPENCLAW_WORKSPACE_BOOTSTRAP_MODE:-overwrite}"
 METORO_TOKEN="${METORO_BEARER_TOKEN:-}"
 METORO_NAMESPACE="${NAMESPACE_METORO:-metoro}"
 OTLP_ENDPOINT="${OPENCLAW_OTLP_ENDPOINT:-}"
@@ -66,6 +76,80 @@ CA_CERTS_MOUNT_DIR="/etc/openclaw-ca"
 HOST=""
 STORAGE="${DEFAULT_STORAGE_OPENCLAW}"
 UNINSTALL="false"
+
+bootstrap_openclaw_agent_workspace_markdown() {
+  local namespace="$1"
+  local pod_name="$2"
+  local bootstrap_dir="$3"
+  local mode="$4"
+
+  if [[ "${mode}" == "off" ]]; then
+    log "Skipping agent workspace markdown bootstrap (mode=off)"
+    return 0
+  fi
+
+  [[ -d "${bootstrap_dir}" ]] || die "Agent workspace template directory not found: ${bootstrap_dir}"
+
+  local agent_overrides_root="${bootstrap_dir}/agents"
+  local backup_root="${bootstrap_dir}/backup"
+  [[ -d "${agent_overrides_root}" ]] || die "Missing agent overrides directory: ${agent_overrides_root}"
+  run mkdir -p "${backup_root}"
+
+  local agent_rows=""
+  agent_rows="$(k -n "${namespace}" exec "${pod_name}" -c main -- sh -lc 'openclaw agents list --json | node -e '\''const fs=require("fs");const agents=JSON.parse(fs.readFileSync(0,"utf8"));for (const agent of agents) { if (agent && agent.id && agent.workspace) { process.stdout.write(agent.id + "\\t" + agent.workspace + "\\n"); } }'\''' 2> /dev/null || true)"
+  [[ -n "${agent_rows}" ]] || die "Failed to retrieve agent workspace paths via 'openclaw agents list --json'"
+
+  if [[ "${DRY_RUN:-false}" != "true" ]]; then
+    k -n "${namespace}" exec "${pod_name}" -c main -- sh -lc 'openclaw agents list --json' > "${backup_root}/agents.list.json"
+  fi
+
+  local backed_up=0
+  local applied=0
+  local agent_id=""
+  local workspace_dir=""
+
+  while IFS=$'\t' read -r agent_id workspace_dir; do
+    [[ -n "${agent_id}" ]] || continue
+    [[ -n "${workspace_dir}" ]] || continue
+
+    run k -n "${namespace}" exec "${pod_name}" -c main -- sh -lc "mkdir -p \"${workspace_dir}\""
+
+    local backup_dir="${backup_root}/${agent_id}"
+    run mkdir -p "${backup_dir}"
+
+    local existing_files=""
+    existing_files="$(k -n "${namespace}" exec "${pod_name}" -c main -- sh -lc "find \"${workspace_dir}\" -maxdepth 1 -type f -name '*.md' -printf '%f\\n' 2>/dev/null || true")"
+
+    local existing_name=""
+    while IFS= read -r existing_name; do
+      [[ -n "${existing_name}" ]] || continue
+      if [[ "${DRY_RUN:-false}" == "true" ]]; then
+        log "[DRY_RUN] would back up ${workspace_dir}/${existing_name} -> ${backup_dir}/${existing_name}"
+      else
+        k -n "${namespace}" exec "${pod_name}" -c main -- sh -lc "cat \"${workspace_dir}/${existing_name}\"" > "${backup_dir}/${existing_name}"
+      fi
+      backed_up=$((backed_up + 1))
+    done <<< "${existing_files}"
+
+    local agent_override_dir="${agent_overrides_root}/${agent_id}"
+    if [[ -d "${agent_override_dir}" ]]; then
+      local override_file=""
+      shopt -s nullglob
+      for override_file in "${agent_override_dir}"/*.md; do
+        local base_name="$(basename "${override_file}")"
+        local target_file="${workspace_dir}/${base_name}"
+        local target_tmp_file="${workspace_dir}/.${base_name}.bootstrap"
+
+        run k -n "${namespace}" cp "${override_file}" "${pod_name}:${target_tmp_file}" -c main
+        run k -n "${namespace}" exec "${pod_name}" -c main -- sh -lc "mv \"${target_tmp_file}\" \"${target_file}\" && chmod 0644 \"${target_file}\""
+        applied=$((applied + 1))
+      done
+      shopt -u nullglob
+    fi
+  done <<< "${agent_rows}"
+
+  log "Agent workspace bootstrap complete (mode=${mode}): backed_up=${backed_up}, overrides_applied=${applied}"
+}
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -82,6 +166,34 @@ while [[ $# -gt 0 ]]; do
       ;;
     --secret=*)
       SECRET_NAME="${1#*=}"
+      ;;
+    --config-file)
+      shift
+      OPENCLAW_CONFIG_FILE="${1:-}"
+      ;;
+    --config-file=*)
+      OPENCLAW_CONFIG_FILE="${1#*=}"
+      ;;
+    --config-mode)
+      shift
+      OPENCLAW_CONFIG_MODE="${1:-}"
+      ;;
+    --config-mode=*)
+      OPENCLAW_CONFIG_MODE="${1#*=}"
+      ;;
+    --agent-workspace-dir)
+      shift
+      AGENT_WORKSPACE_DIR="${1:-}"
+      ;;
+    --agent-workspace-dir=*)
+      AGENT_WORKSPACE_DIR="${1#*=}"
+      ;;
+    --workspace-bootstrap-mode)
+      shift
+      WORKSPACE_BOOTSTRAP_MODE="${1:-}"
+      ;;
+    --workspace-bootstrap-mode=*)
+      WORKSPACE_BOOTSTRAP_MODE="${1#*=}"
       ;;
     --metoro-token)
       shift
@@ -182,6 +294,14 @@ if [[ "${UNINSTALL}" == "true" ]]; then
 fi
 
 [[ -n "${SECRET_NAME}" ]] || die "Secret name is required. Use --secret to specify a pre-created Kubernetes Secret."
+[[ -n "${OPENCLAW_CONFIG_FILE}" ]] || die "OpenClaw config file is required."
+[[ -f "${OPENCLAW_CONFIG_FILE}" ]] || die "OpenClaw config file not found: ${OPENCLAW_CONFIG_FILE}"
+[[ "${OPENCLAW_CONFIG_MODE}" == "merge" || "${OPENCLAW_CONFIG_MODE}" == "overwrite" ]] || die "Invalid config mode '${OPENCLAW_CONFIG_MODE}'. Expected: merge or overwrite."
+[[ "${WORKSPACE_BOOTSTRAP_MODE}" == "overwrite" || "${WORKSPACE_BOOTSTRAP_MODE}" == "off" ]] || die "Invalid workspace bootstrap mode '${WORKSPACE_BOOTSTRAP_MODE}'. Expected: overwrite or off."
+if [[ "${WORKSPACE_BOOTSTRAP_MODE}" != "off" ]]; then
+  [[ -n "${AGENT_WORKSPACE_DIR}" ]] || die "Agent workspace directory is required unless --workspace-bootstrap-mode=off"
+  [[ -d "${AGENT_WORKSPACE_DIR}" ]] || die "Agent workspace directory not found: ${AGENT_WORKSPACE_DIR}"
+fi
 [[ -n "${METORO_NAMESPACE}" ]] || die "Metoro namespace is required"
 [[ -n "${METORO_TOKEN}" ]] || die "Metoro token is required. Set METORO_BEARER_TOKEN or pass --metoro-token."
 [[ -n "${OTEL_SERVICE_NAME}" ]] || die "OTEL service name is required"
@@ -265,7 +385,11 @@ The secret should contain the necessary API keys, tokens, or credentials.
 
 To create the secret, run:
   kubectl create secret generic ${SECRET_NAME} \\
-    --from-literal=api-key=YOUR_API_KEY \\
+    --from-literal=OPENCLAW_GATEWAY_TOKEN=YOUR_GATEWAY_TOKEN \\
+    --from-literal=DISCORD_BOT_TOKEN=YOUR_DISCORD_BOT_TOKEN \\
+    --from-literal=GITHUB_TOKEN=YOUR_GITHUB_TOKEN \\
+    --from-literal=ANTHROPIC_API_KEY=YOUR_MODEL_API_KEY \\
+    --from-literal=SAG_API_KEY=YOUR_SAG_API_KEY \\
     --namespace ${NAMESPACE}
 
 Or create from a file:
@@ -492,28 +616,37 @@ fi
 # Install/Upgrade OpenClaw
 log "Installing/Upgrading OpenClaw via Helm"
 log "NOTE: Wiring secret '${SECRET_NAME}' to chart via app-template.controllers.main.containers.main.envFrom"
+log "NOTE: Using managed OpenClaw config from: ${OPENCLAW_CONFIG_FILE} (mode: ${OPENCLAW_CONFIG_MODE})"
 
 # Wire the secret using the chart's actual structure (app-template based)
 # The chart expects: app-template.controllers.main.containers.main.envFrom[0].secretRef.name
-helm upgrade --install openclaw openclaw/openclaw \
-  --namespace "${NAMESPACE}" \
-  --version "${CHART_VERSION_OPENCLAW}" \
-  --values "${VALUES_FILE}" \
-  --values "${SKILLS_VALUES_FILE}" \
-  --set-string "app-template.controllers.main.containers.main.envFrom[0].secretRef.name=${SECRET_NAME}" \
-  --set-string "app-template.controllers.main.containers.main.env.PATH=${RUNTIME_BIN_DIR}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
-  --set-string "app-template.controllers.main.containers.main.env.NODE_PATH=${OTEL_RUNTIME_DIR}/node_modules" \
-  --set-string "app-template.controllers.main.containers.main.env.NODE_OPTIONS=--require @opentelemetry/auto-instrumentations-node/register --use-openssl-ca" \
-  --set-string "app-template.controllers.main.containers.main.env.OTEL_NODE_ENABLED_INSTRUMENTATIONS=http,undici" \
-  --set-string "app-template.controllers.main.containers.main.env.OTEL_EXPORTER_OTLP_ENDPOINT=${OTLP_ENDPOINT}" \
-  --set-string "app-template.controllers.main.containers.main.env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=${OTLP_TRACES_ENDPOINT}" \
-  --set-string "app-template.controllers.main.containers.main.env.OTEL_TRACES_EXPORTER=otlp" \
-  --set-string "app-template.controllers.main.containers.main.env.OTEL_METRICS_EXPORTER=none" \
-  --set-string "app-template.controllers.main.containers.main.env.OTEL_SERVICE_NAME=${OTEL_SERVICE_NAME}" \
-  --set-string "app-template.controllers.main.containers.main.env.OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf" \
-  "${HELM_CA_ARGS[@]}" \
-  --wait \
-  --timeout 5m || {
+HELM_OPENCLAW_ARGS=(
+  upgrade --install openclaw openclaw/openclaw
+  --namespace "${NAMESPACE}"
+  --version "${CHART_VERSION_OPENCLAW}"
+  --values "${VALUES_FILE}"
+  --values "${SKILLS_VALUES_FILE}"
+  --set-string "configMode=${OPENCLAW_CONFIG_MODE}"
+  --set-file "app-template.configMaps.config.data.openclaw\\.json=${OPENCLAW_CONFIG_FILE}"
+  --set-string "app-template.controllers.main.containers.main.envFrom[0].secretRef.name=${SECRET_NAME}"
+  --set-string "app-template.controllers.main.containers.main.env.PATH=${RUNTIME_BIN_DIR}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+  --set-string "app-template.controllers.main.containers.main.env.NODE_PATH=${OTEL_RUNTIME_DIR}/node_modules"
+  --set-string "app-template.controllers.main.containers.main.env.NODE_OPTIONS=--require @opentelemetry/auto-instrumentations-node/register --use-openssl-ca"
+  --set-string "app-template.controllers.main.containers.main.env.OTEL_EXPORTER_OTLP_ENDPOINT=${OTLP_ENDPOINT}"
+  --set-string "app-template.controllers.main.containers.main.env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=${OTLP_TRACES_ENDPOINT}"
+  --set-string "app-template.controllers.main.containers.main.env.OTEL_TRACES_EXPORTER=otlp"
+  --set-string "app-template.controllers.main.containers.main.env.OTEL_METRICS_EXPORTER=none"
+  --set-string "app-template.controllers.main.containers.main.env.OTEL_SERVICE_NAME=${OTEL_SERVICE_NAME}"
+  --set-string "app-template.controllers.main.containers.main.env.OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf"
+)
+
+if [[ ${#HELM_CA_ARGS[@]} -gt 0 ]]; then
+  HELM_OPENCLAW_ARGS+=("${HELM_CA_ARGS[@]}")
+fi
+
+HELM_OPENCLAW_ARGS+=(--wait --timeout 5m)
+
+helm "${HELM_OPENCLAW_ARGS[@]}" || {
   cat << EOF
 
 ERROR: Failed to install OpenClaw.
@@ -538,6 +671,7 @@ OPENCLAW_POD_NAME="$(k -n "${NAMESPACE}" get pods -l app.kubernetes.io/instance=
 [[ -n "${OPENCLAW_POD_NAME}" ]] || die "Unable to determine OpenClaw pod name for diagnostics plugin setup"
 
 openclaw_install_diagnostics_runtime_dependencies "${NAMESPACE}" "${OPENCLAW_POD_NAME}" "${OTEL_RUNTIME_DIR}"
+bootstrap_openclaw_agent_workspace_markdown "${NAMESPACE}" "${OPENCLAW_POD_NAME}" "${AGENT_WORKSPACE_DIR}" "${WORKSPACE_BOOTSTRAP_MODE}"
 
 # Dynamically determine OpenClaw service name
 OPENCLAW_SVC=$(k -n "${NAMESPACE}" get svc -l app.kubernetes.io/instance=openclaw -o jsonpath='{.items[0].metadata.name}' 2> /dev/null || echo "openclaw")

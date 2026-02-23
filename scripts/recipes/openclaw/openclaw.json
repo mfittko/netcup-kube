@@ -1,0 +1,199 @@
+{
+  "env": {
+    "shellEnv": {
+      "enabled": false
+    }
+  },
+  "diagnostics": {
+    "enabled": true,
+    "otel": {
+      "enabled": true,
+      "endpoint": "http://metoro-otel-collector.metoro.svc.cluster.local:4318",
+      "protocol": "http/protobuf",
+      "serviceName": "openclaw",
+      "traces": true,
+      "metrics": true,
+      "logs": true,
+      "sampleRate": 1,
+      "flushIntervalMs": 60000
+    }
+  },
+  "logging": {
+    "level": "info",
+    "consoleLevel": "info",
+    "consoleStyle": "compact",
+    "redactSensitive": "tools"
+  },
+  "browser": {
+    "enabled": true,
+    "defaultProfile": "default",
+    "profiles": {
+      "default": {
+        "cdpUrl": "http://localhost:9222",
+        "color": "#4285F4"
+      }
+    }
+  },
+  "auth": {
+    "profiles": {
+      "openai-codex:default": {
+        "provider": "openai-codex",
+        "mode": "oauth"
+      }
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": {
+        "primary": "openai-codex/gpt-5.2"
+      },
+      "models": {
+        "anthropic/claude-opus-4-6": {
+          "alias": "opus",
+          "params": {
+            "cacheRetention": "short"
+          }
+        },
+        "openai-codex/gpt-5.2": {},
+        "openai-codex/gpt-5.3-codex": {
+          "alias": "codex"
+        }
+      },
+      "workspace": "/home/node/.openclaw/workspace",
+      "userTimezone": "UTC",
+      "contextPruning": {
+        "mode": "cache-ttl",
+        "ttl": "1h"
+      },
+      "compaction": {
+        "mode": "safeguard"
+      },
+      "timeoutSeconds": 600,
+      "heartbeat": {
+        "every": "30m"
+      },
+      "maxConcurrent": 1
+    },
+    "list": [
+      {
+        "id": "main",
+        "default": true,
+        "identity": {
+          "name": "OpenClaw",
+          "emoji": "🦞"
+        }
+      },
+      {
+        "id": "coding",
+        "name": "Coding",
+        "workspace": "/home/node/.openclaw/workspace-coding",
+        "agentDir": "/home/node/.openclaw/agents/coding/agent",
+        "model": "openai-codex/gpt-5.3-codex",
+        "identity": {
+          "name": "Coding Agent",
+          "emoji": "🧠"
+        }
+      }
+    ]
+  },
+  "tools": {
+    "profile": "full",
+    "web": {
+      "search": {
+        "enabled": false
+      },
+      "fetch": {
+        "enabled": true
+      }
+    }
+  },
+  "commands": {
+    "native": "auto",
+    "nativeSkills": "auto"
+  },
+  "session": {
+    "scope": "per-sender",
+    "reset": {
+      "mode": "idle",
+      "idleMinutes": 60
+    },
+    "store": "/home/node/.openclaw/sessions"
+  },
+  "hooks": {
+    "internal": {
+      "enabled": true,
+      "entries": {
+        "session-memory": {
+          "enabled": true
+        },
+        "command-logger": {
+          "enabled": true
+        }
+      }
+    }
+  },
+  "channels": {
+    "discord": {
+      "enabled": true,
+      "token": "${DISCORD_BOT_TOKEN}",
+      "groupPolicy": "open",
+      "actions": {
+        "channels": true
+      },
+      "dmPolicy": "open",
+      "allowFrom": [
+        "*"
+      ],
+      "dm": {
+        "enabled": true
+      },
+      "guilds": {},
+      "accounts": {}
+    }
+  },
+  "gateway": {
+    "port": 18789,
+    "mode": "local",
+    "bind": "loopback",
+    "auth": {
+      "mode": "token",
+      "token": "${OPENCLAW_GATEWAY_TOKEN}"
+    },
+    "trustedProxies": [
+      "10.0.0.1"
+    ],
+    "tailscale": {
+      "mode": "off",
+      "resetOnExit": false
+    }
+  },
+  "skills": {
+    "install": {
+      "nodeManager": "pnpm"
+    },
+    "entries": {
+      "github": {
+        "enabled": true
+      },
+      "slack": {
+        "enabled": true
+      },
+      "sag": {
+        "enabled": false
+      }
+    }
+  },
+  "plugins": {
+    "allow": [
+      "discord"
+    ],
+    "entries": {
+      "diagnostics-otel": {
+        "enabled": false
+      },
+      "discord": {
+        "enabled": true
+      }
+    }
+  }
+}
