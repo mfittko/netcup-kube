@@ -2,33 +2,18 @@ package main
 
 import (
 	"fmt"
-	"net/http"
 	"os"
 	"os/exec"
-	"time"
 )
 
-// probeKubeAPI checks if the local Kubernetes API is reachable.
-// It reads KUBECONFIG (or uses the default) and tries to reach the API server.
+// probeKubeAPI checks if the local Kubernetes API is reachable by running
+// kubectl with a short request timeout. This is kubeconfig-aware and handles
+// TLS/auth automatically, avoiding false negatives from raw HTTP probes.
 func probeKubeAPI() bool {
-	// Quick HTTP probe to the kube API server configured in kubeconfig
-	// We use a short timeout to avoid blocking the UX.
-	client := &http.Client{Timeout: 2 * time.Second}
-	kubeHost := os.Getenv("KUBERNETES_SERVICE_HOST")
-	if kubeHost == "" {
-		kubeHost = "127.0.0.1"
-	}
-	kubePort := os.Getenv("KUBERNETES_SERVICE_PORT")
-	if kubePort == "" {
-		kubePort = "6443"
-	}
-	url := fmt.Sprintf("https://%s:%s/livez", kubeHost, kubePort)
-	resp, err := client.Get(url) //nolint:noctx
-	if err != nil {
-		return false
-	}
-	defer func() { _ = resp.Body.Close() }()
-	return resp.StatusCode < 500
+	cmd := exec.Command("kubectl", "--request-timeout=3s", "get", "--raw=/livez")
+	cmd.Stdout = nil
+	cmd.Stderr = nil
+	return cmd.Run() == nil
 }
 
 // runKubectl runs kubectl with the given arguments, connecting stdio

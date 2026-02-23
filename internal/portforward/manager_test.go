@@ -476,3 +476,59 @@ func TestTcpProbe_Failure(t *testing.T) {
 		t.Error("tcpProbe() = true for non-listening port, want false")
 	}
 }
+
+func TestReadLogTail_NonExistent(t *testing.T) {
+	result := readLogTail("/nonexistent/file.log", 1024)
+	if result != "" {
+		t.Errorf("readLogTail(nonexistent) = %q, want empty string", result)
+	}
+}
+
+func TestReadLogTail_ZeroMaxBytes(t *testing.T) {
+	result := readLogTail(filepath.Join(t.TempDir(), "anything.log"), 0)
+	if result != "" {
+		t.Errorf("readLogTail(maxBytes=0) = %q, want empty string", result)
+	}
+}
+
+func TestReadLogTail_Empty(t *testing.T) {
+	f, err := os.CreateTemp(t.TempDir(), "test-*.log")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = f.Close()
+
+	result := readLogTail(f.Name(), 1024)
+	if result != "" {
+		t.Errorf("readLogTail(empty file) = %q, want empty string", result)
+	}
+}
+
+func TestReadLogTail_ShortFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.log")
+	content := "hello world"
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	result := readLogTail(path, 1024)
+	if result != content {
+		t.Errorf("readLogTail(short) = %q, want %q", result, content)
+	}
+}
+
+func TestReadLogTail_Truncated(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.log")
+	content := "line1\nline2\nline3\nline4"
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Request only last 5 bytes
+	result := readLogTail(path, 5)
+	if len(result) > 5 {
+		t.Errorf("readLogTail(maxBytes=5) returned %d bytes, want <= 5", len(result))
+	}
+}

@@ -7,6 +7,7 @@ import (
 
 	"github.com/mfittko/netcup-kube/internal/openclaw"
 	"github.com/mfittko/netcup-kube/internal/portforward"
+	"github.com/mfittko/netcup-kube/internal/tunnel"
 	"github.com/spf13/cobra"
 )
 
@@ -17,6 +18,13 @@ var (
 	pfNamespace  string
 	pfLocalPort  string
 	pfRemotePort string
+
+	// Tunnel flags
+	tunHost       string
+	tunUser       string
+	tunLocalPort  string
+	tunRemoteHost string
+	tunRemotePort string
 )
 
 var rootCmd = &cobra.Command{
@@ -57,21 +65,43 @@ Steps:
   5. Validate local port readiness`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg := openclawConfig()
-		resolver := openclaw.New(cfg, nil)
 
-		// Resolve the service target
+		// Step 1: Probe kube API
+		if !probeKubeAPI() {
+			// Step 2: API unreachable – ensure SSH tunnel is running
+			tun := tunnelConfig()
+			if tun.Host == "" {
+				return fmt.Errorf("kube API is unreachable and no tunnel host configured (set TUNNEL_HOST or --tunnel-host)")
+			}
+
+			mgr := tunnel.New(tun.User, tun.Host, tun.LocalPort, tun.RemoteHost, tun.RemotePort)
+			if !mgr.IsRunning() {
+				fmt.Fprintf(os.Stderr, "kube API unreachable; starting SSH tunnel via %s@%s...\n", tun.User, tun.Host)
+				if err := mgr.Start(); err != nil {
+					return fmt.Errorf("failed to start SSH tunnel: %w", err)
+				}
+			}
+
+			// Re-probe after tunnel start
+			if !probeKubeAPI() {
+				return fmt.Errorf("kube API still unreachable after starting SSH tunnel; check tunnel config and kubeconfig")
+			}
+		}
+
+		// Step 3: Resolve service target
+		resolver := openclaw.New(cfg, nil)
 		svcTarget, err := resolver.ResolveService()
 		if err != nil {
 			return fmt.Errorf("failed to resolve OpenClaw service: %w", err)
 		}
 
+		// Step 4: Start port-forward (idempotent)
 		mgr := pfManager(cfg)
-
-		// Start (idempotent)
 		if err := mgr.Start(); err != nil {
 			return fmt.Errorf("failed to start port-forward: %w", err)
 		}
 
+		// Step 5: Report status and readiness
 		st := mgr.Status()
 		if st.State == portforward.StateRunning {
 			fmt.Printf("port-forward running: localhost:%s -> %s in namespace %s (pid %d)\n",
@@ -195,11 +225,26 @@ var statusCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg := openclawConfig()
 
-		// 1. Kubernetes API reachability
+		// 1. SSH Tunnel status
+		tun := tunnelConfig()
+		var tunnelRunning bool
+		if tun.Host != "" {
+			tunMgr := tunnel.New(tun.User, tun.Host, tun.LocalPort, tun.RemoteHost, tun.RemotePort)
+			tunnelRunning = tunMgr.IsRunning()
+			fmt.Printf("tunnel:       %s", boolStatus(tunnelRunning))
+			if tunnelRunning {
+				fmt.Printf(" (localhost:%s -> %s:%s via %s@%s)", tun.LocalPort, tun.RemoteHost, tun.RemotePort, tun.User, tun.Host)
+			}
+			fmt.Println()
+		} else {
+			fmt.Printf("tunnel:       unconfigured (set TUNNEL_HOST to enable)\n")
+		}
+
+		// 2. Kubernetes API reachability
 		apiReachable := probeKubeAPI()
 		fmt.Printf("kube-api:     %s\n", boolStatus(apiReachable))
 
-		// 2. Port-forward status
+		// 3. Port-forward status
 		mgr := pfManager(cfg)
 		pfStatus := mgr.Status()
 		fmt.Printf("port-forward: %s", pfStatus.State)
@@ -208,7 +253,7 @@ var statusCmd = &cobra.Command{
 		}
 		fmt.Println()
 
-		// 3. OpenClaw service resolution
+		// 4. OpenClaw service resolution
 		resolver := openclaw.New(cfg, nil)
 		svc, svcErr := resolver.ResolveService()
 		if svcErr != nil {
@@ -224,8 +269,9 @@ var statusCmd = &cobra.Command{
 			fmt.Printf("pod:          found\n")
 		}
 
-		// Overall health
-		healthy := apiReachable && pfStatus.State == portforward.StateRunning && svcErr == nil && podErr == nil
+		// Overall health: API reachable (directly or via tunnel) + pf running + svc + pod resolved
+		apiOrTunnel := apiReachable || tunnelRunning
+		healthy := apiOrTunnel && pfStatus.State == portforward.StateRunning && svcErr == nil && podErr == nil
 		fmt.Printf("healthy:      %s\n", boolStatus(healthy))
 
 		if !healthy {
@@ -240,6 +286,13 @@ func init() {
 	portForwardCmd.PersistentFlags().StringVarP(&pfNamespace, "namespace", "n", "", "Kubernetes namespace (default: openclaw)")
 	portForwardCmd.PersistentFlags().StringVar(&pfLocalPort, "local-port", "", "Local port (default: 18789)")
 	portForwardCmd.PersistentFlags().StringVar(&pfRemotePort, "remote-port", "", "Remote port (default: 18789)")
+
+	// Tunnel flags (global; used by port-forward start and status)
+	rootCmd.PersistentFlags().StringVar(&tunHost, "tunnel-host", "", "SSH tunnel host (default: $TUNNEL_HOST or $MGMT_HOST)")
+	rootCmd.PersistentFlags().StringVar(&tunUser, "tunnel-user", "", "SSH tunnel user (default: $TUNNEL_USER or ops)")
+	rootCmd.PersistentFlags().StringVar(&tunLocalPort, "tunnel-local-port", "", "SSH tunnel local port (default: $TUNNEL_LOCAL_PORT or 6443)")
+	rootCmd.PersistentFlags().StringVar(&tunRemoteHost, "tunnel-remote-host", "", "SSH tunnel remote host (default: $TUNNEL_REMOTE_HOST or 127.0.0.1)")
+	rootCmd.PersistentFlags().StringVar(&tunRemotePort, "tunnel-remote-port", "", "SSH tunnel remote port (default: $TUNNEL_REMOTE_PORT or 6443)")
 
 	portForwardCmd.AddCommand(portForwardStartCmd)
 	portForwardCmd.AddCommand(portForwardStopCmd)
@@ -270,6 +323,74 @@ func openclawConfig() openclaw.Config {
 		cfg.RemotePort = rp
 	}
 	return cfg
+}
+
+// tunnelParams holds SSH tunnel connection parameters
+type tunnelParams struct {
+	Host       string
+	User       string
+	LocalPort  string
+	RemoteHost string
+	RemotePort string
+}
+
+// tunnelConfig builds tunnel connection parameters from flags and environment.
+// Mirrors the precedence used by netcup-kube ssh tunnel.
+func tunnelConfig() tunnelParams {
+	p := tunnelParams{}
+
+	// Host
+	p.Host = tunHost
+	if p.Host == "" {
+		p.Host = os.Getenv("TUNNEL_HOST")
+	}
+	if p.Host == "" {
+		p.Host = os.Getenv("MGMT_HOST")
+	}
+	if p.Host == "" {
+		p.Host = os.Getenv("MGMT_IP")
+	}
+
+	// User
+	p.User = tunUser
+	if p.User == "" {
+		p.User = os.Getenv("TUNNEL_USER")
+	}
+	if p.User == "" {
+		p.User = os.Getenv("MGMT_USER")
+	}
+	if p.User == "" {
+		p.User = "ops"
+	}
+
+	// Local port
+	p.LocalPort = tunLocalPort
+	if p.LocalPort == "" {
+		p.LocalPort = os.Getenv("TUNNEL_LOCAL_PORT")
+	}
+	if p.LocalPort == "" {
+		p.LocalPort = "6443"
+	}
+
+	// Remote host
+	p.RemoteHost = tunRemoteHost
+	if p.RemoteHost == "" {
+		p.RemoteHost = os.Getenv("TUNNEL_REMOTE_HOST")
+	}
+	if p.RemoteHost == "" {
+		p.RemoteHost = "127.0.0.1"
+	}
+
+	// Remote port
+	p.RemotePort = tunRemotePort
+	if p.RemotePort == "" {
+		p.RemotePort = os.Getenv("TUNNEL_REMOTE_PORT")
+	}
+	if p.RemotePort == "" {
+		p.RemotePort = "6443"
+	}
+
+	return p
 }
 
 // pfManager creates a port-forward Manager from the openclaw config
