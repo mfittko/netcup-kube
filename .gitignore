@@ -21,6 +21,8 @@ config/k3s.yaml
 # Go build artifacts
 bin/netcup-kube
 bin/netcup-claw
+netcup-kube
+netcup-claw
 
 # Go test coverage
 *.out
