@@ -20,12 +20,20 @@ Usage:
 Options:
   --namespace <name>   Namespace to install into (default: openclaw).
   --secret <name>      Name of pre-created Kubernetes Secret with OpenClaw credentials (required).
+  --host <fqdn>        Create a Traefik Ingress for this host (entrypoint: web).
+  --storage <size>     PVC size for OpenClaw state (default: 10Gi).
+  --uninstall          Uninstall OpenClaw and monitoring components.
+  -h, --help           Show this help.
+
+OpenClaw Config & Agent Workspace:
   --config-file <path> Path to OpenClaw JSON/JSON5 config template (default: scripts/recipes/openclaw/openclaw.json).
   --config-mode <mode> Config reconciliation mode: merge|overwrite (default: merge).
   --agent-workspace-dir <path>
                        Path to agent workspace templates/backup (default: scripts/recipes/openclaw/agent-workspace).
   --workspace-bootstrap-mode <mode>
                        Agent workspace bootstrap mode: overwrite|off (default: overwrite).
+
+Monitoring (Metoro):
   --metoro-token <v>   Metoro bearer token (required; prefer METORO_BEARER_TOKEN env var).
   --metoro-namespace <name>
                        Namespace for Metoro exporter stack (default: metoro).
@@ -33,15 +41,16 @@ Options:
                        OTLP/HTTP endpoint for OpenClaw diagnostics plugin (default: in-cluster metoro-otel-collector).
   --otel-service-name <name>
                        OTEL service name for OpenClaw telemetry (default: openclaw).
+
+TLS / CA:
   --ca-secret <name>   Optional Secret name with custom root CA for outbound HTTPS trust.
   --ca-secret-key <k>  Key in --ca-secret containing the PEM cert (default: ca.crt).
-  --host <fqdn>        Create a Traefik Ingress for this host (entrypoint: web).
-  --storage <size>     PVC size for OpenClaw state (default: 10Gi).
-  --uninstall          Uninstall OpenClaw and monitoring components.
-  -h, --help           Show this help.
 
 Environment:
   KUBECONFIG           Kubeconfig to use. If not set, defaults to /etc/rancher/k3s/k3s.yaml (on the node).
+  OPENCLAW_CONFIG_MODE        Config reconciliation mode (default: merge).
+  OPENCLAW_AGENT_WORKSPACE_DIR Path to agent workspace dir.
+  OPENCLAW_WORKSPACE_BOOTSTRAP_MODE Agent workspace bootstrap mode (default: overwrite).
 
 Requirements:
   - Kubernetes >= 1.26
