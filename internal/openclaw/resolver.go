@@ -110,7 +110,7 @@ func (r *Resolver) Config() Config {
 	return r.cfg
 }
 
-// PortForwardTarget returns the port-forward target string (namespace/service:port)
+// PortForwardTarget returns the port-forward target string (service:port)
 func (r *Resolver) PortForwardTarget(svcTarget string) string {
 	return fmt.Sprintf("%s:%s", svcTarget, r.cfg.RemotePort)
 }

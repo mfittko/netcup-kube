@@ -50,8 +50,8 @@ type Manager struct {
 	// stateDir is the directory for PID/log/state files. Defaults to /tmp.
 	stateDir string
 
-	// execFunc allows injection for testing
-	execFunc StartFunc
+	// startFunc allows injection for testing
+	startFunc StartFunc
 
 	// processChecker allows injection for testing
 	processChecker ProcessChecker
@@ -77,7 +77,7 @@ func WithStateDir(dir string) Option {
 // WithStartFunc sets a custom start function (for testing)
 func WithStartFunc(fn StartFunc) Option {
 	return func(m *Manager) {
-		m.execFunc = fn
+		m.startFunc = fn
 	}
 }
 
@@ -96,7 +96,7 @@ func New(namespace, target, localPort, remotePort string, opts ...Option) *Manag
 		LocalPort:      localPort,
 		RemotePort:     remotePort,
 		stateDir:       defaultStateDir(),
-		execFunc:       defaultStartFunc,
+		startFunc:      defaultStartFunc,
 		processChecker: defaultProcessChecker,
 	}
 	for _, opt := range opts {
@@ -131,7 +131,7 @@ func (m *Manager) Start() error {
 	}
 
 	// Launch background process
-	pid, err := m.execFunc(m.Namespace, m.Target, m.LocalPort, m.RemotePort, logFile)
+	pid, err := m.startFunc(m.Namespace, m.Target, m.LocalPort, m.RemotePort, logFile)
 	if err != nil {
 		_ = m.writeState(&stateFile{State: StateFailed, LocalPort: m.LocalPort})
 		return fmt.Errorf("failed to start port-forward: %w", err)
@@ -144,6 +144,15 @@ func (m *Manager) Start() error {
 		LocalPort: m.LocalPort,
 		LogFile:   logFile,
 	}); err != nil {
+		if proc, findErr := os.FindProcess(pid); findErr == nil {
+			_ = proc.Kill()
+		}
+		_ = m.writeState(&stateFile{
+			State:     StateFailed,
+			PID:       pid,
+			LocalPort: m.LocalPort,
+			LogFile:   logFile,
+		})
 		return fmt.Errorf("failed to write state: %w", err)
 	}
 
@@ -155,11 +164,11 @@ func (m *Manager) Start() error {
 			LocalPort: m.LocalPort,
 			LogFile:   logFile,
 		})
-		logTail := readLogTail(logFile, 2048)
+		logTail := strings.TrimSpace(readLogTail(logFile, 2048))
 		if logTail != "" {
-			return fmt.Errorf("port-forward process exited immediately (pid %d): %s", pid, logTail)
+			return fmt.Errorf("port-forward process exited immediately (pid %d); see log file %s for details: %s", pid, logFile, logTail)
 		}
-		return fmt.Errorf("port-forward process exited immediately (pid %d)", pid)
+		return fmt.Errorf("port-forward process exited immediately (pid %d); check that kubectl is installed and in PATH, verify target %s in namespace %s, and inspect log file %s for more details", pid, m.Target, m.Namespace, logFile)
 	}
 
 	return nil
@@ -183,8 +192,18 @@ func (m *Manager) Stop() error {
 		}
 	}
 
-	if err := m.writeState(&stateFile{State: StateStopped, LocalPort: m.LocalPort}); err != nil {
-		return fmt.Errorf("failed to write state: %w", err)
+	var writeErr error
+	for i := 0; i < 3; i++ {
+		if err := m.writeState(&stateFile{State: StateStopped, LocalPort: m.LocalPort}); err == nil {
+			writeErr = nil
+			break
+		} else {
+			writeErr = err
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
+	if writeErr != nil {
+		return fmt.Errorf("failed to write state: %w", writeErr)
 	}
 
 	return nil
@@ -292,11 +311,23 @@ func defaultStateDir() string {
 // Returns nil when the port is accepting connections within the deadline.
 func ReadinessCheck(localPort string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
+	for {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			break
+		}
+
 		if isPortListening(localPort) {
 			return nil
 		}
-		time.Sleep(200 * time.Millisecond)
+
+		sleepDuration := 200 * time.Millisecond
+		if remaining < sleepDuration {
+			sleepDuration = remaining
+		}
+		if sleepDuration > 0 {
+			time.Sleep(sleepDuration)
+		}
 	}
 	return fmt.Errorf("port-forward on :%s not ready after %s", localPort, timeout)
 }

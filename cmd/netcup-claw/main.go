@@ -122,7 +122,7 @@ Steps:
 		}
 
 		// Step 4: Start port-forward (idempotent)
-		mgr := pfManager(cfg)
+		mgr := pfManager(cfg, svcTarget)
 		if err := mgr.Start(); err != nil {
 			return fmt.Errorf("failed to start port-forward: %w", err)
 		}
@@ -150,7 +150,7 @@ var portForwardStopCmd = &cobra.Command{
 	Short: "Stop background port-forward",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg := openclawConfig()
-		mgr := pfManager(cfg)
+		mgr := pfManager(cfg, "")
 
 		if err := mgr.Stop(); err != nil {
 			return fmt.Errorf("failed to stop port-forward: %w", err)
@@ -166,7 +166,7 @@ var portForwardStatusCmd = &cobra.Command{
 	Short: "Show port-forward status",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg := openclawConfig()
-		mgr := pfManager(cfg)
+		mgr := pfManager(cfg, "")
 		st := mgr.Status()
 
 		fmt.Printf("state:      %s\n", st.State)
@@ -1220,7 +1220,7 @@ var statusCmd = &cobra.Command{
 		fmt.Printf("kube-api:     %s\n", boolStatus(apiReachable))
 
 		// 3. Port-forward status
-		mgr := pfManager(cfg)
+		mgr := pfManager(cfg, "")
 		pfStatus := mgr.Status()
 		fmt.Printf("port-forward: %s", pfStatus.State)
 		if pfStatus.PID > 0 {
@@ -1390,9 +1390,13 @@ func tunnelConfig() tunnelParams {
 	return p
 }
 
-// pfManager creates a port-forward Manager from the openclaw config
-func pfManager(cfg openclaw.Config) *portforward.Manager {
-	return portforward.New(cfg.Namespace, cfg.FallbackSvc, cfg.LocalPort, cfg.RemotePort)
+// pfManager creates a port-forward Manager from the openclaw config.
+// If target is empty, cfg.FallbackSvc is used.
+func pfManager(cfg openclaw.Config, target string) *portforward.Manager {
+	if strings.TrimSpace(target) == "" {
+		target = cfg.FallbackSvc
+	}
+	return portforward.New(cfg.Namespace, target, cfg.LocalPort, cfg.RemotePort)
 }
 
 // boolStatus returns "ok" or "not ok" for boolean health values
