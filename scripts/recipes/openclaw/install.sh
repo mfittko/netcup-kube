@@ -136,7 +136,8 @@ bootstrap_openclaw_agent_workspace_markdown() {
       local override_file=""
       shopt -s nullglob
       for override_file in "${agent_override_dir}"/*.md; do
-        local base_name="$(basename "${override_file}")"
+        local base_name=""
+        base_name="$(basename "${override_file}")"
         local target_file="${workspace_dir}/${base_name}"
         local target_tmp_file="${workspace_dir}/.${base_name}.bootstrap"
 
