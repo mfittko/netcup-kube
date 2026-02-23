@@ -5,6 +5,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -13,6 +14,7 @@ import (
 func newTestManager(t *testing.T, startFn StartFunc, checker ProcessChecker) *Manager {
 	t.Helper()
 	dir := t.TempDir()
+	localPort := freeLocalPort(t)
 	opts := []Option{WithStateDir(dir)}
 	if startFn != nil {
 		opts = append(opts, WithStartFunc(startFn))
@@ -20,7 +22,22 @@ func newTestManager(t *testing.T, startFn StartFunc, checker ProcessChecker) *Ma
 	if checker != nil {
 		opts = append(opts, WithProcessChecker(checker))
 	}
-	return New("openclaw", "svc/openclaw", "18789", "18789", opts...)
+	return New("openclaw", "svc/openclaw", localPort, "18789", opts...)
+}
+
+func freeLocalPort(t *testing.T) string {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to allocate free local port: %v", err)
+	}
+	defer func() { _ = ln.Close() }()
+
+	_, port, err := net.SplitHostPort(ln.Addr().String())
+	if err != nil {
+		t.Fatalf("SplitHostPort error: %v", err)
+	}
+	return port
 }
 
 func TestNew(t *testing.T) {
@@ -31,8 +48,8 @@ func TestNew(t *testing.T) {
 	if m.Namespace != "openclaw" {
 		t.Errorf("Namespace = %q, want %q", m.Namespace, "openclaw")
 	}
-	if m.LocalPort != "18789" {
-		t.Errorf("LocalPort = %q, want %q", m.LocalPort, "18789")
+	if m.LocalPort == "" {
+		t.Errorf("LocalPort = %q, want non-empty", m.LocalPort)
 	}
 }
 
@@ -106,6 +123,72 @@ func TestStart_Failure(t *testing.T) {
 	st := m.Status()
 	if st.State != StateFailed {
 		t.Errorf("State = %q after failure, want %q", st.State, StateFailed)
+	}
+}
+
+func TestStart_PortAlreadyInUse(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Skipf("Cannot bind listener: %v", err)
+	}
+	defer func() { _ = ln.Close() }()
+
+	_, port, err := net.SplitHostPort(ln.Addr().String())
+	if err != nil {
+		t.Fatalf("SplitHostPort error: %v", err)
+	}
+
+	startCount := 0
+	startFn := func(namespace, target, localPort, remotePort, logFile string) (int, error) {
+		startCount++
+		return 1234, nil
+	}
+
+	m := New("openclaw", "svc/openclaw", port, "18789",
+		WithStateDir(t.TempDir()),
+		WithStartFunc(startFn),
+	)
+
+	err = m.Start()
+	if err == nil {
+		t.Fatal("Start() expected error when local port is already in use, got nil")
+	}
+	if !strings.Contains(err.Error(), "already in use") {
+		t.Fatalf("Start() error = %v, want message containing 'already in use'", err)
+	}
+	if startCount != 0 {
+		t.Fatalf("start function called %d times, want 0", startCount)
+	}
+}
+
+func TestStart_ProcessExitsImmediately(t *testing.T) {
+	fakePID := 12345
+	startFn := func(namespace, target, localPort, remotePort, logFile string) (int, error) {
+		if writeErr := os.WriteFile(logFile, []byte("unable to listen on any of the requested ports"), 0600); writeErr != nil {
+			t.Fatalf("failed to write synthetic log: %v", writeErr)
+		}
+		return fakePID, nil
+	}
+	checker := func(pid int) bool { return false }
+
+	m := newTestManager(t, startFn, checker)
+	err := m.Start()
+	if err == nil {
+		t.Fatal("Start() expected error for immediately exited process, got nil")
+	}
+	if !strings.Contains(err.Error(), "exited immediately") {
+		t.Fatalf("Start() error = %v, want message containing 'exited immediately'", err)
+	}
+
+	st := m.Status()
+	if st.State != StateFailed {
+		t.Errorf("State = %q, want %q", st.State, StateFailed)
+	}
+	if st.PID != fakePID {
+		t.Errorf("PID = %d, want %d", st.PID, fakePID)
+	}
+	if st.LogFile == "" {
+		t.Error("LogFile is empty, want non-empty")
 	}
 }
 

@@ -116,6 +116,10 @@ func (m *Manager) Start() error {
 		}
 	}
 
+	if isPortListening(m.LocalPort) {
+		return fmt.Errorf("local port %s is already in use; stop the existing forward or use a different local port", m.LocalPort)
+	}
+
 	// Transition to starting
 	logFile := m.logFilePath()
 	if err := m.writeState(&stateFile{
@@ -141,6 +145,21 @@ func (m *Manager) Start() error {
 		LogFile:   logFile,
 	}); err != nil {
 		return fmt.Errorf("failed to write state: %w", err)
+	}
+
+	time.Sleep(200 * time.Millisecond)
+	if !m.processChecker(pid) {
+		_ = m.writeState(&stateFile{
+			State:     StateFailed,
+			PID:       pid,
+			LocalPort: m.LocalPort,
+			LogFile:   logFile,
+		})
+		logTail := readLogTail(logFile, 2048)
+		if logTail != "" {
+			return fmt.Errorf("port-forward process exited immediately (pid %d): %s", pid, logTail)
+		}
+		return fmt.Errorf("port-forward process exited immediately (pid %d)", pid)
 	}
 
 	return nil
@@ -182,8 +201,22 @@ func (m *Manager) Status() Status {
 	if st.State == StateRunning && st.PID > 0 {
 		if !m.processChecker(st.PID) {
 			// Process died; update state
-			_ = m.writeState(&stateFile{State: StateFailed, LocalPort: m.LocalPort})
-			return Status{State: StateFailed, LocalPort: m.LocalPort}
+			failed := &stateFile{
+				State:     StateFailed,
+				PID:       st.PID,
+				LocalPort: st.LocalPort,
+				LogFile:   st.LogFile,
+			}
+			if failed.LocalPort == "" {
+				failed.LocalPort = m.LocalPort
+			}
+			_ = m.writeState(failed)
+			return Status{
+				State:     StateFailed,
+				PID:       failed.PID,
+				LocalPort: failed.LocalPort,
+				LogFile:   failed.LogFile,
+			}
 		}
 	}
 
@@ -275,4 +308,21 @@ func isPortListening(port string) bool {
 		return false
 	}
 	return tcpProbe("127.0.0.1", port)
+}
+
+func readLogTail(path string, maxBytes int) string {
+	if maxBytes <= 0 {
+		return ""
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil || len(data) == 0 {
+		return ""
+	}
+
+	if len(data) > maxBytes {
+		data = data[len(data)-maxBytes:]
+	}
+
+	return strings.TrimSpace(string(data))
 }
