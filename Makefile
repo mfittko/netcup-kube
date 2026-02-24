@@ -12,6 +12,10 @@ BINARY_NAME := netcup-kube
 BINARY_PATH := bin/$(BINARY_NAME)
 GO_MAIN := ./cmd/$(BINARY_NAME)
 
+CLAW_BINARY_NAME := netcup-claw
+CLAW_BINARY_PATH := bin/$(CLAW_BINARY_NAME)
+CLAW_GO_MAIN := ./cmd/$(CLAW_BINARY_NAME)
+
 .PHONY: fmt fmt-check lint check test build build-go clean test-go go-deps
 
 fmt:
@@ -30,13 +34,15 @@ build: build-go
 
 build-go:
 	$(GO_BUILD) -o $(BINARY_PATH) $(GO_MAIN)
+	$(GO_BUILD) -o $(CLAW_BINARY_PATH) $(CLAW_GO_MAIN)
 
 build-linux:
 	GOOS=linux GOARCH=$(shell go env GOARCH) $(GO_BUILD) -o $(BINARY_PATH) $(GO_MAIN)
+	GOOS=linux GOARCH=$(shell go env GOARCH) $(GO_BUILD) -o $(CLAW_BINARY_PATH) $(CLAW_GO_MAIN)
 
 clean:
 	$(GO_CLEAN)
-	rm -f $(BINARY_PATH)
+	rm -f $(BINARY_PATH) $(CLAW_BINARY_PATH)
 
 test-go:
 	$(GO_TEST) -v ./...

@@ -1,0 +1,54 @@
+# OpenClaw chart-native skill/runtime values
+# This file configures init-skills with a declarative command block.
+
+app-template:
+  controllers:
+    main:
+      initContainers:
+        init-skills:
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              GH_VERSION="v2.68.1"
+              BIN_DIR="/home/node/.openclaw/bin"
+
+              mkdir -p "${BIN_DIR}"
+              if [ -x "${BIN_DIR}/gh" ]; then
+                "${BIN_DIR}/gh" --version > /dev/null 2>&1 && exit 0
+              fi
+
+              ARCH="$(uname -m)"
+              case "${ARCH}" in
+                x86_64|amd64)
+                  GH_ARCH="amd64"
+                  ;;
+                aarch64|arm64)
+                  GH_ARCH="arm64"
+                  ;;
+                *)
+                  echo "unsupported architecture: ${ARCH}" >&2
+                  exit 1
+                  ;;
+              esac
+
+              TARBALL="gh_${GH_VERSION#v}_linux_${GH_ARCH}.tar.gz"
+              URL="https://github.com/cli/cli/releases/download/${GH_VERSION}/${TARBALL}"
+              TMP_TARBALL="/tmp/${TARBALL}"
+              EXTRACT_DIR="/tmp/gh_${GH_VERSION#v}_linux_${GH_ARCH}"
+
+              if command -v curl > /dev/null 2>&1; then
+                curl -fsSL "${URL}" -o "${TMP_TARBALL}"
+              elif command -v wget > /dev/null 2>&1; then
+                wget -qO "${TMP_TARBALL}" "${URL}"
+              else
+                echo "neither curl nor wget available" >&2
+                exit 1
+              fi
+
+              tar -xzf "${TMP_TARBALL}" -C /tmp
+              cp "${EXTRACT_DIR}/bin/gh" "${BIN_DIR}/gh"
+              chmod 0755 "${BIN_DIR}/gh"
+              rm -f "${TMP_TARBALL}"
+              rm -rf "${EXTRACT_DIR}"

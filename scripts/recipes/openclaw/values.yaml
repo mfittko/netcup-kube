@@ -1,0 +1,24 @@
+# OpenClaw Helm values
+# NOTE: This file is auto-generated on first install. Customize as needed.
+# The file will be preserved across reinstalls.
+
+persistence:
+  enabled: true
+  size: 10Gi
+
+app-template:
+  controllers:
+    main:
+      containers:
+        main:
+          env:
+            PATH: /home/node/.openclaw/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+            NODE_PATH: /home/node/.openclaw/otel-runtime/node_modules
+            NODE_OPTIONS: --require @opentelemetry/auto-instrumentations-node/register --use-openssl-ca
+            OTEL_NODE_ENABLED_INSTRUMENTATIONS: http,undici
+            OTEL_METRICS_EXPORTER: none
+
+# Secret reference is passed via --set-string flag during Helm install using
+# the chart's app-template structure:
+# app-template.controllers.main.containers.main.envFrom[0].secretRef.name
+# This wires the pre-created secret 'openclaw-credentials' to the OpenClaw pod environment.

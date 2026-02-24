@@ -1,0 +1,95 @@
+{
+  "version": 1,
+  "defaults": {},
+  "agents": {
+    "main": {
+      "allowlist": [
+        {
+          "pattern": "/usr/bin/curl"
+        },
+        {
+          "pattern": "/home/node/.openclaw/bin/gh"
+        },
+        {
+          "pattern": "/usr/bin/ls"
+        },
+        {
+          "pattern": "/usr/bin/cat"
+        },
+        {
+          "pattern": "/usr/bin/grep"
+        },
+        {
+          "pattern": "/usr/bin/sed"
+        },
+        {
+          "pattern": "/usr/bin/awk"
+        },
+        {
+          "pattern": "/usr/bin/head"
+        },
+        {
+          "pattern": "/usr/bin/tail"
+        },
+        {
+          "pattern": "/usr/bin/find"
+        },
+        {
+          "pattern": "/usr/bin/cut"
+        },
+        {
+          "pattern": "/usr/bin/sort"
+        },
+        {
+          "pattern": "/usr/bin/uniq"
+        },
+        {
+          "pattern": "/usr/bin/wc"
+        },
+        {
+          "pattern": "/usr/bin/tr"
+        },
+        {
+          "pattern": "/usr/bin/xargs"
+        },
+        {
+          "pattern": "/usr/bin/git"
+        }
+      ]
+    },
+    "coding": {
+      "allowlist": [
+        {
+          "pattern": "/home/node/.openclaw/bin/gh"
+        },
+        {
+          "pattern": "/usr/bin/curl"
+        },
+        {
+          "pattern": "/usr/bin/ls"
+        },
+        {
+          "pattern": "/usr/bin/cat"
+        },
+        {
+          "pattern": "/usr/bin/grep"
+        },
+        {
+          "pattern": "/usr/bin/sed"
+        },
+        {
+          "pattern": "/usr/bin/awk"
+        },
+        {
+          "pattern": "/usr/bin/head"
+        },
+        {
+          "pattern": "/usr/bin/tail"
+        },
+        {
+          "pattern": "/usr/bin/find"
+        }
+      ]
+    }
+  }
+}
