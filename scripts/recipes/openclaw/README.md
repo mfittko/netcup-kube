@@ -6,6 +6,12 @@ This recipe installs [OpenClaw](https://openclaw.ai/) with mandatory kernel-leve
 
 OpenClaw can execute tools and make outbound calls. This recipe enforces kernel/eBPF telemetry by installing the Metoro exporter + node-agent stack and an in-cluster OTLP collector (`metoro-otel-collector`) alongside OpenClaw. Installation fails fast when monitoring prerequisites are missing.
 
+This setup is intentionally opinionated for this repository's default operating model:
+- Discord is enabled as the primary channel (`channels.discord.enabled=true`)
+- OpenAI Codex is the default model/auth profile (`openai-codex:*` in `openclaw.json`)
+
+If you run a different channel/provider stack, update `scripts/recipes/openclaw/openclaw.json` (or provide `--config-file`) before install.
+
 Collector routing defaults:
 - OTLP logs: `OpenClaw -> metoro-otel-collector -> metoro-exporter (/api/v1/custom/otel)`
 - OTLP traces: `OpenClaw -> metoro-otel-collector -> metoro-exporter (/api/v1/custom/otel)`
@@ -24,6 +30,7 @@ Collector routing defaults:
 - **Kubernetes**: >= 1.26
 - **Kernel**: >= 4.9 (for eBPF support)
 - **Pre-created Secret**: Kubernetes Secret for OpenClaw credentials
+- **Discord token**: `DISCORD_BOT_TOKEN` is required by default config
 - **Metoro Bearer Token**: `METORO_BEARER_TOKEN` (recommended) or `--metoro-token`
 - **OpenClaw OTLP endpoint**: Optional override via `OPENCLAW_OTLP_ENDPOINT` or `--otlp-endpoint` (default: `http://metoro-otel-collector.metoro.svc.cluster.local:4318`)
 - **Helm**: >= 3.0
@@ -38,11 +45,14 @@ kubectl create namespace openclaw
 kubectl create secret generic openclaw-credentials \
   --from-literal=OPENCLAW_GATEWAY_TOKEN=YOUR_GATEWAY_TOKEN \
   --from-literal=DISCORD_BOT_TOKEN=YOUR_DISCORD_BOT_TOKEN \
+  --from-literal=OPENAI_API_KEY=YOUR_OPENAI_API_KEY \
   --from-literal=GITHUB_TOKEN=YOUR_GITHUB_TOKEN \
   --from-literal=ANTHROPIC_API_KEY=YOUR_MODEL_API_KEY \
   --from-literal=SAG_API_KEY=YOUR_SAG_API_KEY \
   --namespace openclaw
 ```
+
+Note: the default auth profile in `openclaw.json` is `openai-codex` with `mode: oauth`. `OPENAI_API_KEY` is optional unless you switch auth/provider settings to a key-based flow.
 
 ### 2. Install OpenClaw + mandatory monitoring
 
