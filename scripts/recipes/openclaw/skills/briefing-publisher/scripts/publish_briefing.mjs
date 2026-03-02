@@ -258,37 +258,129 @@ ${items}
 `;
 }
 
-async function getFileSha({ token, owner, repo, branch, filePath }) {
-  try {
-    const data = await githubRequest({
-      token,
-      method: 'GET',
-      urlPath: `/repos/${owner}/${repo}/contents/${encodeURIComponent(filePath).replace(/%2F/g, '/')}` + `?ref=${encodeURIComponent(branch)}`,
-    });
-    return data.sha || '';
-  } catch (error) {
-    if (error.status === 404) return '';
-    throw error;
-  }
+function branchRefPath(branch) {
+  return String(branch || '')
+    .split('/')
+    .map((part) => encodeURIComponent(part))
+    .join('/');
 }
 
-async function putFile({ token, owner, repo, branch, filePath, content, message }) {
-  const sha = await getFileSha({ token, owner, repo, branch, filePath });
-  const encoded = Buffer.from(content, 'utf8').toString('base64');
+async function getBranchHeadSha({ token, owner, repo, branch }) {
+  const data = await githubRequest({
+    token,
+    method: 'GET',
+    urlPath: `/repos/${owner}/${repo}/git/ref/heads/${branchRefPath(branch)}`,
+  });
+  const sha = data?.object?.sha;
+  if (!sha) throw new Error(`Unable to resolve branch head SHA for ${branch}`);
+  return sha;
+}
 
-  const body = {
-    message,
-    content: encoded,
-    branch,
-  };
-  if (sha) body.sha = sha;
-
+async function getCommit({ token, owner, repo, sha }) {
   return githubRequest({
     token,
-    method: 'PUT',
-    urlPath: `/repos/${owner}/${repo}/contents/${encodeURIComponent(filePath).replace(/%2F/g, '/')}`,
-    body,
+    method: 'GET',
+    urlPath: `/repos/${owner}/${repo}/git/commits/${encodeURIComponent(sha)}`,
   });
+}
+
+async function createBlob({ token, owner, repo, content }) {
+  return githubRequest({
+    token,
+    method: 'POST',
+    urlPath: `/repos/${owner}/${repo}/git/blobs`,
+    body: {
+      content,
+      encoding: 'utf-8',
+    },
+  });
+}
+
+async function createTree({ token, owner, repo, baseTreeSha, tree }) {
+  return githubRequest({
+    token,
+    method: 'POST',
+    urlPath: `/repos/${owner}/${repo}/git/trees`,
+    body: {
+      base_tree: baseTreeSha,
+      tree,
+    },
+  });
+}
+
+async function createCommit({ token, owner, repo, message, treeSha, parentSha }) {
+  return githubRequest({
+    token,
+    method: 'POST',
+    urlPath: `/repos/${owner}/${repo}/git/commits`,
+    body: {
+      message,
+      tree: treeSha,
+      parents: [parentSha],
+    },
+  });
+}
+
+async function updateBranchHead({ token, owner, repo, branch, sha }) {
+  return githubRequest({
+    token,
+    method: 'PATCH',
+    urlPath: `/repos/${owner}/${repo}/git/refs/heads/${branchRefPath(branch)}`,
+    body: {
+      sha,
+      force: false,
+    },
+  });
+}
+
+async function commitFilesBatch({ token, owner, repo, branch, message, files }) {
+  const headSha = await getBranchHeadSha({ token, owner, repo, branch });
+  const headCommit = await getCommit({ token, owner, repo, sha: headSha });
+  const baseTreeSha = headCommit?.tree?.sha;
+  if (!baseTreeSha) throw new Error('Unable to resolve base tree SHA');
+
+  const treeEntries = [];
+  for (const file of files) {
+    const blob = await createBlob({
+      token,
+      owner,
+      repo,
+      content: file.content,
+    });
+    treeEntries.push({
+      path: file.path,
+      mode: '100644',
+      type: 'blob',
+      sha: blob.sha,
+    });
+  }
+
+  const tree = await createTree({
+    token,
+    owner,
+    repo,
+    baseTreeSha,
+    tree: treeEntries,
+  });
+
+  const commit = await createCommit({
+    token,
+    owner,
+    repo,
+    message,
+    treeSha: tree.sha,
+    parentSha: headSha,
+  });
+
+  await updateBranchHead({
+    token,
+    owner,
+    repo,
+    branch,
+    sha: commit.sha,
+  });
+
+  return commit.sha;
 }
 
 function buildIndex({ series, entries, feedPath }) {
@@ -460,26 +552,6 @@ async function main() {
       throw new Error(`Missing token env. Set ${args.tokenEnv} (or BRIEFINGS_GH_TOKEN / GITHUB_TOKEN)`);
     }
 
-    await putFile({
-      token,
-      owner,
-      repo,
-      branch: args.branch,
-      filePath: paths.archivePath,
-      content: inputContent,
-      message: `publish: ${series} ${stamp}`,
-    });
-
-    await putFile({
-      token,
-      owner,
-      repo,
-      branch: args.branch,
-      filePath: paths.latestPath,
-      content: inputContent,
-      message: `update latest: ${series} ${stamp}`,
-    });
-
     const oldIndex = await getTextFile({
       token,
       owner,
@@ -489,15 +561,6 @@ async function main() {
     });
 
     const newIndex = updateIndexContent(oldIndex, paths.archiveRelativePath, stamp);
-    await putFile({
-      token,
-      owner,
-      repo,
-      branch: args.branch,
-      filePath: paths.indexPath,
-      content: newIndex,
-      message: `update index: ${series} ${stamp}`,
-    });
 
     const entries = parseIndexEntries(newIndex).map((entry) => {
       const mdPath = `${sitePath}/reports/${series}/${entry.link}`;
@@ -512,16 +575,6 @@ async function main() {
       homePath: `${base}/index.html`,
       latestViewPath: latestUrl,
       feedPath: `${base}/reports/${series}/feed.xml`,
-    });
-
-    await putFile({
-      token,
-      owner,
-      repo,
-      branch: args.branch,
-      filePath: paths.indexHtmlPath,
-      content: indexHtml,
-      message: `update index html: ${series} ${stamp}`,
     });
 
     const rssItems = parseIndexEntries(newIndex).slice(0, 100).map((entry) => {
@@ -544,16 +597,6 @@ async function main() {
       items: rssItems,
     });
 
-    await putFile({
-      token,
-      owner,
-      repo,
-      branch: args.branch,
-      filePath: paths.seriesFeedPath,
-      content: seriesFeed,
-      message: `update feed: ${series} ${stamp}`,
-    });
-
     const rootFeed = buildRssFeed({
       title: `${series} briefings`,
       description: `Automated ${series} briefing archive feed`,
@@ -562,14 +605,20 @@ async function main() {
       items: rssItems,
     });
 
-    await putFile({
+    const commitSha = await commitFilesBatch({
       token,
       owner,
       repo,
       branch: args.branch,
-      filePath: paths.rootFeedPath,
-      content: rootFeed,
-      message: `update root feed: ${series} ${stamp}`,
+      message: `publish: ${series} ${stamp}`,
+      files: [
+        { path: paths.archivePath, content: inputContent },
+        { path: paths.latestPath, content: inputContent },
+        { path: paths.indexPath, content: newIndex },
+        { path: paths.indexHtmlPath, content: indexHtml },
+        { path: paths.seriesFeedPath, content: seriesFeed },
+        { path: paths.rootFeedPath, content: rootFeed },
+      ],
     });
 
     console.log(
@@ -585,6 +634,7 @@ async function main() {
           indexPath: paths.indexPath,
           seriesFeedPath: paths.seriesFeedPath,
           rootFeedPath: paths.rootFeedPath,
+          commitSha,
           archiveUrl,
           latestUrl,
           seriesFeedUrl,
