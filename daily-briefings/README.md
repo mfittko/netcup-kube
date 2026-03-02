@@ -11,17 +11,6 @@ This repository is configured to publish from `docs/`.
 - Market feed: `/docs/reports/market/feed.xml`
 - Root feed: `/docs/feed.xml`
 
-## Report naming
-
-Use sortable UTC timestamps for report files:
-
-- `YYYY-MM-DDTHHMMSSZ.md`
-
-Examples:
-
-- `2026-03-02T214711Z.md`
-- `latest.md` (stable pointer to most recent report)
-
 ## Current publish outputs
 
 Each publish writes:
