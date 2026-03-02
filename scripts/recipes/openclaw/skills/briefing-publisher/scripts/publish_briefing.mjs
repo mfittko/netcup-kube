@@ -212,7 +212,7 @@ async function githubRequest({ token, method, urlPath, body }) {
   return data;
 }
 
-function buildSeriesIndexHtml({ title, entries, homePath, latestViewPath }) {
+function buildSeriesIndexHtml({ title, entries, homePath, latestViewPath, feedPath }) {
   const items = entries
     .map((entry) => `      <li><a href="${htmlEscape(entry.link)}">${htmlEscape(entry.label)}</a></li>`)
     .join('\n');
@@ -246,6 +246,8 @@ function buildSeriesIndexHtml({ title, entries, homePath, latestViewPath }) {
       <a href="${htmlEscape(homePath)}">Home</a>
       ·
       <a href="${htmlEscape(latestViewPath)}">Latest report</a>
+      ·
+      <a href="${htmlEscape(feedPath)}">RSS feed</a>
     </p>
     <h2>Entries</h2>
     <ul>
@@ -289,11 +291,15 @@ async function putFile({ token, owner, repo, branch, filePath, content, message 
   });
 }
 
-function buildIndex({ series, entries }) {
+function buildIndex({ series, entries, feedPath }) {
   const lines = [];
   lines.push(`# ${series}`);
   lines.push('');
   lines.push('Automated briefing archive.');
+  if (feedPath) {
+    lines.push('');
+    lines.push(`RSS feed: [feed.xml](${feedPath})`);
+  }
   lines.push('');
   lines.push('## Entries');
   lines.push('');
@@ -321,11 +327,13 @@ async function getTextFile({ token, owner, repo, branch, filePath }) {
 
 function updateIndexContent(oldContent, archiveRelativePath, stamp) {
   const entry = `- [${stamp}](${archiveRelativePath})`;
+  const feedPath = 'feed.xml';
 
   if (!oldContent.trim()) {
     return buildIndex({
       series: 'Briefings',
       entries: [{ label: stamp, link: archiveRelativePath }],
+      feedPath,
     });
   }
 
@@ -503,6 +511,7 @@ async function main() {
       entries,
       homePath: `${base}/index.html`,
       latestViewPath: latestUrl,
+      feedPath: `${base}/reports/${series}/feed.xml`,
     });
 
     await putFile({
