@@ -48,6 +48,7 @@ kubectl create secret generic openclaw-credentials \
   --from-literal=OPENAI_API_KEY=YOUR_OPENAI_API_KEY \
   --from-literal=GITHUB_TOKEN=YOUR_GITHUB_TOKEN \
   --from-literal=ANTHROPIC_API_KEY=YOUR_MODEL_API_KEY \
+  --from-literal=AISSTREAM_API_KEY=YOUR_AISSTREAM_API_KEY \
   --from-literal=SAG_API_KEY=YOUR_SAG_API_KEY \
   --namespace openclaw
 ```
@@ -58,20 +59,31 @@ Note: the default auth profile in `openclaw.json` is `openai-codex` with `mode: 
 
 ```bash
 METORO_BEARER_TOKEN=YOUR_TOKEN netcup-kube install openclaw \
-  --secret openclaw-credentials \
   --namespace openclaw \
   --storage 10Gi
 ```
+
+By default, the recipe uses secret name `openclaw-credentials`. Use `--secret` (or `OPENCLAW_SECRET_NAME`) only if you use a custom secret name.
 
 With Traefik Ingress:
 
 ```bash
 METORO_BEARER_TOKEN=YOUR_TOKEN netcup-kube install openclaw \
-  --secret openclaw-credentials \
   --namespace openclaw \
   --host openclaw.example.com \
   --storage 10Gi
 ```
+
+This host is used for both OpenClaw UI/API and gateway/webhooks by default.
+
+Notes:
+- `--host` routes to OpenClaw gateway service port `18789`.
+- The recipe auto-adds used hostnames to Caddy edge-http domains when possible.
+- You still need a public DNS `A`/`AAAA` record for the host(s) pointing to your edge node.
+- You can set defaults in `config/netcup-kube.env` via `OPENCLAW_HOST` (CLI flags override env).
+- If `CHART_VERSION_OPENCLAW=latest` is set in `scripts/recipes/recipes.conf` (or env), installer resolves the newest chart version each run.
+- Public access is expected via `https://...` (TLS terminated at the edge/Caddy setup used by this repo).
+- The upstream OpenClaw Helm chart also supports chart-native ingress TLS (`ingress.main.tls`) if you prefer Kubernetes-managed TLS secrets.
 
 ## Monitoring Verification
 
@@ -128,7 +140,57 @@ Bootstrap controls:
 - `--agent-workspace-dir /path/to/agent-workspace`
 - `--workspace-bootstrap-mode overwrite|off`
 
+For existing OpenClaw deployments, keep `--workspace-bootstrap-mode off` unless you explicitly want recipe-managed markdown overrides copied into agent workspaces.
+
 The installer discovers runtime agents/workspaces via `openclaw agents list --json` and then writes files into each workspace.
+
+Cron jobs can also be synced via `netcup-claw`:
+
+- `netcup-claw cron backup`
+- `netcup-claw cron pull`
+- `netcup-claw cron deploy`
+- `netcup-claw cron push` (alias of deploy)
+
+Approvals can also be synced via `netcup-claw`:
+
+- `netcup-claw approvals backup`
+- `netcup-claw approvals pull`
+- `netcup-claw approvals deploy`
+- `netcup-claw approvals push` (alias of deploy)
+
+Config can also be synced via `netcup-claw`:
+
+- `netcup-claw config backup`
+- `netcup-claw config pull`
+- `netcup-claw config deploy`
+- `netcup-claw config push` (alias of deploy)
+
+Defaults:
+
+- Local source: `scripts/recipes/openclaw/cron/jobs.json`
+- Runtime target: `/home/node/.openclaw/cron/jobs.json`
+- Backups: `scripts/recipes/openclaw/cron/backup/`
+
+Daily Market Pulse behavior (current baseline):
+
+- Discord announcement is intentionally compact (targeted under 2k chars for reliable delivery in announce mode).
+- Announcement omits raw links/URLs for reliability in summary delivery.
+- Full markdown report is persisted in runtime workspace for retrieval at:
+  - `/home/node/.openclaw/workspace/market/fxempire-market-analysis-24h.md`
+
+Skill code can also be managed via `netcup-claw`:
+
+- `netcup-claw skills list`
+- `netcup-claw skills backup --skill hormuz-ais-watch`
+- `netcup-claw skills pull --skill hormuz-ais-watch`
+- `netcup-claw skills pull --all --exclude hormuz-ais-watch`
+- `netcup-claw skills deploy --skill hormuz-ais-watch`
+
+Defaults:
+
+- Local workspace root: `scripts/recipes/openclaw/skills`
+- Runtime skills root: `/home/node/.openclaw/workspace/skills`
+- Backups: `scripts/recipes/openclaw/skills/backup/`
 
 It wires OTEL environment variables on the OpenClaw pod:
 
@@ -200,19 +262,20 @@ https://us-east.metoro.io
 | Option | Description | Default |
 |--------|-------------|---------|
 | `--namespace` | Namespace to install OpenClaw into | `openclaw` |
-| `--secret` | Name of pre-created Kubernetes Secret | **Required** |
+| `--secret` | Name of pre-created Kubernetes Secret | `openclaw-credentials` |
 | `--config-file` | Path to OpenClaw JSON/JSON5 config template | `scripts/recipes/openclaw/openclaw.json` |
 | `--config-mode` | OpenClaw config reconciliation mode (`merge` or `overwrite`) | `merge` |
 | `--agent-workspace-dir` | Path to agent overrides/backup tree (`agents/<id>/*.md`, `backup/`) | `scripts/recipes/openclaw/agent-workspace` |
-| `--workspace-bootstrap-mode` | Agent workspace bootstrap mode (`overwrite`, `off`) | `overwrite` |
+| `--workspace-bootstrap-mode` | Agent workspace bootstrap mode (`overwrite`, `off`) | `off` |
 | `--metoro-token` | Metoro bearer token (prefer env var) | **Required** (unless `METORO_BEARER_TOKEN` set) |
 | `--metoro-namespace` | Namespace for Metoro components | `metoro` |
 | `--otlp-endpoint` | OpenClaw OTLP/HTTP endpoint override | `http://metoro-otel-collector.metoro.svc.cluster.local:4318` |
 | `--otel-service-name` | OTEL service name | `openclaw` |
 | `--ca-secret` | Optional Secret with custom root CA for outbound HTTPS | None |
 | `--ca-secret-key` | Key inside `--ca-secret` containing PEM cert | `ca.crt` |
-| `--host` | Create Traefik Ingress for this FQDN | None |
+| `--host` | Create Traefik Ingress for this FQDN on OpenClaw gateway/webhook port `18789` | None |
 | `--storage` | PVC size for OpenClaw state | `10Gi` |
+| `--upgrade` | Use latest available OpenClaw chart version for this run and force rollout restart of deployment `openclaw` | `false` |
 | `--uninstall` | Uninstall OpenClaw, Metoro exporter, and OTLP collector resources | N/A |
 
 ## Uninstallation

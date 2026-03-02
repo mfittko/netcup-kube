@@ -155,6 +155,12 @@
     "port": 18789,
     "mode": "local",
     "bind": "loopback",
+    "controlUi": {
+      "allowedOrigins": [
+        "https://${OPENCLAW_HOST}",
+        "http://localhost:18789"
+      ]
+    },
     "auth": {
       "mode": "token",
       "token": "${OPENCLAW_GATEWAY_TOKEN}"
@@ -185,9 +191,13 @@
   },
   "plugins": {
     "allow": [
-      "discord"
+      "discord",
+      "copilot-proxy"
     ],
     "entries": {
+      "copilot-proxy": {
+        "enabled": true
+      },
       "diagnostics-otel": {
         "enabled": false
       },

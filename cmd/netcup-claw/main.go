@@ -8,10 +8,12 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"reflect"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/mfittko/netcup-kube/internal/config"
 	"github.com/mfittko/netcup-kube/internal/openclaw"
 	"github.com/mfittko/netcup-kube/internal/portforward"
 	"github.com/mfittko/netcup-kube/internal/tunnel"
@@ -37,6 +39,19 @@ var (
 	approvalsWorkspaceDir string
 	approvalsDeployFile   string
 	approvalsBackupPath   string
+	cronWorkspaceDir      string
+	cronDeployFile        string
+	cronBackupPath        string
+	skillsWorkspaceDir    string
+	skillsSourceDir       string
+	skillsBackupPath      string
+	skillName             string
+	skillsPullAll         bool
+	skillsExclude         []string
+	secretsEnvFile        string
+	secretsName           string
+	secretsCreateMissing  bool
+	secretsRestart        bool
 	configWorkspaceDir    string
 	configDeployFile      string
 	configBackupPath      string
@@ -203,12 +218,9 @@ Examples:
 	Args:               cobra.MinimumNArgs(1),
 	DisableFlagParsing: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg := openclawConfig()
-		resolver := openclaw.New(cfg, nil)
-
-		pod, err := resolver.ResolvePod()
+		cfg, pod, err := resolveOpenClawPod()
 		if err != nil {
-			return fmt.Errorf("failed to resolve OpenClaw pod: %w", err)
+			return err
 		}
 
 		execArgs := buildShellRunKubectlArgs(cfg.Namespace, pod, args)
@@ -230,15 +242,18 @@ Examples:
 	Args:               cobra.MinimumNArgs(1),
 	DisableFlagParsing: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg := openclawConfig()
-		resolver := openclaw.New(cfg, nil)
-
-		pod, err := resolver.ResolvePod()
+		cfg, pod, err := resolveOpenClawPod()
 		if err != nil {
-			return fmt.Errorf("failed to resolve OpenClaw pod: %w", err)
+			return err
 		}
 
 		execArgs := buildOpenClawCLIKubectlArgs(cfg.Namespace, pod, args)
+		useTTY := hasTerminalStdio()
+		if useTTY {
+			execArgs = withKubectlExecTTY(execArgs)
+		} else if openclawArgsRequireTTY(args) {
+			return fmt.Errorf("command requires an interactive TTY")
+		}
 
 		return runKubectl(execArgs...)
 	},
@@ -277,6 +292,47 @@ func buildOpenClawCLIKubectlArgs(namespace, pod string, args []string) []string 
 	return append(execArgs, args...)
 }
 
+func openclawArgsRequireTTY(args []string) bool {
+	if len(args) >= 1 && args[0] == "onboard" {
+		return true
+	}
+	if len(args) >= 3 && args[0] == "models" && args[1] == "auth" && args[2] == "login" {
+		return true
+	}
+	if len(args) >= 2 && args[0] == "auth" && args[1] == "login" {
+		return true
+	}
+	return false
+}
+
+func hasTerminalStdio() bool {
+	in, err := os.Stdin.Stat()
+	if err != nil {
+		return false
+	}
+	out, err := os.Stdout.Stat()
+	if err != nil {
+		return false
+	}
+	return (in.Mode()&os.ModeCharDevice) != 0 && (out.Mode()&os.ModeCharDevice) != 0
+}
+
+func withKubectlExecTTY(args []string) []string {
+	if len(args) == 0 {
+		return args
+	}
+	updated := make([]string, 0, len(args)+1)
+	inserted := false
+	for _, arg := range args {
+		updated = append(updated, arg)
+		if !inserted && arg == "exec" {
+			updated = append(updated, "-it")
+			inserted = true
+		}
+	}
+	return updated
+}
+
 type agentListEntry struct {
 	ID        string `json:"id"`
 	Workspace string `json:"workspace"`
@@ -295,6 +351,9 @@ func localAgentWorkspaceDir() string {
 
 func resolveOpenClawPod() (openclaw.Config, string, error) {
 	cfg := openclawConfig()
+	if err := ensureKubeAPIReachableWithTunnel(); err != nil {
+		return cfg, "", err
+	}
 	resolver := openclaw.New(cfg, nil)
 	pod, err := resolver.ResolvePod()
 	if err != nil {
@@ -365,6 +424,18 @@ func normalizeApprovalsPayload(payload []byte) ([]byte, error) {
 	return normalized, nil
 }
 
+func prettyJSON(payload []byte) ([]byte, error) {
+	var decoded any
+	if err := json.Unmarshal(payload, &decoded); err != nil {
+		return nil, fmt.Errorf("invalid JSON for pretty print: %w", err)
+	}
+	pretty, err := json.MarshalIndent(decoded, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("failed to pretty print JSON: %w", err)
+	}
+	return append(pretty, '\n'), nil
+}
+
 func writeApprovalsBackup(backupPath string, payload []byte) (string, error) {
 	return writeSnapshotBackup(backupPath, "exec-approvals", payload)
 }
@@ -411,6 +482,413 @@ func localConfigWorkspaceDir() string {
 	return "scripts/recipes/openclaw/config"
 }
 
+func localCronWorkspaceDir() string {
+	if strings.TrimSpace(cronWorkspaceDir) != "" {
+		return cronWorkspaceDir
+	}
+	return "scripts/recipes/openclaw/cron"
+}
+
+func localSkillsWorkspaceDir() string {
+	if strings.TrimSpace(skillsWorkspaceDir) != "" {
+		return skillsWorkspaceDir
+	}
+	return "scripts/recipes/openclaw/skills"
+}
+
+func remoteSkillsRootDir() string {
+	return "/home/node/.openclaw/workspace/skills"
+}
+
+func remoteSkillDir(skill string) string {
+	return remoteSkillsRootDir() + "/" + skill
+}
+
+func listRemoteSkillNames(cfg openclaw.Config, pod string) ([]string, error) {
+	root := remoteSkillsRootDir()
+	out, err := runKubectlOutput(
+		"-n", cfg.Namespace,
+		"exec",
+		"-c", openclawMainContainer,
+		pod,
+		"--",
+		"sh",
+		"-lc",
+		fmt.Sprintf("if [ -d %s ]; then for d in %s/*; do [ -d \"$d\" ] || continue; basename \"$d\"; done; fi", shellQuote(root), shellQuote(root)),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list remote skills: %w", err)
+	}
+
+	lines := strings.Split(string(out), "\n")
+	names := make([]string, 0, len(lines))
+	for _, line := range lines {
+		name := strings.TrimSpace(line)
+		if name == "" {
+			continue
+		}
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names, nil
+}
+
+func filterSkillNames(all []string, excludes []string) []string {
+	excluded := map[string]struct{}{}
+	for _, raw := range excludes {
+		name := strings.TrimSpace(raw)
+		if name == "" {
+			continue
+		}
+		excluded[name] = struct{}{}
+	}
+
+	filtered := make([]string, 0, len(all))
+	for _, name := range all {
+		if _, skip := excluded[name]; skip {
+			continue
+		}
+		filtered = append(filtered, name)
+	}
+	return filtered
+}
+
+func resolveSelectedSkill(args []string) (string, error) {
+	if len(args) > 0 {
+		selected := strings.TrimSpace(args[0])
+		if selected == "" {
+			return "", fmt.Errorf("skill name cannot be empty")
+		}
+		return selected, nil
+	}
+
+	selected := strings.TrimSpace(skillName)
+	if selected == "" {
+		return "", fmt.Errorf("skill name cannot be empty")
+	}
+	return selected, nil
+}
+
+func copyRemoteSkillToLocal(cfg openclaw.Config, pod, skill, targetDir string) error {
+	if strings.TrimSpace(skill) == "" {
+		return fmt.Errorf("skill name cannot be empty")
+	}
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		return fmt.Errorf("failed to create target dir %s: %w", targetDir, err)
+	}
+
+	destination := filepath.Join(targetDir, skill)
+	if err := os.RemoveAll(destination); err != nil {
+		return fmt.Errorf("failed to clean destination dir %s: %w", destination, err)
+	}
+	if err := os.MkdirAll(destination, 0o755); err != nil {
+		return fmt.Errorf("failed to create destination dir %s: %w", destination, err)
+	}
+
+	if err := runKubectl(
+		"-n", cfg.Namespace,
+		"cp",
+		pod+":"+remoteSkillDir(skill)+"/.",
+		destination,
+		"-c", openclawMainContainer,
+	); err != nil {
+		return fmt.Errorf("failed to copy remote skill %s to %s: %w", skill, destination, err)
+	}
+	return nil
+}
+
+func backupRemoteSkillSnapshot(cfg openclaw.Config, pod, skill, backupPath string) (string, error) {
+	resolvedPath := strings.TrimSpace(backupPath)
+	if resolvedPath == "" {
+		return "", nil
+	}
+
+	snapshotRoot := filepath.Join(resolvedPath, fmt.Sprintf("%s-%s", skill, time.Now().UTC().Format("20060102-150405")))
+	if err := os.MkdirAll(snapshotRoot, 0o755); err != nil {
+		return "", fmt.Errorf("failed to create skill backup dir %s: %w", snapshotRoot, err)
+	}
+
+	if err := copyRemoteSkillToLocal(cfg, pod, skill, snapshotRoot); err != nil {
+		return "", err
+	}
+
+	return filepath.Join(snapshotRoot, skill), nil
+}
+
+func deployLocalSkillToRemote(cfg openclaw.Config, pod, skill, sourceDir string) error {
+	if strings.TrimSpace(skill) == "" {
+		return fmt.Errorf("skill name cannot be empty")
+	}
+
+	info, err := os.Stat(sourceDir)
+	if err != nil {
+		return fmt.Errorf("failed to access skill source dir %s: %w", sourceDir, err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("skill source path is not a directory: %s", sourceDir)
+	}
+
+	if filepath.Base(sourceDir) != skill {
+		return fmt.Errorf("skill source dir basename (%s) must match --skill (%s)", filepath.Base(sourceDir), skill)
+	}
+
+	if err := runKubectl(
+		"-n", cfg.Namespace,
+		"exec",
+		"-c", openclawMainContainer,
+		pod,
+		"--",
+		"sh",
+		"-lc",
+		fmt.Sprintf("mkdir -p %s && rm -rf %s", shellQuote(remoteSkillsRootDir()), shellQuote(remoteSkillDir(skill))),
+	); err != nil {
+		return fmt.Errorf("failed to prepare remote skill path: %w", err)
+	}
+
+	if err := runKubectl(
+		"-n", cfg.Namespace,
+		"cp",
+		sourceDir,
+		pod+":"+remoteSkillsRootDir(),
+		"-c", openclawMainContainer,
+	); err != nil {
+		return fmt.Errorf("failed to deploy local skill dir %s: %w", sourceDir, err)
+	}
+
+	return nil
+}
+
+func fetchCronJobsSnapshot(cfg openclaw.Config, pod string) ([]byte, error) {
+	out, err := runKubectlOutput(
+		"-n", cfg.Namespace,
+		"exec",
+		"-c", openclawMainContainer,
+		pod,
+		"--",
+		"sh",
+		"-lc",
+		"cat /home/node/.openclaw/cron/jobs.json",
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch cron jobs snapshot: %w", err)
+	}
+	return out, nil
+}
+
+func normalizeCronJobsPayload(payload []byte) ([]byte, error) {
+	var direct any
+	if err := json.Unmarshal(payload, &direct); err != nil {
+		return nil, fmt.Errorf("invalid cron jobs JSON: %w", err)
+	}
+	stripRuntimeCronFields(direct)
+	normalized, err := json.Marshal(direct)
+	if err != nil {
+		return nil, fmt.Errorf("failed to normalize cron jobs JSON: %w", err)
+	}
+	return normalized, nil
+}
+
+func stripRuntimeCronFields(payload any) {
+	root, ok := payload.(map[string]any)
+	if !ok {
+		return
+	}
+
+	jobsRaw, ok := root["jobs"]
+	if !ok {
+		return
+	}
+
+	jobs, ok := jobsRaw.([]any)
+	if !ok {
+		return
+	}
+
+	for _, jobRaw := range jobs {
+		job, ok := jobRaw.(map[string]any)
+		if !ok {
+			continue
+		}
+
+		delete(job, "state")
+		delete(job, "createdAtMs")
+		delete(job, "updatedAtMs")
+		delete(job, "sessionKey")
+		delete(job, "wakeMode")
+	}
+}
+
+func writeCronJobsBackup(backupPath string, payload []byte) (string, error) {
+	return writeSnapshotBackup(backupPath, "cron-jobs", payload)
+}
+
+type cronJobsFile struct {
+	Jobs []cronJobSpec `json:"jobs"`
+}
+
+type cronJobSpec struct {
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	Enabled       bool   `json:"enabled"`
+	AgentID       string `json:"agentId"`
+	SessionTarget string `json:"sessionTarget"`
+	Payload       struct {
+		Kind     string `json:"kind"`
+		Message  string `json:"message"`
+		Model    string `json:"model"`
+		Thinking string `json:"thinking"`
+	} `json:"payload"`
+	Schedule struct {
+		Kind string `json:"kind"`
+		Expr string `json:"expr"`
+		Tz   string `json:"tz"`
+	} `json:"schedule"`
+	Delivery struct {
+		Mode       string `json:"mode"`
+		Channel    string `json:"channel"`
+		To         string `json:"to"`
+		BestEffort bool   `json:"bestEffort"`
+	} `json:"delivery"`
+}
+
+func parseCronJobsFile(payload []byte) (cronJobsFile, error) {
+	var file cronJobsFile
+	if err := json.Unmarshal(payload, &file); err != nil {
+		return cronJobsFile{}, fmt.Errorf("invalid cron jobs JSON: %w", err)
+	}
+	return file, nil
+}
+
+func buildCronEditArgs(job cronJobSpec) ([]string, error) {
+	if strings.TrimSpace(job.ID) == "" {
+		return nil, fmt.Errorf("job id is required")
+	}
+
+	args := []string{"cron", "edit", job.ID}
+
+	if name := strings.TrimSpace(job.Name); name != "" {
+		args = append(args, "--name", name)
+	}
+
+	if strings.EqualFold(job.Schedule.Kind, "cron") {
+		expr := strings.TrimSpace(job.Schedule.Expr)
+		if expr == "" {
+			return nil, fmt.Errorf("job %s missing cron expr", job.ID)
+		}
+		args = append(args, "--cron", expr)
+		if tz := strings.TrimSpace(job.Schedule.Tz); tz != "" {
+			args = append(args, "--tz", tz)
+		}
+	}
+
+	if strings.TrimSpace(job.AgentID) != "" {
+		args = append(args, "--agent", strings.TrimSpace(job.AgentID))
+	}
+
+	if sessionTarget := strings.TrimSpace(job.SessionTarget); sessionTarget != "" {
+		args = append(args, "--session", sessionTarget)
+	}
+
+	if job.Enabled {
+		args = append(args, "--enable")
+	} else {
+		args = append(args, "--disable")
+	}
+
+	mode := strings.TrimSpace(job.Delivery.Mode)
+	if strings.EqualFold(mode, "announce") {
+		args = append(args, "--announce")
+	} else if strings.EqualFold(mode, "none") {
+		args = append(args, "--no-deliver")
+	}
+
+	if channel := strings.TrimSpace(job.Delivery.Channel); channel != "" {
+		args = append(args, "--channel", channel)
+	}
+	if to := strings.TrimSpace(job.Delivery.To); to != "" {
+		args = append(args, "--to", to)
+	}
+
+	if job.Delivery.BestEffort {
+		args = append(args, "--best-effort-deliver")
+	} else {
+		args = append(args, "--no-best-effort-deliver")
+	}
+
+	if strings.EqualFold(strings.TrimSpace(job.Payload.Kind), "agentTurn") {
+		if msg := strings.TrimSpace(job.Payload.Message); msg != "" {
+			args = append(args, "--message", msg)
+		}
+		if model := strings.TrimSpace(job.Payload.Model); model != "" {
+			args = append(args, "--model", model)
+		}
+		if thinking := strings.TrimSpace(job.Payload.Thinking); thinking != "" {
+			args = append(args, "--thinking", thinking)
+		}
+	}
+
+	return args, nil
+}
+
+func cronJobSpecEqualForSync(desired cronJobSpec, current cronJobSpec) bool {
+	return reflect.DeepEqual(desired, current)
+}
+
+func openclawSecretKeys() []string {
+	return []string{
+		"OPENCLAW_GATEWAY_TOKEN",
+		"DISCORD_BOT_TOKEN",
+		"GITHUB_TOKEN",
+		"GH_TOKEN",
+		"OPENAI_API_KEY",
+		"ANTHROPIC_API_KEY",
+		"AISSTREAM_API_KEY",
+		"SAG_API_KEY",
+	}
+}
+
+func processEnvMap() map[string]string {
+	result := make(map[string]string)
+	for _, entry := range os.Environ() {
+		parts := strings.SplitN(entry, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		result[parts[0]] = parts[1]
+	}
+	return result
+}
+
+func resolveSecretsFromEnv(processValues, envFileValues map[string]string, keys []string) (map[string]string, []string) {
+	resolved := make(map[string]string)
+	missing := make([]string, 0)
+
+	for _, key := range keys {
+		value := strings.TrimSpace(processValues[key])
+		if envFileValues != nil {
+			if fileValue, ok := envFileValues[key]; ok {
+				value = strings.TrimSpace(fileValue)
+			}
+		}
+		if value == "" {
+			missing = append(missing, key)
+			continue
+		}
+		resolved[key] = value
+	}
+
+	return resolved, missing
+}
+
+func sortedKeys(values map[string]string) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
 func deployedConfigMapName() string {
 	return "openclaw"
 }
@@ -446,6 +924,7 @@ var configCmd = &cobra.Command{
 
 Sub-commands:
   backup  - Pull current deployed openclaw.json into local backup path
+  pull    - Pull current deployed openclaw.json into local workspace file
   deploy  - Push local openclaw.json into ConfigMap and restart rollout`,
 }
 
@@ -474,9 +953,42 @@ var configBackupCmd = &cobra.Command{
 	},
 }
 
+var configPullCmd = &cobra.Command{
+	Use:   "pull",
+	Short: "Pull current deployed OpenClaw config into local workspace file",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		cfg := openclawConfig()
+		payload, err := fetchDeployedConfig(cfg)
+		if err != nil {
+			return err
+		}
+
+		prettyPayload, err := prettyJSON(payload)
+		if err != nil {
+			return err
+		}
+
+		targetPath := strings.TrimSpace(configDeployFile)
+		if targetPath == "" {
+			targetPath = "scripts/recipes/openclaw/openclaw.json"
+		}
+
+		if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
+			return fmt.Errorf("failed to create target directory for %s: %w", targetPath, err)
+		}
+		if err := os.WriteFile(targetPath, prettyPayload, 0o644); err != nil {
+			return fmt.Errorf("failed to write pulled config to %s: %w", targetPath, err)
+		}
+
+		fmt.Printf("pull complete: %s\n", targetPath)
+		return nil
+	},
+}
+
 var configDeployCmd = &cobra.Command{
-	Use:   "deploy",
-	Short: "Deploy local OpenClaw config to ConfigMap and restart",
+	Use:     "deploy",
+	Aliases: []string{"push"},
+	Short:   "Deploy local OpenClaw config to ConfigMap and restart",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg := openclawConfig()
 
@@ -758,6 +1270,7 @@ var approvalsCmd = &cobra.Command{
 
 Sub-commands:
   backup  - Pull current approvals snapshot into local backup path
+  pull    - Pull current approvals snapshot into local workspace file
   deploy  - Push local approvals JSON to runtime with optional pre-change backup`,
 }
 
@@ -790,9 +1303,51 @@ var approvalsBackupCmd = &cobra.Command{
 	},
 }
 
+var approvalsPullCmd = &cobra.Command{
+	Use:   "pull",
+	Short: "Pull current approvals snapshot into local workspace file",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		cfg, pod, err := resolveOpenClawPod()
+		if err != nil {
+			return err
+		}
+
+		snapshot, err := fetchApprovalsSnapshot(cfg, pod)
+		if err != nil {
+			return err
+		}
+
+		normalizedPayload, err := normalizeApprovalsPayload(snapshot)
+		if err != nil {
+			return err
+		}
+
+		prettyPayload, err := prettyJSON(normalizedPayload)
+		if err != nil {
+			return err
+		}
+
+		targetPath := strings.TrimSpace(approvalsDeployFile)
+		if targetPath == "" {
+			targetPath = filepath.Join(localApprovalsWorkspaceDir(), "approvals.json")
+		}
+
+		if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
+			return fmt.Errorf("failed to create target directory for %s: %w", targetPath, err)
+		}
+		if err := os.WriteFile(targetPath, prettyPayload, 0o644); err != nil {
+			return fmt.Errorf("failed to write pulled approvals to %s: %w", targetPath, err)
+		}
+
+		fmt.Printf("pull complete: %s\n", targetPath)
+		return nil
+	},
+}
+
 var approvalsDeployCmd = &cobra.Command{
-	Use:   "deploy",
-	Short: "Deploy local approvals JSON to runtime",
+	Use:     "deploy",
+	Aliases: []string{"push"},
+	Short:   "Deploy local approvals JSON to runtime",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		inputPath := strings.TrimSpace(approvalsDeployFile)
 		if inputPath == "" {
@@ -885,6 +1440,521 @@ var approvalsDeployCmd = &cobra.Command{
 		)
 
 		fmt.Printf("deploy complete: %s\n", inputPath)
+		return nil
+	},
+}
+
+var cronCmd = &cobra.Command{
+	Use:   "cron",
+	Short: "Backup or deploy OpenClaw cron jobs file",
+	Long: `Manage OpenClaw cron jobs state against the running pod.
+
+Sub-commands:
+  backup  - Pull current cron jobs snapshot into local backup path
+  pull    - Pull current cron jobs snapshot into local workspace file
+	deploy  - Push local cron jobs JSON to runtime with optional pre-change backup
+	sync    - Apply local jobs via openclaw cron edit to refresh scheduler state`,
+}
+
+var cronBackupCmd = &cobra.Command{
+	Use:   "backup",
+	Short: "Pull current cron jobs snapshot into local backup path",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		cfg, pod, err := resolveOpenClawPod()
+		if err != nil {
+			return err
+		}
+
+		snapshot, err := fetchCronJobsSnapshot(cfg, pod)
+		if err != nil {
+			return err
+		}
+
+		backupPath := strings.TrimSpace(cronBackupPath)
+		if backupPath == "" {
+			backupPath = filepath.Join(localCronWorkspaceDir(), "backup")
+		}
+
+		backupFile, err := writeCronJobsBackup(backupPath, snapshot)
+		if err != nil {
+			return err
+		}
+
+		fmt.Printf("backup complete: %s\n", backupFile)
+		return nil
+	},
+}
+
+var cronPullCmd = &cobra.Command{
+	Use:   "pull",
+	Short: "Pull current cron jobs snapshot into local workspace file",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		cfg, pod, err := resolveOpenClawPod()
+		if err != nil {
+			return err
+		}
+
+		snapshot, err := fetchCronJobsSnapshot(cfg, pod)
+		if err != nil {
+			return err
+		}
+
+		normalizedPayload, err := normalizeCronJobsPayload(snapshot)
+		if err != nil {
+			return err
+		}
+
+		prettyPayload, err := prettyJSON(normalizedPayload)
+		if err != nil {
+			return err
+		}
+
+		targetPath := strings.TrimSpace(cronDeployFile)
+		if targetPath == "" {
+			targetPath = filepath.Join(localCronWorkspaceDir(), "jobs.json")
+		}
+
+		if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
+			return fmt.Errorf("failed to create target directory for %s: %w", targetPath, err)
+		}
+		if err := os.WriteFile(targetPath, prettyPayload, 0o644); err != nil {
+			return fmt.Errorf("failed to write pulled cron jobs to %s: %w", targetPath, err)
+		}
+
+		fmt.Printf("pull complete: %s\n", targetPath)
+		return nil
+	},
+}
+
+var cronDeployCmd = &cobra.Command{
+	Use:     "deploy",
+	Aliases: []string{"push"},
+	Short:   "Deploy local cron jobs JSON to runtime",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		inputPath := strings.TrimSpace(cronDeployFile)
+		if inputPath == "" {
+			inputPath = filepath.Join(localCronWorkspaceDir(), "jobs.json")
+		}
+
+		if _, err := os.Stat(inputPath); err != nil {
+			return fmt.Errorf("failed to read cron jobs file %s: %w", inputPath, err)
+		}
+
+		payload, err := os.ReadFile(inputPath)
+		if err != nil {
+			return fmt.Errorf("failed to read cron jobs file %s: %w", inputPath, err)
+		}
+
+		normalizedPayload, err := normalizeCronJobsPayload(payload)
+		if err != nil {
+			return err
+		}
+
+		cfg, pod, err := resolveOpenClawPod()
+		if err != nil {
+			return err
+		}
+
+		backupPath := strings.TrimSpace(cronBackupPath)
+		if backupPath == "" {
+			backupPath = filepath.Join(localCronWorkspaceDir(), "backup")
+		}
+
+		if backupPath != "off" {
+			snapshot, err := fetchCronJobsSnapshot(cfg, pod)
+			if err != nil {
+				return err
+			}
+			backupFile, err := writeCronJobsBackup(backupPath, snapshot)
+			if err != nil {
+				return err
+			}
+			if backupFile != "" {
+				fmt.Printf("cron jobs backup saved: %s\n", backupFile)
+			}
+		}
+
+		tmpLocalFile, err := os.CreateTemp("", "netcup-claw-cron-jobs-*.json")
+		if err != nil {
+			return fmt.Errorf("failed to create temporary cron jobs file: %w", err)
+		}
+		tmpLocalPath := tmpLocalFile.Name()
+		if _, err := tmpLocalFile.Write(normalizedPayload); err != nil {
+			_ = tmpLocalFile.Close()
+			_ = os.Remove(tmpLocalPath)
+			return fmt.Errorf("failed to write temporary cron jobs file: %w", err)
+		}
+		if err := tmpLocalFile.Close(); err != nil {
+			_ = os.Remove(tmpLocalPath)
+			return fmt.Errorf("failed to close temporary cron jobs file: %w", err)
+		}
+		defer func() {
+			_ = os.Remove(tmpLocalPath)
+		}()
+
+		remoteTempPath := "/tmp/netcup-claw-cron-jobs.json"
+		if err := runKubectl(
+			"-n", cfg.Namespace,
+			"cp",
+			tmpLocalPath,
+			pod+":"+remoteTempPath,
+			"-c", openclawMainContainer,
+		); err != nil {
+			return fmt.Errorf("failed to upload cron jobs file: %w", err)
+		}
+
+		if err := runKubectl(
+			"-n", cfg.Namespace,
+			"exec",
+			"-c", openclawMainContainer,
+			pod,
+			"--",
+			"sh",
+			"-lc",
+			fmt.Sprintf("mkdir -p /home/node/.openclaw/cron && mv %s /home/node/.openclaw/cron/jobs.json && chmod 0644 /home/node/.openclaw/cron/jobs.json", shellQuote(remoteTempPath)),
+		); err != nil {
+			return fmt.Errorf("failed to apply cron jobs file: %w", err)
+		}
+
+		fmt.Printf("deploy complete: %s\n", inputPath)
+		fmt.Println("note: if scheduler does not pick up changes immediately, restart OpenClaw deployment")
+		return nil
+	},
+}
+
+var cronSyncCmd = &cobra.Command{
+	Use:   "sync",
+	Short: "Sync cron jobs via openclaw cron edit",
+	Long: `Apply local cron jobs to the running scheduler via OpenClaw cron commands.
+
+This updates scheduler-owned state/job payloads by calling:
+  openclaw cron edit <id> ...
+
+It is useful when file-based deploy does not fully refresh scheduler in-memory state.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		inputPath := strings.TrimSpace(cronDeployFile)
+		if inputPath == "" {
+			inputPath = filepath.Join(localCronWorkspaceDir(), "jobs.json")
+		}
+
+		payload, err := os.ReadFile(inputPath)
+		if err != nil {
+			return fmt.Errorf("failed to read cron jobs file %s: %w", inputPath, err)
+		}
+
+		normalizedPayload, err := normalizeCronJobsPayload(payload)
+		if err != nil {
+			return err
+		}
+
+		file, err := parseCronJobsFile(normalizedPayload)
+		if err != nil {
+			return err
+		}
+
+		cfg, pod, err := resolveOpenClawPod()
+		if err != nil {
+			return err
+		}
+
+		currentSnapshot, err := fetchCronJobsSnapshot(cfg, pod)
+		if err != nil {
+			return err
+		}
+
+		normalizedCurrent, err := normalizeCronJobsPayload(currentSnapshot)
+		if err != nil {
+			return err
+		}
+
+		currentFile, err := parseCronJobsFile(normalizedCurrent)
+		if err != nil {
+			return err
+		}
+
+		currentByID := make(map[string]cronJobSpec, len(currentFile.Jobs))
+		for _, job := range currentFile.Jobs {
+			if id := strings.TrimSpace(job.ID); id != "" {
+				currentByID[id] = job
+			}
+		}
+
+		applied := 0
+		skipped := 0
+		for _, job := range file.Jobs {
+			if current, ok := currentByID[strings.TrimSpace(job.ID)]; ok {
+				if cronJobSpecEqualForSync(job, current) {
+					skipped++
+					continue
+				}
+			}
+
+			editArgs, buildErr := buildCronEditArgs(job)
+			if buildErr != nil {
+				return fmt.Errorf("job %q (%s): %w", job.Name, job.ID, buildErr)
+			}
+
+			if err := runKubectl(buildOpenClawCLIKubectlArgs(cfg.Namespace, pod, editArgs)...); err != nil {
+				return fmt.Errorf("failed to sync job %q (%s): %w", job.Name, job.ID, err)
+			}
+			applied++
+		}
+
+		fmt.Printf("sync complete: %d updated, %d unchanged\n", applied, skipped)
+		return nil
+	},
+}
+
+var skillsCmd = &cobra.Command{
+	Use:   "skills",
+	Short: "Backup, pull, or deploy OpenClaw skill directories",
+	Long: `Manage OpenClaw skill code under /home/node/.openclaw/workspace/skills.
+
+Sub-commands:
+  list   - List runtime skills present in OpenClaw workspace
+  backup - Pull runtime skill into timestamped local backup path
+  pull   - Pull runtime skill(s) into repository workspace path
+  deploy - Push local repository skill to runtime (with optional backup)`,
+}
+
+var skillsListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List runtime skill directories",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		cfg, pod, err := resolveOpenClawPod()
+		if err != nil {
+			return err
+		}
+
+		names, err := listRemoteSkillNames(cfg, pod)
+		if err != nil {
+			return err
+		}
+		for _, name := range names {
+			fmt.Println(name)
+		}
+		return nil
+	},
+}
+
+var skillsBackupCmd = &cobra.Command{
+	Use:   "backup [skill]",
+	Short: "Backup runtime skill directory into local timestamped snapshot",
+	Args:  cobra.MaximumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		cfg, pod, err := resolveOpenClawPod()
+		if err != nil {
+			return err
+		}
+
+		selectedSkill, err := resolveSelectedSkill(args)
+		if err != nil {
+			return err
+		}
+
+		backupPath := strings.TrimSpace(skillsBackupPath)
+		if backupPath == "" {
+			backupPath = filepath.Join(localSkillsWorkspaceDir(), "backup")
+		}
+
+		backupDir, err := backupRemoteSkillSnapshot(cfg, pod, selectedSkill, backupPath)
+		if err != nil {
+			return err
+		}
+
+		fmt.Printf("backup complete: %s\n", backupDir)
+		return nil
+	},
+}
+
+var skillsPullCmd = &cobra.Command{
+	Use:   "pull [skill]",
+	Short: "Pull runtime skill directory/directories into repository workspace",
+	Args:  cobra.MaximumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		cfg, pod, err := resolveOpenClawPod()
+		if err != nil {
+			return err
+		}
+
+		workspaceRoot := localSkillsWorkspaceDir()
+		if err := os.MkdirAll(workspaceRoot, 0o755); err != nil {
+			return fmt.Errorf("failed to create skills workspace dir %s: %w", workspaceRoot, err)
+		}
+
+		if skillsPullAll {
+			if len(args) > 0 {
+				return fmt.Errorf("do not pass a positional skill when using --all")
+			}
+
+			remoteSkills, listErr := listRemoteSkillNames(cfg, pod)
+			if listErr != nil {
+				return listErr
+			}
+
+			targets := filterSkillNames(remoteSkills, skillsExclude)
+			if len(targets) == 0 {
+				fmt.Println("no skills selected for pull (all excluded or none present)")
+				return nil
+			}
+
+			for _, name := range targets {
+				if err := copyRemoteSkillToLocal(cfg, pod, name, workspaceRoot); err != nil {
+					return err
+				}
+				fmt.Printf("pulled: %s\n", filepath.Join(workspaceRoot, name))
+			}
+
+			fmt.Printf("pull complete: %d skills\n", len(targets))
+			return nil
+		}
+
+		selectedSkill, err := resolveSelectedSkill(args)
+		if err != nil {
+			return err
+		}
+
+		targetPath := filepath.Join(workspaceRoot, selectedSkill)
+		if err := copyRemoteSkillToLocal(cfg, pod, selectedSkill, workspaceRoot); err != nil {
+			return err
+		}
+
+		fmt.Printf("pull complete: %s\n", targetPath)
+		return nil
+	},
+}
+
+var skillsDeployCmd = &cobra.Command{
+	Use:     "deploy [skill]",
+	Aliases: []string{"push"},
+	Short:   "Deploy local skill directory to runtime",
+	Args:    cobra.MaximumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		cfg, pod, err := resolveOpenClawPod()
+		if err != nil {
+			return err
+		}
+
+		selectedSkill, err := resolveSelectedSkill(args)
+		if err != nil {
+			return err
+		}
+
+		sourceDir := strings.TrimSpace(skillsSourceDir)
+		if sourceDir == "" {
+			sourceDir = filepath.Join(localSkillsWorkspaceDir(), selectedSkill)
+		}
+
+		backupPath := strings.TrimSpace(skillsBackupPath)
+		if backupPath == "" {
+			backupPath = filepath.Join(localSkillsWorkspaceDir(), "backup")
+		}
+
+		if backupPath != "off" {
+			backupDir, backupErr := backupRemoteSkillSnapshot(cfg, pod, selectedSkill, backupPath)
+			if backupErr != nil {
+				return backupErr
+			}
+			if backupDir != "" {
+				fmt.Printf("skill backup saved: %s\n", backupDir)
+			}
+		}
+
+		if err := deployLocalSkillToRemote(cfg, pod, selectedSkill, sourceDir); err != nil {
+			return err
+		}
+
+		fmt.Printf("deploy complete: %s -> %s\n", sourceDir, remoteSkillDir(selectedSkill))
+		return nil
+	},
+}
+
+var secretsCmd = &cobra.Command{
+	Use:   "secrets",
+	Short: "Manage OpenClaw Kubernetes secret values",
+}
+
+var secretsSyncCmd = &cobra.Command{
+	Use:   "sync",
+	Short: "Sync OpenClaw secret keys from local environment and .env",
+	Long: `Sync key/value pairs into the OpenClaw Kubernetes Secret.
+
+Precedence:
+  1) Values from --env-file (default: .env)
+  2) Process environment variables
+
+Only known OpenClaw-related keys are synced. Existing secret keys not in this
+set are preserved when patching.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		cfg := openclawConfig()
+
+		processValues := processEnvMap()
+		var envFileValues map[string]string
+		envFilePath := strings.TrimSpace(secretsEnvFile)
+		if envFilePath != "" {
+			if _, err := os.Stat(envFilePath); err == nil {
+				loaded, loadErr := config.LoadEnvFileToMap(envFilePath)
+				if loadErr != nil {
+					return fmt.Errorf("failed to load env file %s: %w", envFilePath, loadErr)
+				}
+				envFileValues = loaded
+			}
+		}
+
+		resolved, missing := resolveSecretsFromEnv(processValues, envFileValues, openclawSecretKeys())
+		if len(resolved) == 0 {
+			return fmt.Errorf("no secret values resolved; set env vars or provide --env-file")
+		}
+
+		patchPayload := map[string]any{"stringData": resolved}
+		patchBytes, err := json.Marshal(patchPayload)
+		if err != nil {
+			return fmt.Errorf("failed to build secret patch payload: %w", err)
+		}
+
+		if err := runKubectl(
+			"-n", cfg.Namespace,
+			"patch",
+			"secret",
+			secretsName,
+			"--type",
+			"merge",
+			"-p",
+			string(patchBytes),
+		); err != nil {
+			if !secretsCreateMissing {
+				return fmt.Errorf("failed to patch secret %s: %w", secretsName, err)
+			}
+
+			createArgs := []string{"-n", cfg.Namespace, "create", "secret", "generic", secretsName}
+			for _, key := range sortedKeys(resolved) {
+				createArgs = append(createArgs, "--from-literal="+key+"="+resolved[key])
+			}
+			if createErr := runKubectl(createArgs...); createErr != nil {
+				return fmt.Errorf("failed to patch or create secret %s: %w", secretsName, err)
+			}
+			fmt.Printf("created secret: %s (namespace: %s, keys synced: %d)\n", secretsName, cfg.Namespace, len(resolved))
+		} else {
+			fmt.Printf("patched secret: %s (namespace: %s, keys synced: %d)\n", secretsName, cfg.Namespace, len(resolved))
+		}
+
+		if len(missing) > 0 {
+			sort.Strings(missing)
+			fmt.Printf("skipped missing keys: %s\n", strings.Join(missing, ", "))
+		}
+
+		if secretsRestart {
+			fmt.Printf("restarting deployment/%s in namespace %s...\n", deployedConfigDeploymentName(), cfg.Namespace)
+			if err := runKubectl("-n", cfg.Namespace, "rollout", "restart", "deployment/"+deployedConfigDeploymentName()); err != nil {
+				return fmt.Errorf("secret synced but failed to restart deployment: %w", err)
+			}
+			if err := runKubectl("-n", cfg.Namespace, "rollout", "status", "deployment/"+deployedConfigDeploymentName(), "--timeout=180s"); err != nil {
+				return fmt.Errorf("deployment restart triggered but rollout did not complete: %w", err)
+			}
+			fmt.Println("deployment restart complete")
+		} else {
+			fmt.Println("note: restart OpenClaw deployment to reload environment variables")
+		}
 		return nil
 	},
 }
@@ -1180,12 +2250,9 @@ Examples:
   netcup-claw logs --tail 100`,
 	DisableFlagParsing: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg := openclawConfig()
-		resolver := openclaw.New(cfg, nil)
-
-		pod, err := resolver.ResolvePod()
+		cfg, pod, err := resolveOpenClawPod()
 		if err != nil {
-			return fmt.Errorf("failed to resolve OpenClaw pod: %w", err)
+			return err
 		}
 
 		logArgs := append([]string{"-n", cfg.Namespace, "logs", pod}, args...)
@@ -1199,6 +2266,7 @@ var statusCmd = &cobra.Command{
 	Short: "Show unified OpenClaw status (tunnel, port-forward, service health)",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg := openclawConfig()
+		_ = ensureKubeAPIReachableWithTunnel()
 
 		// 1. SSH Tunnel status
 		tun := tunnelConfig()
@@ -1280,14 +2348,42 @@ func init() {
 	configCmd.PersistentFlags().StringVar(&configBackupPath, "backup-path", "", "Directory or file path for config backups (default: <workspace-dir>/backup, use 'off' to disable on deploy)")
 	configDeployCmd.Flags().StringVar(&configDeployFile, "file", "", "Local OpenClaw config JSON file to deploy (default: scripts/recipes/openclaw/openclaw.json)")
 	configCmd.AddCommand(configBackupCmd)
+	configCmd.AddCommand(configPullCmd)
 	configCmd.AddCommand(configDeployCmd)
 	rootCmd.AddCommand(configCmd)
 	approvalsCmd.PersistentFlags().StringVar(&approvalsWorkspaceDir, "workspace-dir", "", "Local approvals workspace root (default: scripts/recipes/openclaw/approvals)")
 	approvalsCmd.PersistentFlags().StringVar(&approvalsBackupPath, "backup-path", "", "Directory or file path for approvals backups (default: <workspace-dir>/backup, use 'off' to disable on deploy)")
 	approvalsDeployCmd.Flags().StringVar(&approvalsDeployFile, "file", "", "Local approvals JSON file to deploy (default: <workspace-dir>/approvals.json)")
 	approvalsCmd.AddCommand(approvalsBackupCmd)
+	approvalsCmd.AddCommand(approvalsPullCmd)
 	approvalsCmd.AddCommand(approvalsDeployCmd)
 	rootCmd.AddCommand(approvalsCmd)
+	cronCmd.PersistentFlags().StringVar(&cronWorkspaceDir, "workspace-dir", "", "Local cron workspace root (default: scripts/recipes/openclaw/cron)")
+	cronCmd.PersistentFlags().StringVar(&cronBackupPath, "backup-path", "", "Directory or file path for cron jobs backups (default: <workspace-dir>/backup, use 'off' to disable on deploy)")
+	cronDeployCmd.Flags().StringVar(&cronDeployFile, "file", "", "Local cron jobs JSON file to deploy (default: <workspace-dir>/jobs.json)")
+	cronSyncCmd.Flags().StringVar(&cronDeployFile, "file", "", "Local cron jobs JSON file to sync (default: <workspace-dir>/jobs.json)")
+	cronCmd.AddCommand(cronBackupCmd)
+	cronCmd.AddCommand(cronPullCmd)
+	cronCmd.AddCommand(cronDeployCmd)
+	cronCmd.AddCommand(cronSyncCmd)
+	rootCmd.AddCommand(cronCmd)
+	skillsCmd.PersistentFlags().StringVar(&skillName, "skill", "hormuz-ais-watch", "Default skill directory name under OpenClaw workspace (overridden by positional [skill])")
+	skillsCmd.PersistentFlags().StringVar(&skillsWorkspaceDir, "workspace-dir", "", "Local skills workspace root (default: scripts/recipes/openclaw/skills)")
+	skillsCmd.PersistentFlags().StringVar(&skillsBackupPath, "backup-path", "", "Directory for skill backups (default: <workspace-dir>/backup, use 'off' to disable on deploy)")
+	skillsPullCmd.Flags().BoolVar(&skillsPullAll, "all", false, "Pull all runtime skills into local workspace")
+	skillsPullCmd.Flags().StringSliceVar(&skillsExclude, "exclude", []string{"hormuz-ais-watch"}, "Skill names to exclude when using --all (repeatable)")
+	skillsDeployCmd.Flags().StringVar(&skillsSourceDir, "source-dir", "", "Local skill directory to deploy (default: <workspace-dir>/<skill>)")
+	skillsCmd.AddCommand(skillsListCmd)
+	skillsCmd.AddCommand(skillsBackupCmd)
+	skillsCmd.AddCommand(skillsPullCmd)
+	skillsCmd.AddCommand(skillsDeployCmd)
+	rootCmd.AddCommand(skillsCmd)
+	secretsSyncCmd.Flags().StringVar(&secretsEnvFile, "env-file", ".env", "Local env file with secret values (takes precedence over process env)")
+	secretsSyncCmd.Flags().StringVar(&secretsName, "name", "openclaw-credentials", "Kubernetes Secret name to patch/create")
+	secretsSyncCmd.Flags().BoolVar(&secretsCreateMissing, "create-missing", true, "Create the secret if it does not exist")
+	secretsSyncCmd.Flags().BoolVar(&secretsRestart, "restart", false, "Restart deployment/openclaw after a successful secret sync")
+	secretsCmd.AddCommand(secretsSyncCmd)
+	rootCmd.AddCommand(secretsCmd)
 	agentsCmd.PersistentFlags().StringVar(&agentsWorkspaceDir, "workspace-dir", "", "Local agent-workspace root (default: scripts/recipes/openclaw/agent-workspace)")
 	agentsCmd.AddCommand(agentsBackupCmd)
 	agentsCmd.AddCommand(agentsDeployCmd)

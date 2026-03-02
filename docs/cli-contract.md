@@ -76,6 +76,7 @@ netcup-kube install <recipe> [recipe-options]
 - `postgres` — Install PostgreSQL (Bitnami Helm chart)
 - `redis` — Install Redis (Bitnami Helm chart)
 - `llm-proxy` — Install llm-proxy (Helm chart; Secret-backed config)
+- `vscode-copilot-proxy` — Install internal-only OpenVSCode Server for Copilot Proxy plugin runtime
 - `sealed-secrets` — Install Sealed Secrets (encrypt secrets for Git)
 - `redisinsight` — Install RedisInsight (Redis GUI)
 - `kube-prometheus-stack` — Install Grafana + Prometheus + Alertmanager
@@ -86,7 +87,9 @@ netcup-kube install <recipe> [recipe-options]
 - `--config-file <path>` — Supply an OpenClaw JSON/JSON5 template from repo or local path.
 - `--config-mode <merge|overwrite>` — Control how the chart `init-config` container reconciles persisted `/home/node/.openclaw/openclaw.json`.
 - `--agent-workspace-dir <path>` — Supply agent workspace overrides/backup path (`agents/<agentId>/*.md`, `backup/`).
-- `--workspace-bootstrap-mode <overwrite|off>` — Control backup + override apply behavior for detected agent workspaces.
+- `--workspace-bootstrap-mode <overwrite|off>` — Control backup + override apply behavior for detected agent workspaces (default: `off`).
+- `--upgrade` — Resolve latest available `openclaw/openclaw` chart version for this run, then force rollout restart of deployment `openclaw` after Helm succeeds.
+- `OPENCLAW_HOST` — Env default alternative to `--host`.
 
 **Common Options:**
 - `--help`, `-h` — Show recipe-specific help

@@ -19,13 +19,13 @@ Usage:
 
 Options:
   --namespace <name>   Namespace to install into (default: openclaw).
-  --secret <name>      Name of pre-created Kubernetes Secret with OpenClaw credentials (required).
+  --secret <name>      Name of pre-created Kubernetes Secret with OpenClaw credentials (default: openclaw-credentials).
   --config-file <path> Path to OpenClaw JSON/JSON5 config template (default: scripts/recipes/openclaw/openclaw.json).
   --config-mode <mode> Config reconciliation mode: merge|overwrite (default: merge).
   --agent-workspace-dir <path>
                        Path to agent workspace templates/backup (default: scripts/recipes/openclaw/agent-workspace).
   --workspace-bootstrap-mode <mode>
-                       Agent workspace bootstrap mode: overwrite|off (default: overwrite).
+                       Agent workspace bootstrap mode: overwrite|off (default: off).
   --metoro-token <v>   Metoro bearer token (required; prefer METORO_BEARER_TOKEN env var).
   --metoro-namespace <name>
                        Namespace for Metoro exporter stack (default: metoro).
@@ -35,13 +35,16 @@ Options:
                        OTEL service name for OpenClaw telemetry (default: openclaw).
   --ca-secret <name>   Optional Secret name with custom root CA for outbound HTTPS trust.
   --ca-secret-key <k>  Key in --ca-secret containing the PEM cert (default: ca.crt).
-  --host <fqdn>        Create a Traefik Ingress for this host (entrypoint: web).
+  --host <fqdn>        Create a Traefik Ingress for this host on OpenClaw gateway port 18789 (entrypoint: web).
   --storage <size>     PVC size for OpenClaw state (default: 10Gi).
+  --upgrade            Force a rollout restart of OpenClaw deployment after Helm succeeds.
   --uninstall          Uninstall OpenClaw and monitoring components.
   -h, --help           Show this help.
 
 Environment:
   KUBECONFIG           Kubeconfig to use. If not set, defaults to /etc/rancher/k3s/k3s.yaml (on the node).
+  OPENCLAW_SECRET_NAME Alternative to --secret (default: openclaw-credentials).
+  OPENCLAW_HOST        Alternative to --host.
 
 Requirements:
   - Kubernetes >= 1.26
@@ -59,11 +62,11 @@ EOF
 }
 
 NAMESPACE="${NAMESPACE_OPENCLAW}"
-SECRET_NAME=""
+SECRET_NAME="${OPENCLAW_SECRET_NAME:-openclaw-credentials}"
 OPENCLAW_CONFIG_FILE="${SCRIPT_DIR}/openclaw.json"
 OPENCLAW_CONFIG_MODE="${OPENCLAW_CONFIG_MODE:-merge}"
 AGENT_WORKSPACE_DIR="${OPENCLAW_AGENT_WORKSPACE_DIR:-${SCRIPT_DIR}/agent-workspace}"
-WORKSPACE_BOOTSTRAP_MODE="${OPENCLAW_WORKSPACE_BOOTSTRAP_MODE:-overwrite}"
+WORKSPACE_BOOTSTRAP_MODE="${OPENCLAW_WORKSPACE_BOOTSTRAP_MODE:-off}"
 METORO_TOKEN="${METORO_BEARER_TOKEN:-}"
 METORO_NAMESPACE="${NAMESPACE_METORO:-metoro}"
 OTLP_ENDPOINT="${OPENCLAW_OTLP_ENDPOINT:-}"
@@ -73,8 +76,9 @@ RUNTIME_BIN_DIR="/home/node/.openclaw/bin"
 CA_SECRET_NAME="${OPENCLAW_CA_SECRET:-}"
 CA_SECRET_KEY="${OPENCLAW_CA_SECRET_KEY:-ca.crt}"
 CA_CERTS_MOUNT_DIR="/etc/openclaw-ca"
-HOST=""
+HOST="${OPENCLAW_HOST:-}"
 STORAGE="${DEFAULT_STORAGE_OPENCLAW}"
+UPGRADE="false"
 UNINSTALL="false"
 
 bootstrap_openclaw_agent_workspace_markdown() {
@@ -252,6 +256,9 @@ while [[ $# -gt 0 ]]; do
     --storage=*)
       STORAGE="${1#*=}"
       ;;
+    --upgrade)
+      UPGRADE="true"
+      ;;
     --uninstall)
       UNINSTALL="true"
       ;;
@@ -294,7 +301,7 @@ if [[ "${UNINSTALL}" == "true" ]]; then
   exit 0
 fi
 
-[[ -n "${SECRET_NAME}" ]] || die "Secret name is required. Use --secret to specify a pre-created Kubernetes Secret."
+[[ -n "${SECRET_NAME}" ]] || die "Secret name cannot be empty."
 [[ -n "${OPENCLAW_CONFIG_FILE}" ]] || die "OpenClaw config file is required."
 [[ -f "${OPENCLAW_CONFIG_FILE}" ]] || die "OpenClaw config file not found: ${OPENCLAW_CONFIG_FILE}"
 [[ "${OPENCLAW_CONFIG_MODE}" == "merge" || "${OPENCLAW_CONFIG_MODE}" == "overwrite" ]] || die "Invalid config mode '${OPENCLAW_CONFIG_MODE}'. Expected: merge or overwrite."
@@ -390,6 +397,7 @@ To create the secret, run:
     --from-literal=DISCORD_BOT_TOKEN=YOUR_DISCORD_BOT_TOKEN \\
     --from-literal=GITHUB_TOKEN=YOUR_GITHUB_TOKEN \\
     --from-literal=ANTHROPIC_API_KEY=YOUR_MODEL_API_KEY \\
+    --from-literal=AISSTREAM_API_KEY=YOUR_AISSTREAM_API_KEY \\
     --from-literal=SAG_API_KEY=YOUR_SAG_API_KEY \\
     --namespace ${NAMESPACE}
 
@@ -619,12 +627,23 @@ log "Installing/Upgrading OpenClaw via Helm"
 log "NOTE: Wiring secret '${SECRET_NAME}' to chart via app-template.controllers.main.containers.main.envFrom"
 log "NOTE: Using managed OpenClaw config from: ${OPENCLAW_CONFIG_FILE} (mode: ${OPENCLAW_CONFIG_MODE})"
 
+CHART_VERSION_TO_USE="${CHART_VERSION_OPENCLAW}"
+if [[ "${CHART_VERSION_TO_USE}" == "latest" ]]; then
+  latest_chart_version="$(helm search repo openclaw/openclaw --versions 2> /dev/null | awk 'NR==2 {print $2}' || true)"
+  if [[ -n "${latest_chart_version}" ]]; then
+    CHART_VERSION_TO_USE="${latest_chart_version}"
+    log "Using latest OpenClaw chart version (CHART_VERSION_OPENCLAW=latest): ${CHART_VERSION_TO_USE}"
+  else
+    die "Failed to resolve latest OpenClaw chart version from Helm repository while CHART_VERSION_OPENCLAW=latest"
+  fi
+fi
+
 # Wire the secret using the chart's actual structure (app-template based)
 # The chart expects: app-template.controllers.main.containers.main.envFrom[0].secretRef.name
 HELM_OPENCLAW_ARGS=(
   upgrade --install openclaw openclaw/openclaw
   --namespace "${NAMESPACE}"
-  --version "${CHART_VERSION_OPENCLAW}"
+  --version "${CHART_VERSION_TO_USE}"
   --values "${VALUES_FILE}"
   --values "${SKILLS_VALUES_FILE}"
   --set-string "configMode=${OPENCLAW_CONFIG_MODE}"
@@ -633,6 +652,7 @@ HELM_OPENCLAW_ARGS=(
   --set-string "app-template.controllers.main.containers.main.env.PATH=${RUNTIME_BIN_DIR}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
   --set-string "app-template.controllers.main.containers.main.env.NODE_PATH=${OTEL_RUNTIME_DIR}/node_modules"
   --set-string "app-template.controllers.main.containers.main.env.NODE_OPTIONS=--require @opentelemetry/auto-instrumentations-node/register --use-openssl-ca"
+  --set-string "app-template.controllers.main.containers.main.env.OPENCLAW_HOST=${HOST}"
   --set-string "app-template.controllers.main.containers.main.env.OTEL_EXPORTER_OTLP_ENDPOINT=${OTLP_ENDPOINT}"
   --set-string "app-template.controllers.main.containers.main.env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=${OTLP_TRACES_ENDPOINT}"
   --set-string "app-template.controllers.main.containers.main.env.OTEL_TRACES_EXPORTER=otlp"
@@ -668,9 +688,16 @@ EOF
 
 log "OpenClaw installed successfully!"
 
+if [[ "${UPGRADE}" == "true" ]]; then
+  log "Forcing OpenClaw deployment rollout restart (--upgrade)"
+  run k -n "${NAMESPACE}" rollout restart deployment/openclaw
+  run k -n "${NAMESPACE}" rollout status deployment/openclaw --timeout=5m
+fi
+
 OPENCLAW_POD_NAME="$(k -n "${NAMESPACE}" get pods -l app.kubernetes.io/instance=openclaw -o jsonpath='{.items[0].metadata.name}' 2> /dev/null || true)"
 [[ -n "${OPENCLAW_POD_NAME}" ]] || die "Unable to determine OpenClaw pod name for diagnostics plugin setup"
 
+openclaw_install_cli_wrapper "${NAMESPACE}" "${OPENCLAW_POD_NAME}" "${RUNTIME_BIN_DIR}"
 openclaw_install_diagnostics_runtime_dependencies "${NAMESPACE}" "${OPENCLAW_POD_NAME}" "${OTEL_RUNTIME_DIR}"
 bootstrap_openclaw_agent_workspace_markdown "${NAMESPACE}" "${OPENCLAW_POD_NAME}" "${AGENT_WORKSPACE_DIR}" "${WORKSPACE_BOOTSTRAP_MODE}"
 
@@ -708,7 +735,7 @@ spec:
           service:
             name: ${OPENCLAW_SVC}
             port:
-              number: 80
+              number: 18789
 EOF
 
   recipe_maybe_add_edge_http_domain "${HOST}"
@@ -732,6 +759,12 @@ EOF
 if [[ -n "${HOST}" ]]; then
   cat << EOF
   Host:       ${HOST}
+EOF
+fi
+
+if [[ -n "${HOST}" ]]; then
+  cat << EOF
+  Gateway:    ${HOST}
 EOF
 fi
 
@@ -781,8 +814,15 @@ EOF
 
 if [[ -n "${HOST}" ]]; then
   cat << EOF
-- Via Ingress: http://${HOST}
+- Via Ingress: https://${HOST}
   (ensure ${HOST} resolves to node IP and is in Caddy edge-http domains)
+EOF
+fi
+
+if [[ -n "${HOST}" ]]; then
+  cat << EOF
+- Gateway (for webhooks): https://${HOST}
+  (same host as OpenClaw UI/API)
 EOF
 fi
 

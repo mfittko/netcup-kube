@@ -37,6 +37,7 @@ Available recipes:
   kube-prometheus-stack    Install Grafana + Prometheus + Alertmanager
   dashboard                Install Kubernetes Dashboard (official web UI)
   llm-proxy                Install llm-proxy (Helm chart; Secret-backed config)
+	vscode-copilot-proxy     Install internal-only OpenVSCode Server for Copilot Proxy
   openclaw                 Install OpenClaw with kernel-level network monitoring
 
 Examples:
