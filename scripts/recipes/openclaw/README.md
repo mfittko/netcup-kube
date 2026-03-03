@@ -148,7 +148,8 @@ Cron jobs can also be synced via `netcup-claw`:
 
 - `netcup-claw cron backup`
 - `netcup-claw cron pull`
-- `netcup-claw cron deploy`
+- `netcup-claw cron sync` (recommended/default behavior)
+- `netcup-claw cron deploy` (uses sync semantics)
 - `netcup-claw cron push` (alias of deploy)
 
 Approvals can also be synced via `netcup-claw`:

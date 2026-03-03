@@ -7,8 +7,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"reflect"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -1446,14 +1446,82 @@ var approvalsDeployCmd = &cobra.Command{
 
 var cronCmd = &cobra.Command{
 	Use:   "cron",
-	Short: "Backup or deploy OpenClaw cron jobs file",
+	Short: "Backup, pull, or sync OpenClaw cron jobs",
 	Long: `Manage OpenClaw cron jobs state against the running pod.
 
 Sub-commands:
   backup  - Pull current cron jobs snapshot into local backup path
   pull    - Pull current cron jobs snapshot into local workspace file
-	deploy  - Push local cron jobs JSON to runtime with optional pre-change backup
+	deploy  - Sync local jobs to scheduler (default, with optional pre-change backup)
 	sync    - Apply local jobs via openclaw cron edit to refresh scheduler state`,
+}
+
+func syncCronJobsFromFile(inputPath string) error {
+	payload, err := os.ReadFile(inputPath)
+	if err != nil {
+		return fmt.Errorf("failed to read cron jobs file %s: %w", inputPath, err)
+	}
+
+	normalizedPayload, err := normalizeCronJobsPayload(payload)
+	if err != nil {
+		return err
+	}
+
+	file, err := parseCronJobsFile(normalizedPayload)
+	if err != nil {
+		return err
+	}
+
+	cfg, pod, err := resolveOpenClawPod()
+	if err != nil {
+		return err
+	}
+
+	currentSnapshot, err := fetchCronJobsSnapshot(cfg, pod)
+	if err != nil {
+		return err
+	}
+
+	normalizedCurrent, err := normalizeCronJobsPayload(currentSnapshot)
+	if err != nil {
+		return err
+	}
+
+	currentFile, err := parseCronJobsFile(normalizedCurrent)
+	if err != nil {
+		return err
+	}
+
+	currentByID := make(map[string]cronJobSpec, len(currentFile.Jobs))
+	for _, job := range currentFile.Jobs {
+		if id := strings.TrimSpace(job.ID); id != "" {
+			currentByID[id] = job
+		}
+	}
+
+	applied := 0
+	skipped := 0
+	for _, job := range file.Jobs {
+		if current, ok := currentByID[strings.TrimSpace(job.ID)]; ok {
+			if cronJobSpecEqualForSync(job, current) {
+				skipped++
+				continue
+			}
+		}
+
+		editArgs, buildErr := buildCronEditArgs(job)
+		if buildErr != nil {
+			return fmt.Errorf("job %q (%s): %w", job.Name, job.ID, buildErr)
+		}
+
+		if err := runKubectl(buildOpenClawCLIKubectlArgs(cfg.Namespace, pod, editArgs)...); err != nil {
+			return fmt.Errorf("failed to sync job %q (%s): %w", job.Name, job.ID, err)
+		}
+		applied++
+	}
+
+	fmt.Printf("sync complete: %d updated, %d unchanged\n", applied, skipped)
+	return nil
 }
 
 var cronBackupCmd = &cobra.Command{
@@ -1529,7 +1597,13 @@ var cronPullCmd = &cobra.Command{
 var cronDeployCmd = &cobra.Command{
 	Use:     "deploy",
 	Aliases: []string{"push"},
-	Short:   "Deploy local cron jobs JSON to runtime",
+	Short:   "Sync local cron jobs JSON to scheduler (default path)",
+	Long: `Apply local cron jobs to runtime using scheduler-safe sync behavior.
+
+This command now uses the same semantics as:
+  netcup-claw cron sync
+
+Optional backup still runs first unless --backup-path=off.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		inputPath := strings.TrimSpace(cronDeployFile)
 		if inputPath == "" {
@@ -1538,16 +1612,6 @@ var cronDeployCmd = &cobra.Command{
 
 		if _, err := os.Stat(inputPath); err != nil {
 			return fmt.Errorf("failed to read cron jobs file %s: %w", inputPath, err)
-		}
-
-		payload, err := os.ReadFile(inputPath)
-		if err != nil {
-			return fmt.Errorf("failed to read cron jobs file %s: %w", inputPath, err)
-		}
-
-		normalizedPayload, err := normalizeCronJobsPayload(payload)
-		if err != nil {
-			return err
 		}
 
 		cfg, pod, err := resolveOpenClawPod()
@@ -1574,51 +1638,8 @@ var cronDeployCmd = &cobra.Command{
 			}
 		}
 
-		tmpLocalFile, err := os.CreateTemp("", "netcup-claw-cron-jobs-*.json")
-		if err != nil {
-			return fmt.Errorf("failed to create temporary cron jobs file: %w", err)
-		}
-		tmpLocalPath := tmpLocalFile.Name()
-		if _, err := tmpLocalFile.Write(normalizedPayload); err != nil {
-			_ = tmpLocalFile.Close()
-			_ = os.Remove(tmpLocalPath)
-			return fmt.Errorf("failed to write temporary cron jobs file: %w", err)
-		}
-		if err := tmpLocalFile.Close(); err != nil {
-			_ = os.Remove(tmpLocalPath)
-			return fmt.Errorf("failed to close temporary cron jobs file: %w", err)
-		}
-		defer func() {
-			_ = os.Remove(tmpLocalPath)
-		}()
-
-		remoteTempPath := "/tmp/netcup-claw-cron-jobs.json"
-		if err := runKubectl(
-			"-n", cfg.Namespace,
-			"cp",
-			tmpLocalPath,
-			pod+":"+remoteTempPath,
-			"-c", openclawMainContainer,
-		); err != nil {
-			return fmt.Errorf("failed to upload cron jobs file: %w", err)
-		}
-
-		if err := runKubectl(
-			"-n", cfg.Namespace,
-			"exec",
-			"-c", openclawMainContainer,
-			pod,
-			"--",
-			"sh",
-			"-lc",
-			fmt.Sprintf("mkdir -p /home/node/.openclaw/cron && mv %s /home/node/.openclaw/cron/jobs.json && chmod 0644 /home/node/.openclaw/cron/jobs.json", shellQuote(remoteTempPath)),
-		); err != nil {
-			return fmt.Errorf("failed to apply cron jobs file: %w", err)
-		}
-
-		fmt.Printf("deploy complete: %s\n", inputPath)
-		fmt.Println("note: if scheduler does not pick up changes immediately, restart OpenClaw deployment")
-		return nil
+		fmt.Println("deploy uses sync semantics (scheduler-safe) by default")
+		return syncCronJobsFromFile(inputPath)
 	},
 }
 
@@ -1636,72 +1657,7 @@ It is useful when file-based deploy does not fully refresh scheduler in-memory s
 		if inputPath == "" {
 			inputPath = filepath.Join(localCronWorkspaceDir(), "jobs.json")
 		}
-
-		payload, err := os.ReadFile(inputPath)
-		if err != nil {
-			return fmt.Errorf("failed to read cron jobs file %s: %w", inputPath, err)
-		}
-
-		normalizedPayload, err := normalizeCronJobsPayload(payload)
-		if err != nil {
-			return err
-		}
-
-		file, err := parseCronJobsFile(normalizedPayload)
-		if err != nil {
-			return err
-		}
-
-		cfg, pod, err := resolveOpenClawPod()
-		if err != nil {
-			return err
-		}
-
-		currentSnapshot, err := fetchCronJobsSnapshot(cfg, pod)
-		if err != nil {
-			return err
-		}
-
-		normalizedCurrent, err := normalizeCronJobsPayload(currentSnapshot)
-		if err != nil {
-			return err
-		}
-
-		currentFile, err := parseCronJobsFile(normalizedCurrent)
-		if err != nil {
-			return err
-		}
-
-		currentByID := make(map[string]cronJobSpec, len(currentFile.Jobs))
-		for _, job := range currentFile.Jobs {
-			if id := strings.TrimSpace(job.ID); id != "" {
-				currentByID[id] = job
-			}
-		}
-
-		applied := 0
-		skipped := 0
-		for _, job := range file.Jobs {
-			if current, ok := currentByID[strings.TrimSpace(job.ID)]; ok {
-				if cronJobSpecEqualForSync(job, current) {
-					skipped++
-					continue
-				}
-			}
-
-			editArgs, buildErr := buildCronEditArgs(job)
-			if buildErr != nil {
-				return fmt.Errorf("job %q (%s): %w", job.Name, job.ID, buildErr)
-			}
-
-			if err := runKubectl(buildOpenClawCLIKubectlArgs(cfg.Namespace, pod, editArgs)...); err != nil {
-				return fmt.Errorf("failed to sync job %q (%s): %w", job.Name, job.ID, err)
-			}
-			applied++
-		}
-
-		fmt.Printf("sync complete: %d updated, %d unchanged\n", applied, skipped)
-		return nil
+		return syncCronJobsFromFile(inputPath)
 	},
 }
 
@@ -2359,8 +2315,8 @@ func init() {
 	approvalsCmd.AddCommand(approvalsDeployCmd)
 	rootCmd.AddCommand(approvalsCmd)
 	cronCmd.PersistentFlags().StringVar(&cronWorkspaceDir, "workspace-dir", "", "Local cron workspace root (default: scripts/recipes/openclaw/cron)")
-	cronCmd.PersistentFlags().StringVar(&cronBackupPath, "backup-path", "", "Directory or file path for cron jobs backups (default: <workspace-dir>/backup, use 'off' to disable on deploy)")
-	cronDeployCmd.Flags().StringVar(&cronDeployFile, "file", "", "Local cron jobs JSON file to deploy (default: <workspace-dir>/jobs.json)")
+	cronCmd.PersistentFlags().StringVar(&cronBackupPath, "backup-path", "", "Directory or file path for cron jobs backups (default: <workspace-dir>/backup, use 'off' to disable pre-sync backup in deploy)")
+	cronDeployCmd.Flags().StringVar(&cronDeployFile, "file", "", "Local cron jobs JSON file to sync via deploy (default: <workspace-dir>/jobs.json)")
 	cronSyncCmd.Flags().StringVar(&cronDeployFile, "file", "", "Local cron jobs JSON file to sync (default: <workspace-dir>/jobs.json)")
 	cronCmd.AddCommand(cronBackupCmd)
 	cronCmd.AddCommand(cronPullCmd)
