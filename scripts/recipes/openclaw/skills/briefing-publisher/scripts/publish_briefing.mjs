@@ -167,6 +167,9 @@ function buildRssFeed({ title, description, siteUrl, feedPath, items }) {
     `    <title>${xmlEscape(title)}</title>`,
     `    <description>${xmlEscape(description)}</description>`,
     `    <link>${xmlEscape(channelLink)}</link>`,
+    '    <language>en-us</language>',
+    '    <generator>briefing-publisher</generator>',
+    '    <docs>https://www.rssboard.org/rss-specification</docs>',
     `    <atom:link href="${xmlEscape(atomSelf)}" rel="self" type="application/rss+xml" />`,
     `    <lastBuildDate>${new Date().toUTCString()}</lastBuildDate>`,
     body,
@@ -256,6 +259,131 @@ ${items}
   </body>
 </html>
 `;
+}
+
+function buildRootHomeHtml({ series, latestViewerUrl, latestMdUrl, seriesFeedUrl, seriesIndexUrl, entries }) {
+  const seriesTitle = titleCaseSeries(series);
+  const listItems = entries
+    .slice(0, 5)
+    .map((entry) => `        <li class="inline-links">${htmlEscape(entry.label)} (<a href="${htmlEscape(entry.viewerUrl)}">html</a>|<a href="${htmlEscape(entry.mdUrl)}">md</a>)</li>`)
+    .join('\n');
+
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AI Briefings</title>
+    <style>
+      :root { color-scheme: dark; }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        margin: 0;
+        background: #0d1117;
+        color: #c9d1d9;
+      }
+      .shell {
+        margin: 2rem auto;
+        max-width: 860px;
+        line-height: 1.5;
+        padding: 0 1rem;
+      }
+      h1, h2 { margin-bottom: 0.4rem; color: #f0f6fc; }
+      h3, h4 { margin-bottom: 0.3rem; color: #f0f6fc; }
+      ul { margin-top: 0.4rem; }
+      a { color: #58a6ff; }
+      code { background: #161b22; padding: 0.1rem 0.35rem; border-radius: 4px; color: #c9d1d9; }
+      .inline-links a { margin: 0 0.2rem; }
+      .muted { color: #8b949e; font-size: 0.95rem; }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <h1>AI Briefings</h1>
+      <p>Published briefings for market and geopolitics workflows.</p>
+
+      <h2>Reports</h2>
+      <h3>${htmlEscape(seriesTitle)}</h3>
+      <ul>
+        <li class="inline-links">latest (
+          <a href="${htmlEscape(latestViewerUrl)}">html</a>|
+          <a href="${htmlEscape(latestMdUrl)}">md</a>
+        )</li>
+        <li>RSS feed: <a href="${htmlEscape(seriesFeedUrl)}">feed.xml</a></li>
+      </ul>
+
+      <h4>archive (limit to 5 max)</h4>
+      <ul>
+${listItems || '        <li class="muted">No archive entries yet.</li>'}
+      </ul>
+      <p class="muted">Full archive: <a href="${htmlEscape(seriesIndexUrl)}">reports/${htmlEscape(series)}/index.html</a></p>
+    </div>
+  </body>
+</html>
+`;
+}
+
+function titleCaseSeries(series) {
+  return String(series || '')
+    .split('/')
+    .filter(Boolean)
+    .map((part) => part.replace(/[-_]+/g, ' '))
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' / ');
+}
+
+function buildRootSeriesSection({ series, latestViewerUrl, latestMdUrl, seriesIndexUrl, seriesFeedUrl, entries }) {
+  const sectionTitle = titleCaseSeries(series);
+  const lines = [];
+  lines.push(`### ${sectionTitle}`);
+  lines.push('');
+  lines.push(`- latest ( [html](${latestViewerUrl})| [md](${latestMdUrl}) )`);
+  lines.push(`- RSS feed: [feed.xml](${seriesFeedUrl})`);
+  lines.push('');
+  lines.push('#### archive (limit to 5 max)');
+  lines.push('');
+
+  for (const entry of entries.slice(0, 5)) {
+    lines.push(`- ${entry.label} ([html](${entry.viewerUrl})|[md](${entry.mdUrl}))`);
+  }
+
+  lines.push('');
+  lines.push(`Full archive: [reports/${series}/index.html](${seriesIndexUrl})`);
+  lines.push('');
+  return lines.join('\n');
+}
+
+function upsertRootIndexSeriesSection(oldContent, { series, section }) {
+  const sectionTitle = titleCaseSeries(series);
+  const normalized = String(oldContent || '').trim();
+
+  if (!normalized) {
+    return [
+      '# AI Briefings',
+      '',
+      'Published briefings for market and geopolitics workflows.',
+      '',
+      '## Reports',
+      '',
+      section,
+    ].join('\n');
+  }
+
+  const escapedTitle = sectionTitle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const sectionPattern = new RegExp(
+    `(^### ${escapedTitle}\\n[\\s\\S]*?)(?=\\n### |\\n## Naming convention|$)`,
+    'm'
+  );
+  if (sectionPattern.test(oldContent)) {
+    return oldContent.replace(sectionPattern, `${section}\n`);
+  }
+
+  const reportsHeader = /^## Reports\s*$/m;
+  if (reportsHeader.test(oldContent)) {
+    return oldContent.replace(reportsHeader, `## Reports\n\n${section}`);
+  }
+
+  return `${oldContent.replace(/\s*$/, '')}\n\n## Reports\n\n${section}`;
 }
 
 function branchRefPath(branch) {
@@ -475,6 +603,8 @@ function derivePaths({ series, stamp }) {
   const indexHtmlPath = `${baseDir}/index.html`;
   const seriesFeedPath = `${baseDir}/feed.xml`;
   const rootFeedPath = 'docs/feed.xml';
+  const rootIndexPath = 'docs/index.md';
+  const rootIndexHtmlPath = 'docs/index.html';
 
   const archiveRelativePath = `${year}/${month}/${stamp}.md`;
 
@@ -485,6 +615,8 @@ function derivePaths({ series, stamp }) {
     indexHtmlPath,
     seriesFeedPath,
     rootFeedPath,
+    rootIndexPath,
+    rootIndexHtmlPath,
     archiveRelativePath,
   };
 }
@@ -535,6 +667,8 @@ async function main() {
             indexPath: paths.indexPath,
             seriesFeedPath: paths.seriesFeedPath,
             rootFeedPath: paths.rootFeedPath,
+            rootIndexPath: paths.rootIndexPath,
+            rootIndexHtmlPath: paths.rootIndexHtmlPath,
             archiveUrl,
             latestUrl,
             seriesFeedUrl,
@@ -560,6 +694,14 @@ async function main() {
       filePath: paths.indexPath,
     });
 
+    const oldRootIndex = await getTextFile({
+      token,
+      owner,
+      repo,
+      branch: args.branch,
+      filePath: paths.rootIndexPath,
+    });
+
     const newIndex = updateIndexContent(oldIndex, paths.archiveRelativePath, stamp);
 
     const entries = parseIndexEntries(newIndex).map((entry) => {
@@ -567,6 +709,7 @@ async function main() {
       return {
         label: entry.label,
         link: `${base}/viewer.html?src=${encodeURIComponent(mdPath)}`,
+        mdUrl: `${base}/reports/${series}/${entry.link}`,
       };
     });
     const indexHtml = buildSeriesIndexHtml({
@@ -579,11 +722,11 @@ async function main() {
 
     const rssItems = parseIndexEntries(newIndex).slice(0, 100).map((entry) => {
       const mdPath = `${sitePath}/reports/${series}/${entry.link}`;
-      const viewerLink = `${base}/viewer.html?src=${encodeURIComponent(mdPath)}`;
+      const mdLink = `${base}/reports/${series}/${entry.link}`;
       return {
         title: `${series} ${entry.label}`,
-        link: viewerLink,
-        guid: viewerLink,
+        link: mdLink,
+        guid: mdLink,
         pubDate: stampToRfc822(entry.label),
         description: `Automated ${series} briefing for ${entry.label}`,
       };
@@ -605,6 +748,32 @@ async function main() {
       items: rssItems,
     });
 
+    const rootSectionEntries = entries.map((entry) => ({
+      label: entry.label,
+      viewerUrl: entry.link,
+      mdUrl: entry.mdUrl,
+    }));
+    const rootSeriesSection = buildRootSeriesSection({
+      series,
+      latestViewerUrl: latestUrl,
+      latestMdUrl: `${base}/reports/${series}/latest.md`,
+      seriesIndexUrl: `${base}/reports/${series}/index.html`,
+      seriesFeedUrl,
+      entries: rootSectionEntries,
+    });
+    const newRootIndex = upsertRootIndexSeriesSection(oldRootIndex, {
+      series,
+      section: rootSeriesSection,
+    });
+    const newRootIndexHtml = buildRootHomeHtml({
+      series,
+      latestViewerUrl: latestUrl,
+      latestMdUrl: `${base}/reports/${series}/latest.md`,
+      seriesFeedUrl,
+      seriesIndexUrl: `${base}/reports/${series}/index.html`,
+      entries: rootSectionEntries,
+    });
+
     const commitSha = await commitFilesBatch({
       token,
       owner,
@@ -618,6 +787,8 @@ async function main() {
         { path: paths.indexHtmlPath, content: indexHtml },
         { path: paths.seriesFeedPath, content: seriesFeed },
         { path: paths.rootFeedPath, content: rootFeed },
+        { path: paths.rootIndexPath, content: newRootIndex },
+        { path: paths.rootIndexHtmlPath, content: newRootIndexHtml },
       ],
     });
 
@@ -634,6 +805,8 @@ async function main() {
           indexPath: paths.indexPath,
           seriesFeedPath: paths.seriesFeedPath,
           rootFeedPath: paths.rootFeedPath,
+          rootIndexPath: paths.rootIndexPath,
+          rootIndexHtmlPath: paths.rootIndexHtmlPath,
           commitSha,
           archiveUrl,
           latestUrl,
