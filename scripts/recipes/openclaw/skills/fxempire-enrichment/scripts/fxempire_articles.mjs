@@ -140,6 +140,8 @@ function normalizeExtractedText(text) {
     .replace(/\r/g, '')
     .replace(/[\t\f\v]+/g, ' ')
     .replace(/\u00a0/g, ' ')
+    .replace(/(?<!\b[A-Z])([.!?;:])([A-Z])/g, '$1 $2')
+    .replace(/([\)\]])([A-Z])/g, '$1 $2')
     .replace(/([a-z])([A-Z])/g, '$1 $2')
     .split('\n')
     .map((line) => line.replace(/\s+/g, ' ').trim())
