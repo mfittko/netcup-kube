@@ -1,12 +1,20 @@
-````skill
 ---
 name: fxempire-live-data
-description: Fetch live FXEmpire market data (candles and rates) for indices, commodities, FX, and crypto via documented website APIs and Oanda proxy candles endpoint.
+description: Retrieve near-real-time market data from chat by running one command for FXEmpire/Oanda candles and rates across indices, commodities, FX, and crypto. Prefer JSON output for downstream automation.
 ---
 
 # FXEmpire live data
 
 Use `scripts/fxempire_live_data.mjs` when you need machine-readable near-live candles or rates snapshots in cron/agent workflows.
+
+## Trigger from chat
+
+Use a direct command prompt, for example:
+
+```text
+Run this command and return only JSON:
+node /home/node/.openclaw/workspace/skills/fxempire-live-data/scripts/fxempire_live_data.mjs --mode candles --provider oanda --instrument NAS100/USD --granularity M1 --count 200 --alignmentTimezone Europe/Berlin
+```
 
 ## Quick examples
 
@@ -81,4 +89,3 @@ node skills/fxempire-live-data/scripts/fxempire_live_data.mjs \
 
 - Endpoints are not formally public APIs and may change.
 - Prefer using this skill as the single integration point so endpoint changes are isolated.
-````
