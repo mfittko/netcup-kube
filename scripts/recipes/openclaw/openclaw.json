@@ -54,6 +54,9 @@
             "cacheRetention": "short"
           }
         },
+        "openai-codex/gpt-5.1-codex-mini": {
+          "alias": "codex-mini"
+        },
         "openai-codex/gpt-5.2": {},
         "openai-codex/gpt-5.3-codex": {
           "alias": "codex"

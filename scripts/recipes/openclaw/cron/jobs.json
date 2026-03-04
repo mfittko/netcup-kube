@@ -2,7 +2,6 @@
   "jobs": [
     {
       "agentId": "main",
-      "createdAtMs": 1771850534267,
       "deleteAfterRun": false,
       "delivery": {
         "bestEffort": true,
@@ -23,23 +22,9 @@
         "kind": "cron",
         "tz": "Europe/Berlin"
       },
-      "sessionKey": "agent:main:main",
-      "sessionTarget": "isolated",
-      "state": {
-        "consecutiveErrors": 0,
-        "lastDelivered": false,
-        "lastDeliveryStatus": "not-delivered",
-        "lastDurationMs": 97233,
-        "lastRunAtMs": 1772431200010,
-        "lastRunStatus": "ok",
-        "lastStatus": "ok",
-        "nextRunAtMs": 1772517600000
-      },
-      "updatedAtMs": 1772431297243,
-      "wakeMode": "now"
+      "sessionTarget": "isolated"
     },
     {
-      "createdAtMs": 1771965327379,
       "deleteAfterRun": false,
       "delivery": {
         "bestEffort": false,
@@ -61,22 +46,9 @@
         "kind": "cron",
         "tz": "Europe/Berlin"
       },
-      "sessionTarget": "isolated",
-      "state": {
-        "consecutiveErrors": 0,
-        "lastDelivered": true,
-        "lastDeliveryStatus": "delivered",
-        "lastDurationMs": 112786,
-        "lastRunAtMs": 1772490542630,
-        "lastRunStatus": "ok",
-        "lastStatus": "ok",
-        "nextRunAtMs": 1772514000000
-      },
-      "updatedAtMs": 1772490655416,
-      "wakeMode": "now"
+      "sessionTarget": "isolated"
     },
     {
-      "createdAtMs": 1772495000000,
       "deleteAfterRun": false,
       "delivery": {
         "bestEffort": true,
@@ -98,22 +70,9 @@
         "kind": "cron",
         "tz": "Europe/Berlin"
       },
-      "sessionTarget": "isolated",
-      "state": {
-        "consecutiveErrors": 0,
-        "lastDelivered": true,
-        "lastDeliveryStatus": "delivered",
-        "lastDurationMs": 22204,
-        "lastRunAtMs": 1772491203985,
-        "lastRunStatus": "ok",
-        "lastStatus": "ok",
-        "nextRunAtMs": 1772514300000
-      },
-      "updatedAtMs": 1772491226189,
-      "wakeMode": "now"
+      "sessionTarget": "isolated"
     },
     {
-      "createdAtMs": 1771965350883,
       "delivery": {
         "channel": "discord",
         "mode": "announce",
@@ -133,22 +92,9 @@
         "kind": "cron",
         "tz": "Europe/Berlin"
       },
-      "sessionTarget": "isolated",
-      "state": {
-        "consecutiveErrors": 0,
-        "lastDelivered": true,
-        "lastDeliveryStatus": "delivered",
-        "lastDurationMs": 134925,
-        "lastRunAtMs": 1772384400006,
-        "lastRunStatus": "ok",
-        "lastStatus": "ok",
-        "nextRunAtMs": 1772989200000
-      },
-      "updatedAtMs": 1772384534931,
-      "wakeMode": "now"
+      "sessionTarget": "isolated"
     },
     {
-      "createdAtMs": 1771966299743,
       "deleteAfterRun": false,
       "delivery": {
         "bestEffort": false,
@@ -161,7 +107,7 @@
       "name": "Daily Sentinel",
       "payload": {
         "kind": "agentTurn",
-        "message": "You are running a daily geopolitical and world events sentinel scan for #news. FIRST: Read /home/node/.openclaw/workspace/sentinel/state.json and /home/node/.openclaw/workspace/sentinel/daily-log.md for prior context. Compare new findings against activeThreats and watchZones. Your job: 1) Armed conflicts and military: Active wars, escalations, military buildups, strikes, naval movements, drone attacks. Track trajectory vs yesterday. 2) Political instability: Coups, mass protests, government collapses, contested elections, sanctions, diplomatic breakdowns. 3) Severe weather and natural disasters: Hurricanes, earthquakes, floods, droughts — especially those affecting supply chains, shipping lanes, or commodity production. 4) Elections and policy shifts: Upcoming votes, polling shifts, surprise policy announcements, regulatory changes. 5) Energy and supply chain: Shipping lane disruptions (Suez, Hormuz, Panama), pipeline incidents, OPEC decisions, port closures. 6) Cyber and infrastructure: Major cyberattacks, grid failures, telecom outages affecting markets or economies. 7) Market impact assessment: For each flagged event, rate potential market impact (LOW/MEDIUM/HIGH) and which asset classes are most exposed. AFTER posting: Update sentinel/state.json with current activeThreats, watchZones, escalationTimeline, and any marketImpactAlerts. Append 2-3 line summary to sentinel/daily-log.md. Format as concise briefing. Use 🔴 HIGH 🟡 MEDIUM 🟢 LOW for impact ratings. Discord-friendly (no tables). If the world is quiet, say so briefly.",
+        "message": "You are running a daily geopolitical and world events sentinel scan for #news. FIRST: Read /home/node/.openclaw/workspace/sentinel/state.json and /home/node/.openclaw/workspace/sentinel/daily-log.md for prior context. Also read /home/node/.openclaw/workspace/state/truthsocial-trump-watch/latest-posts.json and treat it as a primary signal source for U.S. geopolitical intent/messaging. Compare new findings against activeThreats and watchZones. Your job: 1) Armed conflicts and military: Active wars, escalations, military buildups, strikes, naval movements, drone attacks. Track trajectory vs yesterday. 2) Political instability: Coups, mass protests, government collapses, contested elections, sanctions, diplomatic breakdowns. 3) Severe weather and natural disasters: Hurricanes, earthquakes, floods, droughts — especially those affecting supply chains, shipping lanes, or commodity production. 4) Elections and policy shifts: Upcoming votes, polling shifts, surprise policy announcements, regulatory changes. 5) Energy and supply chain: Shipping lane disruptions (Suez, Hormuz, Panama), pipeline incidents, OPEC decisions, port closures. 6) Cyber and infrastructure: Major cyberattacks, grid failures, telecom outages affecting markets or economies. 7) Trump Truth signal: summarize notable new posts (if any), classify geopolitical/market relevance, and map each to potential near-term transmission channels. 8) Market impact assessment: For each flagged event, rate potential market impact (LOW/MEDIUM/HIGH) and which asset classes are most exposed. AFTER posting: Update sentinel/state.json with current activeThreats, watchZones, escalationTimeline, and any marketImpactAlerts. Append 2-3 line summary to sentinel/daily-log.md. Format as concise briefing. Use 🔴 HIGH 🟡 MEDIUM 🟢 LOW for impact ratings. Discord-friendly (no tables). If the world is quiet, say so briefly.",
         "model": "gpt-5.2",
         "thinking": "low"
       },
@@ -170,22 +116,9 @@
         "kind": "cron",
         "tz": "Europe/Berlin"
       },
-      "sessionTarget": "isolated",
-      "state": {
-        "consecutiveErrors": 0,
-        "lastDelivered": true,
-        "lastDeliveryStatus": "delivered",
-        "lastDurationMs": 88246,
-        "lastRunAtMs": 1772425800009,
-        "lastRunStatus": "ok",
-        "lastStatus": "ok",
-        "nextRunAtMs": 1772512200000
-      },
-      "updatedAtMs": 1772425888255,
-      "wakeMode": "now"
+      "sessionTarget": "isolated"
     },
     {
-      "createdAtMs": 1771966313724,
       "deleteAfterRun": false,
       "delivery": {
         "bestEffort": false,
@@ -207,22 +140,9 @@
         "kind": "cron",
         "tz": "Europe/Berlin"
       },
-      "sessionTarget": "isolated",
-      "state": {
-        "consecutiveErrors": 0,
-        "lastDelivered": true,
-        "lastDeliveryStatus": "delivered",
-        "lastDurationMs": 145771,
-        "lastRunAtMs": 1772382600007,
-        "lastRunStatus": "ok",
-        "lastStatus": "ok",
-        "nextRunAtMs": 1772987400000
-      },
-      "updatedAtMs": 1772382745778,
-      "wakeMode": "now"
+      "sessionTarget": "isolated"
     },
     {
-      "createdAtMs": 1771971246098,
       "deleteAfterRun": false,
       "delivery": {
         "bestEffort": false,
@@ -243,22 +163,9 @@
         "kind": "cron",
         "tz": "UTC"
       },
-      "sessionTarget": "isolated",
-      "state": {
-        "consecutiveErrors": 0,
-        "lastDelivered": true,
-        "lastDeliveryStatus": "delivered",
-        "lastDurationMs": 155253,
-        "lastRunAtMs": 1772436600008,
-        "lastRunStatus": "ok",
-        "lastStatus": "ok",
-        "nextRunAtMs": 1772523000000
-      },
-      "updatedAtMs": 1772436755261,
-      "wakeMode": "now"
+      "sessionTarget": "isolated"
     },
     {
-      "createdAtMs": 1771972248981,
       "deleteAfterRun": false,
       "delivery": {
         "bestEffort": false,
@@ -271,7 +178,7 @@
       "name": "AI-Lab Tech Lab Briefing (Wed 08:00 UTC)",
       "payload": {
         "kind": "agentTurn",
-        "message": "Create the weekly AI-Lab Tech Lab briefing.\\n\\nPrimary sources:\\n1) Sofatutor AI Tech Lab project board: https://github.com/orgs/sofatutor/projects/16/views/6\\n2) Repo: https://github.com/sofatutor/ai-lab\\n\\nWhat to include (keep it concise):\\n- Project board: what’s in the top priority/next columns, what’s blocked, what’s stale (no movement in 7+ days), and what needs my input.\\n- ai-lab repo: PRs needing my review, PRs assigned to me, issues assigned to me, and anything mentioning me (last 7 days).\\n- If there are security alerts/CI failures in ai-lab, call them out.\\n\\nOutput format:\\n1) Top 3 priorities for Tech Lab day\\n2) Board highlights (bullets)\\n3) ai-lab repo highlights (bullets with links)\\n4) ‘Asks for me’ (explicit decisions/reviews needed)",
+        "message": "Create the weekly AI-Lab Tech Lab briefing. Exclude/ignore any issues or PRs labeled 'on hold'.\\n\\nPrimary sources:\\n1) Sofatutor AI Tech Lab project board: https://github.com/orgs/sofatutor/projects/16/views/6\\n2) Repo: https://github.com/sofatutor/ai-lab\\n\\nWhat to include (keep it concise):\\n- Project board: what’s in the top priority/next columns, what’s blocked, what’s stale (no movement in 7+ days), and what needs my input.\\n- ai-lab repo: PRs needing my review, PRs assigned to me, issues assigned to me, and anything mentioning me (last 7 days).\\n- If there are security alerts/CI failures in ai-lab, call them out.\\n\\nOutput format:\\n1) Top 3 priorities for Tech Lab day\\n2) Board highlights (bullets)\\n3) ai-lab repo highlights (bullets with links)\\n4) ‘Asks for me’ (explicit decisions/reviews needed)",
         "model": "gpt-5.2"
       },
       "schedule": {
@@ -279,89 +186,50 @@
         "kind": "cron",
         "tz": "UTC"
       },
-      "sessionTarget": "isolated",
-      "state": {
-        "consecutiveErrors": 0,
-        "lastDelivered": true,
-        "lastDeliveryStatus": "delivered",
-        "lastDurationMs": 115239,
-        "lastRunAtMs": 1772008840292,
-        "lastRunStatus": "ok",
-        "lastStatus": "ok",
-        "nextRunAtMs": 1772611200000
-      },
-      "updatedAtMs": 1772273958473,
-      "wakeMode": "now"
+      "sessionTarget": "isolated"
     },
     {
-      "createdAtMs": 1772274098234,
-      "deleteAfterRun": false,
       "delivery": {
         "bestEffort": false,
         "channel": "discord",
         "mode": "announce",
-        "to": "channel:1475978451516391464"
-      },
-      "enabled": true,
-      "id": "5fb9e89d-d51b-496e-a6c8-9b1fb5cd68fb",
-      "name": "Daily GitHub Morning Brief (sofatutor)",
-      "payload": {
-        "kind": "agentTurn",
-        "message": "Create a morning GitHub briefing for the sofatutor org. Exclude/ignore any issues or PRs labeled 'on hold'. Focus on: (1) PRs where review is requested from me, (2) PRs assigned to me, (3) issues assigned to me, (4) items where I was mentioned, (5) relevant GitHub notifications in sofatutor/* that likely need my action (reason: review_requested/mention/assign/security_alert). For each section, list top items (prefer last 24h; include older only if high priority) with repo#number, title, and URL. End with a 3-item recommended priority list for today. Keep it concise and actionable.",
-        "model": "openai-codex/gpt-5.2"
-      },
-      "schedule": {
-        "expr": "30 7 * * 1-5",
-        "kind": "cron",
-        "tz": "UTC"
-      },
-      "sessionTarget": "isolated",
-      "state": {
-        "consecutiveErrors": 0,
-        "lastDelivered": true,
-        "lastDeliveryStatus": "delivered",
-        "lastDurationMs": 241065,
-        "lastRunAtMs": 1772436755261,
-        "lastRunStatus": "ok",
-        "lastStatus": "ok",
-        "nextRunAtMs": 1772523000000
-      },
-      "updatedAtMs": 1772436996326,
-      "wakeMode": "now"
-    },
-    {
-      "createdAtMs": 1772452317087,
-      "delivery": {
-        "channel": "discord",
-        "mode": "announce",
-        "to": "channel:1475593803984273579"
+        "to": "channel:1478308399618855003"
       },
       "enabled": true,
       "id": "b7c7f22c-3d3d-4981-a36d-e11abf5949ba",
       "name": "Hormuz AIS watch",
       "payload": {
         "kind": "agentTurn",
-        "message": "Run the AISStream Hormuz watcher and output only new alerts. Command: node /home/node/.openclaw/workspace/skills/hormuz-ais-watch/scripts/hormuz_watch.mjs . If it prints nothing, reply with exactly HEARTBEAT_OK (no other text). If it prints alerts, paste them verbatim as the response."
+        "message": "Run the AISStream Hormuz watcher and output only meaningful results. Command: node /home/node/.openclaw/workspace/skills/hormuz-ais-watch/scripts/hormuz_watch.mjs . Rules: (1) If stdout contains vessel alerts, return them verbatim. (2) If there are no alerts and command succeeds, reply with exactly HEARTBEAT_OK. (3) If the command fails after retries, return only the single-line AISSTREAM_ERROR message from stderr. Do not include retry-attempt narration or extra commentary."
       },
       "schedule": {
         "expr": "*/5 * * * *",
         "kind": "cron",
         "tz": "UTC"
       },
-      "sessionTarget": "isolated",
-      "state": {
-        "consecutiveErrors": 0,
-        "lastDelivered": false,
-        "lastDeliveryStatus": "not-delivered",
-        "lastDurationMs": 100668,
-        "lastRunAtMs": 1772490300010,
-        "lastRunStatus": "ok",
-        "lastStatus": "ok",
-        "nextRunAtMs": 1772490600000,
-        "runningAtMs": 1772490600004
+      "sessionTarget": "isolated"
+    },
+    {
+      "delivery": {
+        "bestEffort": true,
+        "channel": "discord",
+        "mode": "none",
+        "to": "channel:1478308399618855003"
       },
-      "updatedAtMs": 1772490400678,
-      "wakeMode": "now"
+      "enabled": true,
+      "id": "d112796e-c9ff-4e95-b6e6-a539e67e2790",
+      "name": "Truth Social Trump watch",
+      "payload": {
+        "kind": "agentTurn",
+        "message": "Run: node /home/node/.openclaw/workspace/skills/truthsocial-trump-watch/scripts/truthsocial_watch.mjs\n\nRules:\n1) LOG_ALL_POSTS behavior: treat LOG_ALL_POSTS as enabled by default (1/true). Only disable if environment explicitly sets LOG_ALL_POSTS=0 or false.\n2) If stdout is exactly HEARTBEAT_OK, do nothing else and return exactly HEARTBEAT_OK.\n3) If stdout starts with 🟠 New Truth Social post(s):\n   - If LOG_ALL_POSTS is enabled, send the exact stdout to Discord cron-log using message tool with action=send, channel=discord, to=channel:1478308399618855003.\n   - Evaluate whether new post(s) are market-relevant. Market-relevant includes geopolitics/war, sanctions, trade/tariffs, oil/energy supply, central banks/rates/inflation, fiscal policy, major regulation, or direct likely impact on equities/commodities/FX/crypto.\n   - Only if market-relevant, send a concise alert to #news using message tool with action=send, channel=discord, to=channel:1475601273003970770. Include: timestamp, key claim, impacted asset classes, and impact rating (LOW/MEDIUM/HIGH).\n   - Return ALERT_SENT if any message was sent; otherwise return NO_MARKET_SIGNAL.\n4) If the command fails (stderr line starting with TRUTHSOCIAL_WATCH_ERROR or TRUTHSOCIAL_CHALLENGE_PAGE), send that exact single-line error to cron-log channel 1478308399618855003, then return exactly ERROR_REPORTED.\n5) No extra commentary.",
+        "model": "openai-codex/gpt-5.1-codex-mini"
+      },
+      "schedule": {
+        "expr": "*/5 * * * *",
+        "kind": "cron",
+        "tz": "UTC"
+      },
+      "sessionTarget": "isolated"
     }
   ],
   "version": 1

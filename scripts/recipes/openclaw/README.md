@@ -148,8 +148,12 @@ Cron jobs can also be synced via `netcup-claw`:
 
 - `netcup-claw cron backup`
 - `netcup-claw cron pull`
-- `netcup-claw cron deploy`
+- `netcup-claw cron sync` (recommended/default behavior)
+- `netcup-claw cron sync --prune` (also deletes runtime jobs missing from local file)
+- `netcup-claw cron deploy` (uses sync semantics)
 - `netcup-claw cron push` (alias of deploy)
+- `netcup-claw cron delete <job-id>` (explicitly delete one runtime job)
+- `netcup-claw cron delete --name "<job name>"` (resolve/delete by exact name)
 
 Approvals can also be synced via `netcup-claw`:
 
@@ -191,6 +195,31 @@ Defaults:
 - Local workspace root: `scripts/recipes/openclaw/skills`
 - Runtime skills root: `/home/node/.openclaw/workspace/skills`
 - Backups: `scripts/recipes/openclaw/skills/backup/`
+
+### Truth Social polling (every minute)
+
+This repository now includes a Chrome/CDP-based watcher skill for:
+
+- `@realDonaldTrump` profile on Truth Social
+- Skill path: `scripts/recipes/openclaw/skills/truthsocial-trump-watch`
+- Script path in pod: `/home/node/.openclaw/workspace/skills/truthsocial-trump-watch/scripts/truthsocial_watch.mjs`
+
+The script connects to the in-pod Chrome endpoint (`http://localhost:9222` by default), extracts recent `posts/<id>` links, and dedupes using:
+
+- `/home/node/.openclaw/workspace/state/truthsocial-trump-watch/state.json`
+
+Cron job included in repo:
+
+- Name: `Truth Social Trump watch`
+- Schedule: `* * * * *` (UTC)
+- Behavior: sends Discord alert only when new post(s) are detected; no alert spam when unchanged.
+
+Apply/update in-cluster runtime:
+
+```bash
+netcup-claw skills deploy --skill truthsocial-trump-watch
+netcup-claw cron sync --file scripts/recipes/openclaw/cron/jobs.json
+```
 
 It wires OTEL environment variables on the OpenClaw pod:
 
