@@ -174,6 +174,55 @@ func TestCronJobSpecEqualForSync(t *testing.T) {
 	}
 }
 
+func TestBuildCronAddArgs(t *testing.T) {
+	job := cronJobSpec{
+		ID:            "job-1",
+		Name:          "Truth Social Trump watch",
+		Enabled:       false,
+		AgentID:       "main",
+		SessionTarget: "isolated",
+	}
+	job.Payload.Kind = "agentTurn"
+	job.Payload.Message = "Run watcher"
+	job.Payload.Model = "gpt-5.2"
+	job.Payload.Thinking = "low"
+	job.Schedule.Kind = "cron"
+	job.Schedule.Expr = "* * * * *"
+	job.Schedule.Tz = "UTC"
+	job.Delivery.Mode = "none"
+	job.Delivery.Channel = "discord"
+	job.Delivery.To = "channel:1478308399618855003"
+	job.Delivery.BestEffort = true
+
+	got, err := buildCronAddArgs(job)
+	if err != nil {
+		t.Fatalf("buildCronAddArgs() unexpected error: %v", err)
+	}
+
+	contains := func(flag string) bool {
+		for _, v := range got {
+			if v == flag {
+				return true
+			}
+		}
+		return false
+	}
+
+	if len(got) < 2 || got[0] != "cron" || got[1] != "add" {
+		t.Fatalf("buildCronAddArgs() must start with cron add, got: %v", got)
+	}
+
+	for _, required := range []string{"--name", "--cron", "--tz", "--agent", "--session", "--disabled", "--no-deliver", "--channel", "--to", "--best-effort-deliver", "--message", "--model", "--thinking"} {
+		if !contains(required) {
+			t.Fatalf("buildCronAddArgs() missing flag %q in %v", required, got)
+		}
+	}
+
+	if contains("--no-best-effort-deliver") {
+		t.Fatalf("buildCronAddArgs() should not include --no-best-effort-deliver: %v", got)
+	}
+}
+
 func TestResolveSelectedSkill(t *testing.T) {
 	original := skillName
 	defer func() { skillName = original }()

@@ -75,6 +75,7 @@ netcup-kube install <recipe> [recipe-options]
 - `argo-cd` — Install Argo CD (GitOps continuous delivery tool)
 - `postgres` — Install PostgreSQL (Bitnami Helm chart)
 - `redis` — Install Redis (Bitnami Helm chart)
+- `truthbrush-poller` — Install low-latency Truth poller that posts to OpenClaw webhook
 - `llm-proxy` — Install llm-proxy (Helm chart; Secret-backed config)
 - `vscode-copilot-proxy` — Install internal-only OpenVSCode Server for Copilot Proxy plugin runtime
 - `sealed-secrets` — Install Sealed Secrets (encrypt secrets for Git)
