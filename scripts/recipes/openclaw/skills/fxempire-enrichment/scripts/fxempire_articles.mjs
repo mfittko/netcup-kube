@@ -108,17 +108,59 @@ async function fetchJson(url, opts) {
   }
 }
 
+function decodeHtmlEntities(text) {
+  const named = {
+    nbsp: ' ',
+    amp: '&',
+    quot: '"',
+    apos: "'",
+    lt: '<',
+    gt: '>',
+    ndash: '–',
+    mdash: '—',
+    hellip: '…',
+  };
+
+  return String(text || '')
+    .replace(/&([a-zA-Z]+);/g, (match, name) => named[name] ?? match)
+    .replace(/&#(\d+);/g, (_, dec) => {
+      const code = Number(dec);
+      if (!Number.isFinite(code)) return _;
+      return String.fromCodePoint(code);
+    })
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => {
+      const code = Number.parseInt(hex, 16);
+      if (!Number.isFinite(code)) return _;
+      return String.fromCodePoint(code);
+    });
+}
+
+function normalizeExtractedText(text) {
+  return String(text || '')
+    .replace(/\r/g, '')
+    .replace(/[\t\f\v]+/g, ' ')
+    .replace(/\u00a0/g, ' ')
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .split('\n')
+    .map((line) => line.replace(/\s+/g, ' ').trim())
+    .filter(Boolean)
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 function stripHtml(html) {
-  return html
+  const withBlockBoundaries = String(html || '')
     .replace(/<script\b[\s\S]*?<\/script>/gi, ' ')
     .replace(/<style\b[\s\S]*?<\/style>/gi, ' ')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/\s+/g, ' ')
-    .trim();
+    .replace(/<noscript\b[\s\S]*?<\/noscript>/gi, ' ')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(p|div|section|article|aside|header|footer|h[1-6]|li|ul|ol|blockquote|pre|table|tr|td)\s*>/gi, '\n')
+    .replace(/<(p|div|section|article|aside|header|footer|h[1-6]|li|ul|ol|blockquote|pre|table|tr|td)\b[^>]*>/gi, '\n')
+    .replace(/<[^>]+>/g, ' ');
+
+  const decoded = decodeHtmlEntities(withBlockBoundaries);
+  return normalizeExtractedText(decoded);
 }
 
 function trimBoilerplate(text) {
