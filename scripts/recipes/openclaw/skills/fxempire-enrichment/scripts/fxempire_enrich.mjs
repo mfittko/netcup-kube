@@ -119,12 +119,25 @@ function fmtNum(x) {
 function normalizeTakeaway(text) {
   const snippetRaw = text ? String(text).replace(/\s+/g, ' ').trim() : '';
   if (!snippetRaw) return '';
-  const parts = snippetRaw
-    .split(/(?<=[.!?])\s+/)
-    .map((s) => s.trim())
-    .filter(Boolean);
-  if (parts.length >= 2) return parts.slice(0, 4).join(' ');
-  return snippetRaw.slice(0, 600);
+
+  const maxChars = 700;
+  if (snippetRaw.length <= maxChars) return snippetRaw;
+
+  const window = snippetRaw.slice(0, maxChars);
+  const boundaryRegex = /(?<!\b[A-Z])[.!?](?=\s+[A-Z]|$)/g;
+  let match = null;
+  let lastGoodBoundary = -1;
+  while ((match = boundaryRegex.exec(window)) !== null) {
+    if (match.index >= 280) lastGoodBoundary = match.index;
+  }
+
+  if (lastGoodBoundary !== -1) {
+    return `${window.slice(0, lastGoodBoundary + 1).trim()}…`;
+  }
+
+  const lastSpace = window.lastIndexOf(' ');
+  const cut = lastSpace > 200 ? lastSpace : maxChars;
+  return `${window.slice(0, cut).trim()}…`;
 }
 
 function toNum(v) {
