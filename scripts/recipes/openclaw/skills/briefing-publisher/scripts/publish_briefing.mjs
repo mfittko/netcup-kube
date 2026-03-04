@@ -135,6 +135,10 @@ function xmlEscape(value) {
     .replace(/'/g, '&apos;');
 }
 
+function cdataEscape(value) {
+  return String(value).replace(/\]\]>/g, ']]]]><![CDATA[>');
+}
+
 function stampToRfc822(stamp) {
   const match = String(stamp || '').match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2})(\d{2})(\d{2})Z$/);
   if (!match) return new Date().toUTCString();
@@ -148,13 +152,24 @@ function buildRssFeed({ title, description, siteUrl, feedPath, items }) {
   const atomSelf = `${siteUrl}/${feedPath}`;
   const body = items
     .map((item) => {
+      const descriptionNode = item.descriptionHtml
+        ? `      <description><![CDATA[${cdataEscape(item.descriptionHtml)}]]></description>`
+        : item.description
+          ? `      <description>${xmlEscape(item.description)}</description>`
+          : null;
+
+      const contentEncodedNode = item.contentHtml
+        ? `      <content:encoded><![CDATA[${cdataEscape(item.contentHtml)}]]></content:encoded>`
+        : null;
+
       return [
         '    <item>',
         `      <title>${xmlEscape(item.title)}</title>`,
         `      <link>${xmlEscape(item.link)}</link>`,
         `      <guid isPermaLink="true">${xmlEscape(item.guid || item.link)}</guid>`,
         `      <pubDate>${xmlEscape(item.pubDate)}</pubDate>`,
-        item.description ? `      <description>${xmlEscape(item.description)}</description>` : null,
+        descriptionNode,
+        contentEncodedNode,
         '    </item>',
       ].filter(Boolean).join('\n');
     })
@@ -162,7 +177,7 @@ function buildRssFeed({ title, description, siteUrl, feedPath, items }) {
 
   return [
     '<?xml version="1.0" encoding="UTF-8"?>',
-    '<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">',
+    '<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:content="http://purl.org/rss/1.0/modules/content/">',
     '  <channel>',
     `    <title>${xmlEscape(title)}</title>`,
     `    <description>${xmlEscape(description)}</description>`,
@@ -591,6 +606,13 @@ function parseIndexEntries(content) {
   return entries;
 }
 
+function buildRssItemHtml({ series, label, viewerUrl, mdUrl }) {
+  return [
+    `<p><strong>${htmlEscape(series)} briefing</strong> — ${htmlEscape(label)}</p>`,
+    `<p><a href="${htmlEscape(viewerUrl)}">Read in HTML viewer</a> · <a href="${htmlEscape(mdUrl)}">Raw Markdown</a></p>`,
+  ].join('');
+}
+
 function derivePaths({ series, stamp }) {
   const year = stamp.slice(0, 4);
   const month = stamp.slice(5, 7);
@@ -723,12 +745,20 @@ async function main() {
     const rssItems = parseIndexEntries(newIndex).slice(0, 100).map((entry) => {
       const mdPath = `${sitePath}/reports/${series}/${entry.link}`;
       const mdLink = `${base}/reports/${series}/${entry.link}`;
+      const viewerLink = `${base}/viewer.html?src=${encodeURIComponent(mdPath)}`;
+      const itemHtml = buildRssItemHtml({
+        series,
+        label: entry.label,
+        viewerUrl: viewerLink,
+        mdUrl: mdLink,
+      });
       return {
         title: `${series} ${entry.label}`,
-        link: mdLink,
-        guid: mdLink,
+        link: viewerLink,
+        guid: viewerLink,
         pubDate: stampToRfc822(entry.label),
-        description: `Automated ${series} briefing for ${entry.label}`,
+        descriptionHtml: itemHtml,
+        contentHtml: itemHtml,
       };
     });
 
