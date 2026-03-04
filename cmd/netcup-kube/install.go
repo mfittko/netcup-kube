@@ -32,6 +32,7 @@ Available recipes:
   argo-cd                  Install Argo CD (GitOps continuous delivery tool)
   postgres                 Install PostgreSQL (Bitnami Helm chart)
   redis                    Install Redis (Bitnami Helm chart)
+	truthbrush-poller        Install low-latency Truth poller with OpenClaw webhook delivery
   sealed-secrets           Install Sealed Secrets (encrypt secrets for Git)
   redisinsight             Install RedisInsight (Redis GUI)
   kube-prometheus-stack    Install Grafana + Prometheus + Alertmanager

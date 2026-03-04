@@ -42,6 +42,8 @@ var (
 	cronWorkspaceDir      string
 	cronDeployFile        string
 	cronBackupPath        string
+	cronPrune             bool
+	cronDeleteByName      bool
 	skillsWorkspaceDir    string
 	skillsSourceDir       string
 	skillsBackupPath      string
@@ -830,8 +832,110 @@ func buildCronEditArgs(job cronJobSpec) ([]string, error) {
 	return args, nil
 }
 
+func buildCronAddArgs(job cronJobSpec) ([]string, error) {
+	args := []string{"cron", "add"}
+
+	if name := strings.TrimSpace(job.Name); name != "" {
+		args = append(args, "--name", name)
+	}
+
+	if strings.EqualFold(job.Schedule.Kind, "cron") {
+		expr := strings.TrimSpace(job.Schedule.Expr)
+		if expr == "" {
+			return nil, fmt.Errorf("job %s missing cron expr", job.ID)
+		}
+		args = append(args, "--cron", expr)
+		if tz := strings.TrimSpace(job.Schedule.Tz); tz != "" {
+			args = append(args, "--tz", tz)
+		}
+	}
+
+	if strings.TrimSpace(job.AgentID) != "" {
+		args = append(args, "--agent", strings.TrimSpace(job.AgentID))
+	}
+
+	if sessionTarget := strings.TrimSpace(job.SessionTarget); sessionTarget != "" {
+		args = append(args, "--session", sessionTarget)
+	}
+
+	if !job.Enabled {
+		args = append(args, "--disabled")
+	}
+
+	mode := strings.TrimSpace(job.Delivery.Mode)
+	if strings.EqualFold(mode, "announce") {
+		args = append(args, "--announce")
+	} else if strings.EqualFold(mode, "none") {
+		args = append(args, "--no-deliver")
+	}
+
+	if channel := strings.TrimSpace(job.Delivery.Channel); channel != "" {
+		args = append(args, "--channel", channel)
+	}
+	if to := strings.TrimSpace(job.Delivery.To); to != "" {
+		args = append(args, "--to", to)
+	}
+
+	if job.Delivery.BestEffort {
+		args = append(args, "--best-effort-deliver")
+	}
+
+	if strings.EqualFold(strings.TrimSpace(job.Payload.Kind), "agentTurn") {
+		if msg := strings.TrimSpace(job.Payload.Message); msg != "" {
+			args = append(args, "--message", msg)
+		}
+		if model := strings.TrimSpace(job.Payload.Model); model != "" {
+			args = append(args, "--model", model)
+		}
+		if thinking := strings.TrimSpace(job.Payload.Thinking); thinking != "" {
+			args = append(args, "--thinking", thinking)
+		}
+	}
+
+	return args, nil
+}
+
 func cronJobSpecEqualForSync(desired cronJobSpec, current cronJobSpec) bool {
 	return reflect.DeepEqual(desired, current)
+}
+
+func runOpenClawCronDelete(cfg openclaw.Config, pod, jobID string) error {
+	trimmedID := strings.TrimSpace(jobID)
+	if trimmedID == "" {
+		return fmt.Errorf("job id is required")
+	}
+
+	candidates := [][]string{
+		{"cron", "remove", trimmedID},
+		{"cron", "delete", trimmedID},
+		{"cron", "rm", trimmedID},
+	}
+
+	errs := make([]string, 0, len(candidates))
+	for _, args := range candidates {
+		err := runKubectl(buildOpenClawCLIKubectlArgs(cfg.Namespace, pod, args)...)
+		if err == nil {
+			return nil
+		}
+		errs = append(errs, strings.Join(args, " ")+": "+err.Error())
+	}
+
+	return fmt.Errorf("failed to delete cron job %q (tried remove/delete/rm): %s", trimmedID, strings.Join(errs, " | "))
+}
+
+func findCronJobByName(file cronJobsFile, name string) (cronJobSpec, bool) {
+	trimmed := strings.TrimSpace(name)
+	if trimmed == "" {
+		return cronJobSpec{}, false
+	}
+
+	for _, job := range file.Jobs {
+		if strings.TrimSpace(job.Name) == trimmed {
+			return job, true
+		}
+	}
+
+	return cronJobSpec{}, false
 }
 
 func openclawSecretKeys() []string {
@@ -1453,7 +1557,8 @@ Sub-commands:
   backup  - Pull current cron jobs snapshot into local backup path
   pull    - Pull current cron jobs snapshot into local workspace file
 	deploy  - Sync local jobs to scheduler (default, with optional pre-change backup)
-	sync    - Apply local jobs via openclaw cron edit to refresh scheduler state`,
+	sync    - Upsert local jobs via openclaw cron edit/add to refresh scheduler state
+	delete  - Delete a specific runtime cron job by id (or by name lookup)`,
 }
 
 func syncCronJobsFromFile(inputPath string) error {
@@ -1493,34 +1598,99 @@ func syncCronJobsFromFile(inputPath string) error {
 	}
 
 	currentByID := make(map[string]cronJobSpec, len(currentFile.Jobs))
+	currentByName := make(map[string]cronJobSpec, len(currentFile.Jobs))
 	for _, job := range currentFile.Jobs {
 		if id := strings.TrimSpace(job.ID); id != "" {
 			currentByID[id] = job
 		}
+		if name := strings.TrimSpace(job.Name); name != "" {
+			if _, exists := currentByName[name]; !exists {
+				currentByName[name] = job
+			}
+		}
 	}
 
-	applied := 0
+	updated := 0
+	created := 0
 	skipped := 0
+	pruned := 0
+	desiredIDs := make(map[string]struct{}, len(file.Jobs))
 	for _, job := range file.Jobs {
-		if current, ok := currentByID[strings.TrimSpace(job.ID)]; ok {
-			if cronJobSpecEqualForSync(job, current) {
-				skipped++
-				continue
+		if id := strings.TrimSpace(job.ID); id != "" {
+			desiredIDs[id] = struct{}{}
+		}
+	}
+
+	for _, job := range file.Jobs {
+		resolved := job
+		current, existsByID := currentByID[strings.TrimSpace(job.ID)]
+		if !existsByID {
+			if byName, ok := currentByName[strings.TrimSpace(job.Name)]; ok {
+				current = byName
+				resolved.ID = byName.ID
+				existsByID = true
 			}
 		}
 
-		editArgs, buildErr := buildCronEditArgs(job)
-		if buildErr != nil {
-			return fmt.Errorf("job %q (%s): %w", job.Name, job.ID, buildErr)
+		if existsByID {
+			if id := strings.TrimSpace(current.ID); id != "" {
+				desiredIDs[id] = struct{}{}
+			}
+
+			if cronJobSpecEqualForSync(resolved, current) {
+				skipped++
+				continue
+			}
+
+			editArgs, buildErr := buildCronEditArgs(resolved)
+			if buildErr != nil {
+				return fmt.Errorf("job %q (%s): %w", resolved.Name, resolved.ID, buildErr)
+			}
+
+			if err := runKubectl(buildOpenClawCLIKubectlArgs(cfg.Namespace, pod, editArgs)...); err != nil {
+				return fmt.Errorf("failed to sync job %q (%s): %w", resolved.Name, resolved.ID, err)
+			}
+			updated++
+			continue
 		}
 
-		if err := runKubectl(buildOpenClawCLIKubectlArgs(cfg.Namespace, pod, editArgs)...); err != nil {
-			return fmt.Errorf("failed to sync job %q (%s): %w", job.Name, job.ID, err)
+		addArgs, buildErr := buildCronAddArgs(resolved)
+		if buildErr != nil {
+			return fmt.Errorf("job %q (%s): %w", resolved.Name, resolved.ID, buildErr)
 		}
-		applied++
+
+		if err := runKubectl(buildOpenClawCLIKubectlArgs(cfg.Namespace, pod, addArgs)...); err != nil {
+			return fmt.Errorf("failed to create job %q (%s): %w", resolved.Name, resolved.ID, err)
+		}
+		created++
 	}
 
-	fmt.Printf("sync complete: %d updated, %d unchanged\n", applied, skipped)
+	if cronPrune {
+		for _, current := range currentFile.Jobs {
+			id := strings.TrimSpace(current.ID)
+
+			if _, ok := desiredIDs[id]; ok {
+				continue
+			}
+
+			if id == "" {
+				continue
+			}
+
+			if err := runOpenClawCronDelete(cfg, pod, id); err != nil {
+				return fmt.Errorf("failed to prune job %q (%s): %w", strings.TrimSpace(current.Name), id, err)
+			}
+			pruned++
+		}
+	}
+
+	fmt.Printf("sync complete: %d updated, %d created, %d unchanged, %d pruned\n", updated, created, skipped, pruned)
+	if cronPrune {
+		fmt.Println("prune enabled: runtime jobs missing from local file were deleted")
+	}
+	if created > 0 {
+		fmt.Println("note: newly created jobs receive runtime-generated IDs; run 'netcup-claw cron pull' to refresh local IDs")
+	}
 	return nil
 }
 
@@ -1645,11 +1815,13 @@ Optional backup still runs first unless --backup-path=off.`,
 
 var cronSyncCmd = &cobra.Command{
 	Use:   "sync",
-	Short: "Sync cron jobs via openclaw cron edit",
+	Short: "Upsert cron jobs via openclaw cron edit/add",
 	Long: `Apply local cron jobs to the running scheduler via OpenClaw cron commands.
 
 This updates scheduler-owned state/job payloads by calling:
   openclaw cron edit <id> ...
+and creates missing jobs via:
+  openclaw cron add ...
 
 It is useful when file-based deploy does not fully refresh scheduler in-memory state.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -1658,6 +1830,65 @@ It is useful when file-based deploy does not fully refresh scheduler in-memory s
 			inputPath = filepath.Join(localCronWorkspaceDir(), "jobs.json")
 		}
 		return syncCronJobsFromFile(inputPath)
+	},
+}
+
+var cronDeleteCmd = &cobra.Command{
+	Use:   "delete <job-id>",
+	Short: "Delete a runtime cron job by id or name",
+	Long: `Delete a single runtime cron job.
+
+By default this command expects a job id:
+  netcup-claw cron delete <job-id>
+
+With --name it resolves the current runtime job id by exact name first:
+  netcup-claw cron delete --name "Daily GitHub Morning Brief (sofatutor)"`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		cfg, pod, err := resolveOpenClawPod()
+		if err != nil {
+			return err
+		}
+
+		jobRef := strings.TrimSpace(args[0])
+		if jobRef == "" {
+			return fmt.Errorf("job reference cannot be empty")
+		}
+
+		jobID := jobRef
+		if cronDeleteByName {
+			snapshot, err := fetchCronJobsSnapshot(cfg, pod)
+			if err != nil {
+				return err
+			}
+
+			normalizedCurrent, err := normalizeCronJobsPayload(snapshot)
+			if err != nil {
+				return err
+			}
+
+			currentFile, err := parseCronJobsFile(normalizedCurrent)
+			if err != nil {
+				return err
+			}
+
+			match, ok := findCronJobByName(currentFile, jobRef)
+			if !ok {
+				return fmt.Errorf("no runtime cron job found with name %q", jobRef)
+			}
+
+			jobID = strings.TrimSpace(match.ID)
+			if jobID == "" {
+				return fmt.Errorf("runtime cron job %q has empty id", jobRef)
+			}
+		}
+
+		if err := runOpenClawCronDelete(cfg, pod, jobID); err != nil {
+			return err
+		}
+
+		fmt.Printf("delete complete: %s\n", jobID)
+		return nil
 	},
 }
 
@@ -2318,10 +2549,14 @@ func init() {
 	cronCmd.PersistentFlags().StringVar(&cronBackupPath, "backup-path", "", "Directory or file path for cron jobs backups (default: <workspace-dir>/backup, use 'off' to disable pre-sync backup in deploy)")
 	cronDeployCmd.Flags().StringVar(&cronDeployFile, "file", "", "Local cron jobs JSON file to sync via deploy (default: <workspace-dir>/jobs.json)")
 	cronSyncCmd.Flags().StringVar(&cronDeployFile, "file", "", "Local cron jobs JSON file to sync (default: <workspace-dir>/jobs.json)")
+	cronDeployCmd.Flags().BoolVar(&cronPrune, "prune", false, "Delete runtime cron jobs that are missing from local file during sync")
+	cronSyncCmd.Flags().BoolVar(&cronPrune, "prune", false, "Delete runtime cron jobs that are missing from local file during sync")
+	cronDeleteCmd.Flags().BoolVar(&cronDeleteByName, "name", false, "Treat argument as exact runtime job name instead of id")
 	cronCmd.AddCommand(cronBackupCmd)
 	cronCmd.AddCommand(cronPullCmd)
 	cronCmd.AddCommand(cronDeployCmd)
 	cronCmd.AddCommand(cronSyncCmd)
+	cronCmd.AddCommand(cronDeleteCmd)
 	rootCmd.AddCommand(cronCmd)
 	skillsCmd.PersistentFlags().StringVar(&skillName, "skill", "hormuz-ais-watch", "Default skill directory name under OpenClaw workspace (overridden by positional [skill])")
 	skillsCmd.PersistentFlags().StringVar(&skillsWorkspaceDir, "workspace-dir", "", "Local skills workspace root (default: scripts/recipes/openclaw/skills)")
