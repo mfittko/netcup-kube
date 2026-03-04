@@ -1,12 +1,12 @@
 ---
 name: fxempire-enrichment
-description: Enrich a daily/weekly market analysis cron run with FXEmpire commodity price snapshots and latest related news/forecast articles. Use when the user wants a rolling 24h/48h/72h window (weekday/Sat/Sun), wants Brent-focused oil coverage plus other commodities (e.g., natural gas, gold, silver), and needs to fetch and summarize the actual FXEmpire article pages programmatically for inclusion in an automated daily market analysis.
+description: Enrich a daily/weekly market analysis cron run with FXEmpire multi-asset price snapshots (commodities, indices, FX, crypto) and latest related news/forecast articles. Use when the user wants a rolling 24h/48h/72h window (weekday/Sat/Sun) and needs to fetch and summarize the actual FXEmpire article pages programmatically for inclusion in an automated market analysis.
 ---
 
-# FXEmpire enrichment (commodities)
+# FXEmpire enrichment (multi-asset)
 
 Use the bundled Node scripts with clear separation of concerns:
-- `scripts/fxempire_rates.mjs` for commodity **rates/price snapshot** only
+- `scripts/fxempire_rates.mjs` for multi-asset **rates/price snapshot** (commodities, indices, FX, crypto)
 - `scripts/fxempire_articles.mjs` for **news + forecasts** retrieval and snippet extraction only
 - `scripts/fxempire_enrich.mjs` as an orchestrator that combines both outputs into an **in-depth markdown analysis** (with per-commodity outlook)
 
@@ -53,6 +53,9 @@ node skills/fxempire-enrichment/scripts/fxempire_articles.mjs \
 
 - Rates:
   - `https://www.fxempire.com/api/v1/<locale>/commodities/rates?instruments=...&includeFullData=true&includeSparkLines=true`
+  - `https://www.fxempire.com/api/v1/<locale>/indices/rates?instruments=...&includeFullData=true&includeSparkLines=true`
+  - `https://www.fxempire.com/api/v1/<locale>/currencies/rates?category=&includeSparkLines=true&includeFullData=true&instruments=...`
+  - `https://www.fxempire.com/api/v1/<locale>/crypto-coin/rates?instruments=...&includeFullData=true`
 - Articles hub:
   - `https://www.fxempire.com/api/v1/<locale>/articles/hub/news?size=..&page=..&tag=<tag>`
   - `https://www.fxempire.com/api/v1/<locale>/articles/hub/forecasts?size=..&page=..&tag=<tag>`
@@ -63,9 +66,19 @@ node skills/fxempire-enrichment/scripts/fxempire_articles.mjs \
 
 The script uses these defaults (override with `--tags` if needed):
 - brent-crude-oil → `co-brent-crude-oil`
+- wti-crude-oil → `co-wti-crude-oil`
 - natural-gas → `co-natural-gas`
 - gold → `co-gold`
 - silver → `co-silver`
+- platinum → `co-platinum`
+- spx → `i-spx`
+- tech100-usd → `i-tech100-usd`
+- us30-usd → `i-us30-usd`
+- eur-usd → `c-eur-usd`
+- usd-jpy → `c-usd-jpy`
+- bitcoin → `cc-bitcoin`
+- ethereum → `cc-ethereum`
+- solana → `cc-solana`
 
 ## Integration into an existing cron job
 

@@ -32,6 +32,47 @@ function parseArgs(argv) {
   return out;
 }
 
+function classifyInstrument(slug) {
+  const s = String(slug || '').trim().toLowerCase();
+
+  const commoditySet = new Set([
+    'brent-crude-oil',
+    'wti-crude-oil',
+    'natural-gas',
+    'gold',
+    'silver',
+    'platinum',
+  ]);
+
+  const indexSet = new Set([
+    'spx',
+    'tech100-usd',
+    'us30-usd',
+    'de30-eur',
+    'uk100-gbp',
+    'jp225-usd',
+    'fr40-eur',
+    'vix',
+  ]);
+
+  const currencySet = new Set([
+    'eur-usd',
+    'usd-jpy',
+    'gbp-usd',
+    'usd-chf',
+    'usd-cad',
+    'aud-usd',
+    'nzd-usd',
+  ]);
+
+  if (commoditySet.has(s)) return 'commodities';
+  if (indexSet.has(s)) return 'indices';
+  if (currencySet.has(s)) return 'currencies';
+
+  if (s.includes('-') && s.split('-').length === 2) return 'currencies';
+  return 'crypto-coin';
+}
+
 async function fetchText(url, { timeoutMs = 20000 } = {}) {
   const ac = new AbortController();
   const t = setTimeout(() => ac.abort(), timeoutMs);
@@ -79,23 +120,56 @@ function mdEscape(s) {
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const base = `https://www.fxempire.com/api/v1/${args.locale}`;
-  const ratesUrl = `${base}/commodities/rates?instruments=${encodeURIComponent(
-    args.commodities.join(',')
-  )}&includeFullData=true&includeSparkLines=true`;
 
-  let rates = null;
+  const groups = {
+    commodities: [],
+    indices: [],
+    currencies: [],
+    'crypto-coin': [],
+  };
+  for (const slug of args.commodities) {
+    groups[classifyInstrument(slug)].push(slug);
+  }
+
+  const ratesUrls = [];
+  if (groups.commodities.length) {
+    ratesUrls.push(
+      `${base}/commodities/rates?instruments=${encodeURIComponent(groups.commodities.join(','))}&includeFullData=true&includeSparkLines=true`
+    );
+  }
+  if (groups.indices.length) {
+    ratesUrls.push(
+      `${base}/indices/rates?instruments=${encodeURIComponent(groups.indices.join(','))}&includeFullData=true&includeSparkLines=true`
+    );
+  }
+  if (groups.currencies.length) {
+    ratesUrls.push(
+      `${base}/currencies/rates?category=&includeSparkLines=true&includeFullData=true&instruments=${encodeURIComponent(groups.currencies.join(','))}`
+    );
+  }
+  if (groups['crypto-coin'].length) {
+    ratesUrls.push(
+      `${base}/crypto-coin/rates?instruments=${encodeURIComponent(groups['crypto-coin'].join(','))}&includeFullData=true`
+    );
+  }
+
+  const mergedRates = { entities: {}, prices: {} };
   let ratesError = null;
-  try {
-    rates = await fetchJson(ratesUrl, { timeoutMs: 20000 });
-  } catch (e) {
-    ratesError = e.message;
+  for (const url of ratesUrls) {
+    try {
+      const partial = await fetchJson(url, { timeoutMs: 20000 });
+      Object.assign(mergedRates.entities, partial?.entities || {});
+      Object.assign(mergedRates.prices, partial?.prices || {});
+    } catch (e) {
+      ratesError = ratesError ? `${ratesError}; ${e.message}` : e.message;
+    }
   }
 
   const prices = [];
-  if (!ratesError) {
+  if (Object.keys(mergedRates.entities).length || Object.keys(mergedRates.prices).length) {
     for (const slug of args.commodities) {
-      const e = rates?.entities?.[slug] || {};
-      const p = rates?.prices?.[slug] || {};
+      const e = mergedRates.entities?.[slug] || {};
+      const p = mergedRates.prices?.[slug] || {};
       prices.push({
         slug,
         name: e.name || slug,
@@ -113,7 +187,7 @@ async function main() {
       locale: args.locale,
       commodities: args.commodities,
     },
-    ratesUrl,
+    ratesUrl: ratesUrls.join(' | '),
     prices,
     pricesError: ratesError,
   };
