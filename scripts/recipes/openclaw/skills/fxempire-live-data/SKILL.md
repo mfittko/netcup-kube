@@ -1,6 +1,6 @@
 ---
 name: fxempire-live-data
-description: Retrieve near-real-time market data from chat by running one command for FXEmpire/Oanda candles and rates across indices, commodities, FX, and crypto. Prefer JSON output for downstream automation.
+description: Retrieve near-real-time (live) market data from chat by running one command for FXEmpire/Oanda candles and rates across indices, commodities, FX, and crypto. Prefer JSON output for downstream automation.
 ---
 
 # FXEmpire live data
@@ -15,6 +15,18 @@ Use a direct command prompt, for example:
 Run this command and return only JSON:
 node /home/node/.openclaw/workspace/skills/fxempire-live-data/scripts/fxempire_live_data.mjs --mode candles --provider oanda --instrument NAS100/USD --granularity M1 --count 200 --alignmentTimezone Europe/Berlin
 ```
+
+When you want no commentary/caveats, use this stricter chat prompt:
+
+```text
+Run this command and return only the JSON output (no note, no explanation):
+node /home/node/.openclaw/workspace/skills/fxempire-live-data/scripts/fxempire_live_data.mjs --mode candles --provider oanda --instrument NAS100/USD --granularity M1 --count 200 --alignmentTimezone Europe/Berlin --pretty false
+```
+
+Routing rule for chat:
+
+- If user asks for `M1`/`1m` data, use `--mode candles --provider oanda`.
+- Use `--mode rates` only for quote snapshots when candle granularity is not requested.
 
 ## Quick examples
 
