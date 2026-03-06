@@ -90,3 +90,33 @@ When someone asks to "add an install recipe", the expected change is:
 3) Validate
 - At minimum: `bash -n scripts/recipes/<recipe-name>/install.sh`
 - Prefer: `make check` (shfmt + shellcheck) and `make test` (DRY_RUN container smoke)
+
+## Cursor Cloud specific instructions
+
+Prerequisites (installed by the VM snapshot; the update script only refreshes Go modules):
+- Go 1.23+ at `/usr/local/go/bin/go` (added to `PATH` via `~/.bashrc`)
+- `shellcheck` and `shfmt` (apt packages)
+- Docker (daemon started manually; see below)
+
+### Starting Docker
+The Docker daemon does not auto-start in the Cloud VM. Start it before running `make test`:
+```
+sudo dockerd &>/tmp/dockerd.log &
+sleep 3
+```
+Verify with `docker info`.
+
+### Key commands (all from repo root)
+| Task | Command |
+|------|---------|
+| Install/update Go deps | `make go-deps` |
+| Lint (shfmt + shellcheck) | `make check` |
+| Go unit tests | `make test-go` |
+| Build binaries | `make build` |
+| Integration smoke (Docker) | `make test` |
+| Validate config (no server) | `./bin/netcup-kube validate` |
+
+### Gotchas
+- `make test` runs `build-linux` first, then a Docker-based smoke test (`tests/integration/run.sh`). It requires Docker to be running.
+- `bootstrap --dry-run` will fail at NODE_IP detection in the Cloud VM because there is no real Netcup network interface; this is expected. Use `make test` (Docker integration) for full pipeline validation.
+- Two Go test suites (`TestConfirmationRequired`, `TestDryRunBehavior`) skip unless run as root; they are covered by `make test` which runs inside a Docker container as root.
