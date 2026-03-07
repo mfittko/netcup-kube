@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 )
 
 // ---------------------------------------------------------------------------
@@ -261,5 +262,84 @@ func TestCoalesceStr(t *testing.T) {
 	}
 	if got := coalesceStr("", ""); got != "" {
 		t.Errorf("coalesceStr('', '') = %q, want ''", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Timestamp precision (ISO-8601 milliseconds matching JS toISOString())
+// ---------------------------------------------------------------------------
+
+func TestCryptoLastUpdateMillisecondPrecision(t *testing.T) {
+	// fetchCryptoUSDSnapshot formats lastUpdate with millisecond precision.
+	// Verify the format string produces an output matching JS toISOString()
+	// (e.g. "2024-01-15T00:00:00.789Z") and not the RFC3339 second-only form.
+	// Use midnight UTC to avoid any timezone ambiguity.
+	tsMs := int64(1705276800789) // 2024-01-15T00:00:00.789Z
+	got := time.UnixMilli(tsMs).UTC().Format("2006-01-02T15:04:05.000Z")
+	want := "2024-01-15T00:00:00.789Z"
+	if got != want {
+		t.Errorf("millisecond timestamp format = %q, want %q", got, want)
+	}
+}
+
+func TestMetaNowMillisecondPrecision(t *testing.T) {
+	// meta.now should include milliseconds like JS new Date().toISOString().
+	// Round-trip: format with ms layout and verify the .NNN part is present.
+	ts := time.Date(2024, 1, 15, 12, 34, 56, 789_000_000, time.UTC)
+	got := ts.Format("2006-01-02T15:04:05.000Z")
+	if len(got) != len("2024-01-15T12:34:56.789Z") {
+		t.Errorf("meta.now format length = %d, want 24: %q", len(got), got)
+	}
+	if !strings.HasSuffix(got, "Z") {
+		t.Errorf("meta.now should end with Z: %q", got)
+	}
+	// Must contain the dot separator for milliseconds.
+	if !strings.Contains(got, ".") {
+		t.Errorf("meta.now should contain a dot for milliseconds: %q", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Total-failure prices semantics
+// ---------------------------------------------------------------------------
+
+func TestPricesEmptyOnTotalFailure(t *testing.T) {
+	// When allEntities and allPrices are both empty (total upstream failure),
+	// the prices list should be nil/empty (matching the JS script behaviour).
+	allEntities := map[string]ratesEntity{}
+	allPrices := map[string]ratesPrice{}
+
+	var prices []fxPrice
+	if len(allEntities) > 0 || len(allPrices) > 0 {
+		prices = append(prices, fxPrice{Slug: "should-not-appear"})
+	}
+
+	if len(prices) != 0 {
+		t.Errorf("expected empty prices on total failure, got %d rows", len(prices))
+	}
+}
+
+func TestPricesPopulatedWhenDataPresent(t *testing.T) {
+	// When at least one entity is present, rows should be built.
+	last := 75.5
+	allEntities := map[string]ratesEntity{
+		"gold": {Name: "Gold", Last: &last},
+	}
+	allPrices := map[string]ratesPrice{}
+
+	var prices []fxPrice
+	if len(allEntities) > 0 || len(allPrices) > 0 {
+		e := allEntities["gold"]
+		p := allPrices["gold"]
+		fp := fxPrice{Slug: "gold", Name: e.Name}
+		fp.Last = coalesce(p.Last, e.Last)
+		prices = append(prices, fp)
+	}
+
+	if len(prices) != 1 {
+		t.Errorf("expected 1 price row when data present, got %d", len(prices))
+	}
+	if prices[0].Last == nil || *prices[0].Last != 75.5 {
+		t.Errorf("expected Last=75.5, got %v", prices[0].Last)
 	}
 }

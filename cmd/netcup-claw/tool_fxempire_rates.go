@@ -213,9 +213,10 @@ func fetchCryptoUSDSnapshot(base, locale, slug string) (cryptoSnapshot, error) {
 	snap.price = lastPrice
 
 	// Derive lastUpdate from the last candle's ms timestamp (index 0).
+	// Use millisecond precision to match JS new Date(ts).toISOString().
 	if len(last) > 0 {
 		if ts, err := last[0].Float64(); err == nil && ts > 0 {
-			snap.lastUpdate = time.UnixMilli(int64(ts)).UTC().Format(time.RFC3339)
+			snap.lastUpdate = time.UnixMilli(int64(ts)).UTC().Format("2006-01-02T15:04:05.000Z")
 		}
 	}
 
@@ -410,35 +411,39 @@ func runFXEmpireRates(_ *cobra.Command, _ []string) error {
 	}
 
 	// Build the ordered flat price list (same order as input instruments).
+	// Only emit rows when at least one rates payload was successfully merged,
+	// matching the JS source behaviour: on total upstream failure prices is [].
 	var prices []fxPrice
-	seen := map[string]bool{}
-	for _, raw := range instruments {
-		for _, slug := range strings.Split(raw, ",") {
-			slug = strings.TrimSpace(slug)
-			if slug == "" || seen[slug] {
-				continue
+	if len(allEntities) > 0 || len(allPrices) > 0 {
+		seen := map[string]bool{}
+		for _, raw := range instruments {
+			for _, slug := range strings.Split(raw, ",") {
+				slug = strings.TrimSpace(slug)
+				if slug == "" || seen[slug] {
+					continue
+				}
+				seen[slug] = true
+
+				e := allEntities[slug]
+				p := allPrices[slug]
+
+				name := e.Name
+				if name == "" {
+					name = slug
+				}
+
+				fp := fxPrice{Slug: slug, Name: name}
+				fp.Last = coalesce(p.Last, e.Last)
+				fp.Change = coalesce(p.Change, e.Change)
+				fp.Pct = coalesce(p.PercentChange, e.PercentChange)
+
+				lu := coalesceStr(p.LastUpdate, e.LastUpdate)
+				if lu != "" {
+					fp.LastUpdate = &lu
+				}
+
+				prices = append(prices, fp)
 			}
-			seen[slug] = true
-
-			e := allEntities[slug]
-			p := allPrices[slug]
-
-			name := e.Name
-			if name == "" {
-				name = slug
-			}
-
-			fp := fxPrice{Slug: slug, Name: name}
-			fp.Last = coalesce(p.Last, e.Last)
-			fp.Change = coalesce(p.Change, e.Change)
-			fp.Pct = coalesce(p.PercentChange, e.PercentChange)
-
-			lu := coalesceStr(p.LastUpdate, e.LastUpdate)
-			if lu != "" {
-				fp.LastUpdate = &lu
-			}
-
-			prices = append(prices, fp)
 		}
 	}
 
@@ -453,7 +458,8 @@ func runFXEmpireRates(_ *cobra.Command, _ []string) error {
 
 	payload := fxPayload{
 		Meta: fxMeta{
-			Now:         time.Now().UTC().Format(time.RFC3339),
+			// Use millisecond precision to match JS new Date().toISOString().
+			Now:         time.Now().UTC().Format("2006-01-02T15:04:05.000Z"),
 			Locale:      fxLocale,
 			Commodities: instruments,
 		},
