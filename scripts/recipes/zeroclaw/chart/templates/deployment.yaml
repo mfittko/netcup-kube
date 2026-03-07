@@ -1,7 +1,7 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: zeroclaw
+  name: {{ .Release.Name }}
   namespace: {{ .Release.Namespace }}
   labels:
     app.kubernetes.io/name: zeroclaw
@@ -79,10 +79,14 @@ spec:
               mountPath: /shared-bin
       volumes:
         - name: zeroclaw-data
+          {{- if .Values.persistence.enabled }}
           persistentVolumeClaim:
-            claimName: zeroclaw-data
+            claimName: {{ .Release.Name }}-data
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
         - name: zeroclaw-config
           configMap:
-            name: zeroclaw-config
+            name: {{ .Release.Name }}-config
         - name: shared-bin
           emptyDir: {}

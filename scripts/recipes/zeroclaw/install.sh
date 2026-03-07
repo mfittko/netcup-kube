@@ -215,6 +215,9 @@ HELM_ARGS=(
 )
 
 if [[ -n "${IMAGE}" ]]; then
+  if [[ "${IMAGE}" == *"@"* ]]; then
+    die "Digest-pinned images are not supported with --image. Use repo:tag format (e.g. ghcr.io/zeroclaw-labs/zeroclaw:v1.2.3)."
+  fi
   # Split image into repository and tag components
   IMAGE_REPO="${IMAGE%:*}"
   IMAGE_TAG="${IMAGE##*:}"
@@ -227,7 +230,7 @@ fi
 if [[ -n "${HOST}" ]]; then
   HELM_ARGS+=(
     --set "ingress.enabled=true"
-    --set "ingress.host=${HOST}"
+    --set-string "ingress.host=${HOST}"
   )
 fi
 
