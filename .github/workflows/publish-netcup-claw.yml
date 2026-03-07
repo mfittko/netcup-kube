@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - main
+      # Temporary: keep Docker build active on this PR branch.
+      - copilot/publish-netcup-claw-image
     tags:
       - 'v*'
   workflow_dispatch:
@@ -49,7 +51,8 @@ jobs:
         with:
           context: .
           file: Dockerfile.netcup-claw
-          push: true
+          # Build on branch pushes, publish only on main or version tags.
+          push: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v') }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           platforms: linux/amd64,linux/arm64
