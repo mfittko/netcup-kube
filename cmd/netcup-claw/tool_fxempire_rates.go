@@ -269,11 +269,11 @@ func formatMarkdown(payload fxPayload) string {
 				pctStr = toolutil.FmtPct(*row.Pct)
 			}
 
-			line := fmt.Sprintf("- **%s** (%s): %s ",
+			line := fmt.Sprintf("- **%s** (%s): %s",
 				mdEscape(row.Name), row.Slug, fmtNumMD(row.Last))
 
 			if chStr != "" && pctStr != "" {
-				line += fmt.Sprintf("(%s, %s)", chStr, pctStr)
+				line += fmt.Sprintf(" (%s, %s)", chStr, pctStr)
 			}
 			if row.LastUpdate != nil && *row.LastUpdate != "" {
 				line += fmt.Sprintf(" — lastUpdate %s", *row.LastUpdate)
@@ -393,14 +393,19 @@ func runFXEmpireRates(_ *cobra.Command, _ []string) error {
 			}
 			continue
 		}
-		if snap.price == nil {
-			continue
-		}
 		existing := allPrices[slug]
-		existing.Last = snap.price
-		existing.Change = snap.change
-		existing.PercentChange = snap.pct
-		existing.LastUpdate = snap.lastUpdate
+		if snap.price != nil {
+			existing.Last = snap.price
+		}
+		if snap.change != nil {
+			existing.Change = snap.change
+		}
+		if snap.pct != nil {
+			existing.PercentChange = snap.pct
+		}
+		if snap.lastUpdate != "" {
+			existing.LastUpdate = snap.lastUpdate
+		}
 		allPrices[slug] = existing
 	}
 
@@ -462,7 +467,7 @@ func runFXEmpireRates(_ *cobra.Command, _ []string) error {
 		if err != nil {
 			return fmt.Errorf("encoding JSON output: %w", err)
 		}
-		_, err = os.Stdout.Write(b)
+		_, err = fmt.Fprintln(os.Stdout, string(b))
 		return err
 	}
 

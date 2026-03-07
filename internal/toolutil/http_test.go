@@ -2,8 +2,10 @@ package toolutil_test
 
 import (
 	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/mfittko/netcup-kube/internal/toolutil"
@@ -30,9 +32,9 @@ func TestHTTPGetJSON_Success(t *testing.T) {
 }
 
 func TestHTTPGetJSON_UserAgentHeader(t *testing.T) {
-	var gotUA string
+	gotUACh := make(chan string, 1)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotUA = r.Header.Get("User-Agent")
+		gotUACh <- r.Header.Get("User-Agent")
 		fmt.Fprint(w, `{}`)
 	}))
 	defer srv.Close()
@@ -41,6 +43,7 @@ func TestHTTPGetJSON_UserAgentHeader(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	gotUA := <-gotUACh
 	want := "Mozilla/5.0 (OpenClaw; fxempire-rates)"
 	if gotUA != want {
 		t.Fatalf("User-Agent = %q, want %q", gotUA, want)
@@ -48,9 +51,9 @@ func TestHTTPGetJSON_UserAgentHeader(t *testing.T) {
 }
 
 func TestHTTPGetJSON_CustomHeaders(t *testing.T) {
-	var gotAccept string
+	gotAcceptCh := make(chan string, 1)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotAccept = r.Header.Get("Accept")
+		gotAcceptCh <- r.Header.Get("Accept")
 		fmt.Fprint(w, `{}`)
 	}))
 	defer srv.Close()
@@ -60,6 +63,7 @@ func TestHTTPGetJSON_CustomHeaders(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	gotAccept := <-gotAcceptCh
 	if gotAccept != "application/json" {
 		t.Fatalf("Accept header = %q, want %q", gotAccept, "application/json")
 	}
@@ -74,6 +78,12 @@ func TestHTTPGetJSON_NonOKStatus(t *testing.T) {
 	_, err := toolutil.HTTPGetJSON(srv.URL, 5000, nil)
 	if err == nil {
 		t.Fatal("expected error for non-200 status, got nil")
+	}
+	if !strings.Contains(err.Error(), "404 Not Found") {
+		t.Fatalf("expected status text in error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("expected body snippet in error, got: %v", err)
 	}
 }
 
@@ -136,6 +146,13 @@ func TestFmtNum_NegativeDecimals(t *testing.T) {
 	}
 }
 
+func TestFmtNum_NormalizesRoundedNegativeZero(t *testing.T) {
+	got := toolutil.FmtNum(-0.004, 2)
+	if got != "0.00" {
+		t.Errorf("FmtNum(-0.004, 2) = %q, want %q", got, "0.00")
+	}
+}
+
 // ---------------------------------------------------------------------------
 // FmtNumUS
 // ---------------------------------------------------------------------------
@@ -162,6 +179,18 @@ func TestFmtNumUS(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("FmtNumUS(%v) = %q, want %q", tt.v, got, tt.want)
 		}
+	}
+}
+
+func TestFmtNumUS_NonFiniteValues(t *testing.T) {
+	if got := toolutil.FmtNumUS(math.Inf(1)); got != "+Inf" {
+		t.Errorf("FmtNumUS(+Inf) = %q, want %q", got, "+Inf")
+	}
+	if got := toolutil.FmtNumUS(math.Inf(-1)); got != "-Inf" {
+		t.Errorf("FmtNumUS(-Inf) = %q, want %q", got, "-Inf")
+	}
+	if got := toolutil.FmtNumUS(math.NaN()); got != "NaN" {
+		t.Errorf("FmtNumUS(NaN) = %q, want %q", got, "NaN")
 	}
 }
 

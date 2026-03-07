@@ -36,7 +36,13 @@ func HTTPGetJSON(url string, timeoutMs int, headers map[string]string) ([]byte, 
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("GET %s: unexpected status %d", url, resp.StatusCode)
+		// Include a small body snippet to make upstream API failures debuggable.
+		snippetBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		snippet := strings.TrimSpace(string(snippetBytes))
+		if snippet != "" {
+			return nil, fmt.Errorf("GET %s: unexpected status %s: %s", url, resp.Status, snippet)
+		}
+		return nil, fmt.Errorf("GET %s: unexpected status %s", url, resp.Status)
 	}
 
 	body, err := io.ReadAll(resp.Body)
@@ -52,11 +58,13 @@ func FmtNum(v float64, decimals int) string {
 	if decimals < 0 {
 		decimals = 0
 	}
-	if v == 0 {
-		v = math.Copysign(0, 1) // normalise -0.0 to +0.0
+	factor := math.Pow10(decimals)
+	rounded := math.Round(v*factor) / factor
+	if rounded == 0 {
+		rounded = math.Copysign(0, 1) // normalise -0.0 to +0.0 after rounding
 	}
 	format := fmt.Sprintf("%%.%df", decimals)
-	return fmt.Sprintf(format, math.Round(v*math.Pow10(decimals))/math.Pow10(decimals))
+	return fmt.Sprintf(format, rounded)
 }
 
 // FmtPct formats a floating-point percentage value with exactly two decimal
@@ -73,6 +81,10 @@ func FmtPct(v float64) string {
 //
 // This matches the JS fmtNum helper used by fxempire_rates.mjs.
 func FmtNumUS(v float64) string {
+	if math.IsNaN(v) || math.IsInf(v, 0) {
+		return strconv.FormatFloat(v, 'f', -1, 64)
+	}
+
 	// Round to at most 3 decimal places, then format as fixed-3.
 	rounded := math.Round(v*1000) / 1000
 	s := strconv.FormatFloat(rounded, 'f', 3, 64)
@@ -94,8 +106,9 @@ func FmtNumUS(v float64) string {
 
 	// Strip sign for digit grouping.
 	neg := strings.HasPrefix(intPart, "-")
+	pos := strings.HasPrefix(intPart, "+")
 	digits := intPart
-	if neg {
+	if neg || pos {
 		digits = intPart[1:]
 	}
 
@@ -111,6 +124,8 @@ func FmtNumUS(v float64) string {
 	result := b.String()
 	if neg {
 		result = "-" + result
+	} else if pos {
+		result = "+" + result
 	}
 	return result + decPart
 }
