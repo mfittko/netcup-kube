@@ -31,6 +31,9 @@ coverage.html
 # temp
 tmp/
 
+# local nested repo clone (not part of netcup-kube)
+ai-briefings/
+
 # local OpenClaw agent workspace snapshots
 scripts/recipes/openclaw/agent-workspace/backup/
 
@@ -39,6 +42,12 @@ scripts/recipes/openclaw/approvals/backup/
 
 # local OpenClaw config snapshots
 scripts/recipes/openclaw/config/backup/
+
+# local OpenClaw cron snapshots
+scripts/recipes/openclaw/cron/backup/
+
+# local OpenClaw skills snapshots
+scripts/recipes/openclaw/skills/backup/
 
 # cache
 .gocache

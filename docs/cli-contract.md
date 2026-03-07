@@ -87,7 +87,9 @@ netcup-kube install <recipe> [recipe-options]
 - `--config-file <path>` — Supply an OpenClaw JSON/JSON5 template from repo or local path.
 - `--config-mode <merge|overwrite>` — Control how the chart `init-config` container reconciles persisted `/home/node/.openclaw/openclaw.json`.
 - `--agent-workspace-dir <path>` — Supply agent workspace overrides/backup path (`agents/<agentId>/*.md`, `backup/`).
-- `--workspace-bootstrap-mode <overwrite|off>` — Control backup + override apply behavior for detected agent workspaces.
+- `--workspace-bootstrap-mode <overwrite|off>` — Control backup + override apply behavior for detected agent workspaces (default: `off`).
+- `--upgrade` — Force rollout restart of deployment `openclaw` after Helm succeeds.
+- `OPENCLAW_HOST` — Env default alternative to `--host`.
 
 `zeroclaw` recipe options:
 - `--secret <name>` — Name of the pre-created Kubernetes Secret with `ANTHROPIC_API_KEY` (required).

@@ -155,6 +155,11 @@
     "port": 18789,
     "mode": "local",
     "bind": "loopback",
+    "controlUi": {
+      "allowedOrigins": [
+        "http://localhost:18789"
+      ]
+    },
     "auth": {
       "mode": "token",
       "token": "${OPENCLAW_GATEWAY_TOKEN}"

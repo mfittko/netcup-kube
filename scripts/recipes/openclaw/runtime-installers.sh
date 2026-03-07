@@ -1,5 +1,28 @@
 #!/usr/bin/env bash
 
+openclaw_install_cli_wrapper() {
+  local namespace="$1"
+  local pod_name="$2"
+  local runtime_bin_dir="$3"
+
+  log "Installing OpenClaw CLI wrapper in ${runtime_bin_dir}"
+  if ! k -n "${namespace}" exec -i "${pod_name}" -c main -- sh -s -- "${runtime_bin_dir}" << 'EOF'; then
+set -eu
+RUNTIME_BIN_DIR="$1"
+
+mkdir -p "${RUNTIME_BIN_DIR}"
+cat > "${RUNTIME_BIN_DIR}/openclaw" << 'WRAP'
+#!/usr/bin/env sh
+set -eu
+exec node /app/openclaw.mjs "$@"
+WRAP
+chmod 0755 "${RUNTIME_BIN_DIR}/openclaw"
+EOF
+    log "WARNING: Failed to install OpenClaw CLI wrapper in '${runtime_bin_dir}'."
+    log "WARNING: Chat exec commands like 'openclaw <cmd>' may fail until wrapper is present."
+  fi
+}
+
 openclaw_install_diagnostics_runtime_dependencies() {
   local namespace="$1"
   local pod_name="$2"
@@ -34,7 +57,7 @@ for pkg in \
   fi
 done
 
-if [[ "${missing}" == "true" ]]; then
+if [ "${missing}" = "true" ]; then
   npm install --no-audit --no-fund --silent \
     @opentelemetry/api \
     @opentelemetry/resources \

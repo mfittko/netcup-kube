@@ -39,9 +39,31 @@ recipe_maybe_add_edge_http_domain() {
       echo "  Run: sudo ./bin/netcup-kube dns --type edge-http --add-domains \"${host}\""
     fi
   else
+    local project_root
+    project_root="$(cd "${SCRIPTS_DIR}/.." && pwd)"
+    local netcup_kube_bin="${project_root}/bin/netcup-kube"
+
+    if [[ -x "${netcup_kube_bin}" ]]; then
+      log "  Appending ${host} to Caddy edge-http domains on management node (remote run)."
+      local tmp_env_file
+      tmp_env_file="$(mktemp -t netcup-kube-install.env.XXXXXX)"
+      printf 'CONFIRM=true\n' > "${tmp_env_file}"
+
+      if "${netcup_kube_bin}" remote run --no-tty --env-file "${tmp_env_file}" -- dns --type edge-http --add-domains "${host}"; then
+        log "  Added ${host} to Caddy edge-http domains."
+        rm -f "${tmp_env_file}"
+        return 0
+      fi
+
+      rm -f "${tmp_env_file}"
+      log "  WARNING: Automatic remote DNS update failed; run manually:"
+    else
+      log "  WARNING: ${netcup_kube_bin} not found or not executable; run manually:"
+    fi
+
     echo "  From your laptop:"
-    echo "    bin/netcup-kube remote run dns --show --type edge-http --format csv  # to see current list"
-    echo "    bin/netcup-kube remote run dns --type edge-http --add-domains \"${host}\""
+    echo "    bin/netcup-kube remote run -- dns --show --type edge-http --format csv  # to see current list"
+    echo "    CONFIRM=true bin/netcup-kube remote run --no-tty -- dns --type edge-http --add-domains \"${host}\""
   fi
 }
 

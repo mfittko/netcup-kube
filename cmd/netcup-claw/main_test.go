@@ -46,6 +46,212 @@ func TestBuildOpenClawCLIKubectlArgs(t *testing.T) {
 	}
 }
 
+func TestOpenclawArgsRequireTTY(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want bool
+	}{
+		{name: "onboard", args: []string{"onboard"}, want: true},
+		{name: "models auth login", args: []string{"models", "auth", "login"}, want: true},
+		{name: "auth login", args: []string{"auth", "login"}, want: true},
+		{name: "status", args: []string{"status"}, want: false},
+		{name: "models auth list", args: []string{"models", "auth", "list"}, want: false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := openclawArgsRequireTTY(tc.args)
+			if got != tc.want {
+				t.Fatalf("openclawArgsRequireTTY(%v) = %v, want %v", tc.args, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestWithKubectlExecTTY(t *testing.T) {
+	base := []string{"-n", "openclaw", "exec", "-c", "main", "pod-1", "--", "node", "/app/openclaw.mjs", "status"}
+	got := withKubectlExecTTY(base)
+	want := []string{"-n", "openclaw", "exec", "-it", "-c", "main", "pod-1", "--", "node", "/app/openclaw.mjs", "status"}
+
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("withKubectlExecTTY() = %v, want %v", got, want)
+	}
+}
+
+func TestResolveSecretsFromEnv_FileOverridesProcess(t *testing.T) {
+	keys := []string{"OPENCLAW_GATEWAY_TOKEN", "AISSTREAM_API_KEY", "SAG_API_KEY"}
+	processValues := map[string]string{
+		"OPENCLAW_GATEWAY_TOKEN": "from-process",
+		"AISSTREAM_API_KEY":      "process-ais",
+	}
+	envFileValues := map[string]string{
+		"AISSTREAM_API_KEY": "from-file",
+		"SAG_API_KEY":       "from-file-sag",
+	}
+
+	resolved, missing := resolveSecretsFromEnv(processValues, envFileValues, keys)
+
+	wantResolved := map[string]string{
+		"OPENCLAW_GATEWAY_TOKEN": "from-process",
+		"AISSTREAM_API_KEY":      "from-file",
+		"SAG_API_KEY":            "from-file-sag",
+	}
+	if !reflect.DeepEqual(resolved, wantResolved) {
+		t.Fatalf("resolveSecretsFromEnv() resolved=%v, want=%v", resolved, wantResolved)
+	}
+	if len(missing) != 0 {
+		t.Fatalf("resolveSecretsFromEnv() missing=%v, want none", missing)
+	}
+}
+
+func TestResolveSecretsFromEnv_MissingAndEmpty(t *testing.T) {
+	keys := []string{"OPENCLAW_GATEWAY_TOKEN", "AISSTREAM_API_KEY", "SAG_API_KEY"}
+	processValues := map[string]string{
+		"OPENCLAW_GATEWAY_TOKEN": "  ",
+	}
+	envFileValues := map[string]string{
+		"AISSTREAM_API_KEY": "",
+	}
+
+	resolved, missing := resolveSecretsFromEnv(processValues, envFileValues, keys)
+
+	if len(resolved) != 0 {
+		t.Fatalf("resolveSecretsFromEnv() resolved=%v, want empty", resolved)
+	}
+	if !reflect.DeepEqual(missing, keys) {
+		t.Fatalf("resolveSecretsFromEnv() missing=%v, want=%v", missing, keys)
+	}
+}
+
+func TestSortedKeys(t *testing.T) {
+	got := sortedKeys(map[string]string{"b": "2", "a": "1", "c": "3"})
+	want := []string{"a", "b", "c"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("sortedKeys() = %v, want %v", got, want)
+	}
+}
+
+func TestFilterSkillNames(t *testing.T) {
+	all := []string{"fxempire-enrichment", "hormuz-ais-watch", "weather"}
+	excludes := []string{"hormuz-ais-watch", "  "}
+
+	got := filterSkillNames(all, excludes)
+	want := []string{"fxempire-enrichment", "weather"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("filterSkillNames() = %v, want %v", got, want)
+	}
+}
+
+func TestCronJobSpecEqualForSync(t *testing.T) {
+	desired := cronJobSpec{
+		ID:            "job-1",
+		Name:          "Daily Market Pulse",
+		Enabled:       true,
+		AgentID:       "main",
+		SessionTarget: "isolated",
+	}
+	desired.Payload.Kind = "agentTurn"
+	desired.Payload.Message = "msg"
+	desired.Payload.Model = "gpt-5.2"
+	desired.Payload.Thinking = "low"
+	desired.Schedule.Kind = "cron"
+	desired.Schedule.Expr = "0 6 * * 1-5"
+	desired.Schedule.Tz = "Europe/Berlin"
+	desired.Delivery.Mode = "announce"
+	desired.Delivery.Channel = "discord"
+	desired.Delivery.To = "channel:123"
+	desired.Delivery.BestEffort = false
+
+	current := desired
+	if !cronJobSpecEqualForSync(desired, current) {
+		t.Fatal("cronJobSpecEqualForSync() = false, want true for equal jobs")
+	}
+
+	current.Payload.Message = "changed"
+	if cronJobSpecEqualForSync(desired, current) {
+		t.Fatal("cronJobSpecEqualForSync() = true, want false for changed payload")
+	}
+}
+
+func TestBuildCronAddArgs(t *testing.T) {
+	job := cronJobSpec{
+		ID:            "job-1",
+		Name:          "Truth Social Trump watch",
+		Enabled:       false,
+		AgentID:       "main",
+		SessionTarget: "isolated",
+	}
+	job.Payload.Kind = "agentTurn"
+	job.Payload.Message = "Run watcher"
+	job.Payload.Model = "gpt-5.2"
+	job.Payload.Thinking = "low"
+	job.Schedule.Kind = "cron"
+	job.Schedule.Expr = "* * * * *"
+	job.Schedule.Tz = "UTC"
+	job.Delivery.Mode = "none"
+	job.Delivery.Channel = "discord"
+	job.Delivery.To = "channel:1478308399618855003"
+	job.Delivery.BestEffort = true
+
+	got, err := buildCronAddArgs(job)
+	if err != nil {
+		t.Fatalf("buildCronAddArgs() unexpected error: %v", err)
+	}
+
+	contains := func(flag string) bool {
+		for _, v := range got {
+			if v == flag {
+				return true
+			}
+		}
+		return false
+	}
+
+	if len(got) < 2 || got[0] != "cron" || got[1] != "add" {
+		t.Fatalf("buildCronAddArgs() must start with cron add, got: %v", got)
+	}
+
+	for _, required := range []string{"--name", "--cron", "--tz", "--agent", "--session", "--disabled", "--no-deliver", "--channel", "--to", "--best-effort-deliver", "--message", "--model", "--thinking"} {
+		if !contains(required) {
+			t.Fatalf("buildCronAddArgs() missing flag %q in %v", required, got)
+		}
+	}
+
+	if contains("--no-best-effort-deliver") {
+		t.Fatalf("buildCronAddArgs() should not include --no-best-effort-deliver: %v", got)
+	}
+}
+
+func TestResolveSelectedSkill(t *testing.T) {
+	original := skillName
+	defer func() { skillName = original }()
+
+	skillName = "hormuz-ais-watch"
+
+	got, err := resolveSelectedSkill(nil)
+	if err != nil {
+		t.Fatalf("resolveSelectedSkill(nil) unexpected error: %v", err)
+	}
+	if got != "hormuz-ais-watch" {
+		t.Fatalf("resolveSelectedSkill(nil) = %q, want %q", got, "hormuz-ais-watch")
+	}
+
+	got, err = resolveSelectedSkill([]string{"fxempire-enrichment"})
+	if err != nil {
+		t.Fatalf("resolveSelectedSkill(arg) unexpected error: %v", err)
+	}
+	if got != "fxempire-enrichment" {
+		t.Fatalf("resolveSelectedSkill(arg) = %q, want %q", got, "fxempire-enrichment")
+	}
+
+	skillName = "  "
+	_, err = resolveSelectedSkill(nil)
+	if err == nil {
+		t.Fatal("resolveSelectedSkill(nil) expected error for empty default skill")
+	}
+}
+
 func TestChartVersionFromChart(t *testing.T) {
 	tests := []struct {
 		chart string
