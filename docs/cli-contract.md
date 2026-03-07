@@ -81,12 +81,18 @@ netcup-kube install <recipe> [recipe-options]
 - `kube-prometheus-stack` — Install Grafana + Prometheus + Alertmanager
 - `dashboard` — Install Kubernetes Dashboard (official web UI)
 - `openclaw` — Install OpenClaw with mandatory kernel-level network monitoring
+- `zeroclaw` — Install ZeroClaw AI agent (bundled Helm chart; TOML config; Anthropic provider)
 
 `openclaw` recipe config management:
 - `--config-file <path>` — Supply an OpenClaw JSON/JSON5 template from repo or local path.
 - `--config-mode <merge|overwrite>` — Control how the chart `init-config` container reconciles persisted `/home/node/.openclaw/openclaw.json`.
 - `--agent-workspace-dir <path>` — Supply agent workspace overrides/backup path (`agents/<agentId>/*.md`, `backup/`).
 - `--workspace-bootstrap-mode <overwrite|off>` — Control backup + override apply behavior for detected agent workspaces.
+
+`zeroclaw` recipe options:
+- `--secret <name>` — Name of the pre-created Kubernetes Secret with `ANTHROPIC_API_KEY` (required).
+- `--image <repo:tag>` — Override the default ZeroClaw image (must be `repo:tag` format; digest refs like `repo@sha256:...` are not supported by the Helm chart values and will be rejected).
+- `--storage <size>` — PVC size for `~/.zeroclaw/` state (default: `5Gi`).
 
 **Common Options:**
 - `--help`, `-h` — Show recipe-specific help
