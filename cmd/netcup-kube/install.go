@@ -32,13 +32,11 @@ Available recipes:
   argo-cd                  Install Argo CD (GitOps continuous delivery tool)
   postgres                 Install PostgreSQL (Bitnami Helm chart)
   redis                    Install Redis (Bitnami Helm chart)
-	truthbrush-poller        Install low-latency Truth poller with OpenClaw webhook delivery
   sealed-secrets           Install Sealed Secrets (encrypt secrets for Git)
   redisinsight             Install RedisInsight (Redis GUI)
   kube-prometheus-stack    Install Grafana + Prometheus + Alertmanager
   dashboard                Install Kubernetes Dashboard (official web UI)
   llm-proxy                Install llm-proxy (Helm chart; Secret-backed config)
-	vscode-copilot-proxy     Install internal-only OpenVSCode Server for Copilot Proxy
   openclaw                 Install OpenClaw with kernel-level network monitoring
   zeroclaw                 Install ZeroClaw AI agent (TOML config, Anthropic provider)
 

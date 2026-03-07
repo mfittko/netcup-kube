@@ -276,7 +276,7 @@ https://us-east.metoro.io
 | `--ca-secret-key` | Key inside `--ca-secret` containing PEM cert | `ca.crt` |
 | `--host` | Create Traefik Ingress for this FQDN on OpenClaw gateway/webhook port `18789` | None |
 | `--storage` | PVC size for OpenClaw state | `10Gi` |
-| `--upgrade` | Use latest available OpenClaw chart version for this run and force rollout restart of deployment `openclaw` | `false` |
+| `--upgrade` | Force rollout restart of deployment `openclaw` after Helm succeeds | `false` |
 | `--uninstall` | Uninstall OpenClaw, Metoro exporter, and OTLP collector resources | N/A |
 
 ## Uninstallation

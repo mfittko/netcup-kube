@@ -2118,7 +2118,7 @@ set are preserved when patching.`,
 				createArgs = append(createArgs, "--from-literal="+key+"="+resolved[key])
 			}
 			if createErr := runKubectl(createArgs...); createErr != nil {
-				return fmt.Errorf("failed to patch or create secret %s: %w", secretsName, err)
+				return fmt.Errorf("failed to patch or create secret %s: %w", secretsName, createErr)
 			}
 			fmt.Printf("created secret: %s (namespace: %s, keys synced: %d)\n", secretsName, cfg.Namespace, len(resolved))
 		} else {

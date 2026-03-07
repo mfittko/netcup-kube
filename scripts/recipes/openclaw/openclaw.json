@@ -157,7 +157,6 @@
     "bind": "loopback",
     "controlUi": {
       "allowedOrigins": [
-        "https://${OPENCLAW_HOST}",
         "http://localhost:18789"
       ]
     },
@@ -191,13 +190,9 @@
   },
   "plugins": {
     "allow": [
-      "discord",
-      "copilot-proxy"
+      "discord"
     ],
     "entries": {
-      "copilot-proxy": {
-        "enabled": true
-      },
       "diagnostics-otel": {
         "enabled": false
       },

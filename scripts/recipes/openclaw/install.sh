@@ -80,6 +80,16 @@ HOST="${OPENCLAW_HOST:-}"
 STORAGE="${DEFAULT_STORAGE_OPENCLAW}"
 UPGRADE="false"
 UNINSTALL="false"
+EFFECTIVE_OPENCLAW_CONFIG_FILE=""
+TEMP_OPENCLAW_CONFIG_FILE=""
+
+cleanup_openclaw_temp_config() {
+  if [[ -n "${TEMP_OPENCLAW_CONFIG_FILE}" ]]; then
+    rm -f "${TEMP_OPENCLAW_CONFIG_FILE}"
+  fi
+}
+
+trap cleanup_openclaw_temp_config EXIT
 
 bootstrap_openclaw_agent_workspace_markdown() {
   local namespace="$1"
@@ -304,6 +314,7 @@ fi
 [[ -n "${SECRET_NAME}" ]] || die "Secret name cannot be empty."
 [[ -n "${OPENCLAW_CONFIG_FILE}" ]] || die "OpenClaw config file is required."
 [[ -f "${OPENCLAW_CONFIG_FILE}" ]] || die "OpenClaw config file not found: ${OPENCLAW_CONFIG_FILE}"
+EFFECTIVE_OPENCLAW_CONFIG_FILE="${OPENCLAW_CONFIG_FILE}"
 [[ "${OPENCLAW_CONFIG_MODE}" == "merge" || "${OPENCLAW_CONFIG_MODE}" == "overwrite" ]] || die "Invalid config mode '${OPENCLAW_CONFIG_MODE}'. Expected: merge or overwrite."
 [[ "${WORKSPACE_BOOTSTRAP_MODE}" == "overwrite" || "${WORKSPACE_BOOTSTRAP_MODE}" == "off" ]] || die "Invalid workspace bootstrap mode '${WORKSPACE_BOOTSTRAP_MODE}'. Expected: overwrite or off."
 if [[ "${WORKSPACE_BOOTSTRAP_MODE}" != "off" ]]; then
@@ -315,6 +326,37 @@ fi
 [[ -n "${OTEL_SERVICE_NAME}" ]] || die "OTEL service name is required"
 if [[ -n "${CA_SECRET_NAME}" ]] && [[ -z "${CA_SECRET_KEY}" ]]; then
   die "CA secret key cannot be empty when --ca-secret is set"
+fi
+
+if [[ -n "${HOST}" ]]; then
+  if [[ "${OPENCLAW_CONFIG_FILE}" == "${SCRIPT_DIR}/openclaw.json" ]]; then
+    command -v python3 > /dev/null 2>&1 || die "python3 is required to materialize host-aware OpenClaw config when --host is set"
+    TEMP_OPENCLAW_CONFIG_FILE="$(mktemp -t openclaw-config.XXXXXX.json)"
+    python3 - "${OPENCLAW_CONFIG_FILE}" "${TEMP_OPENCLAW_CONFIG_FILE}" "${HOST}" << 'PY'
+import json
+import sys
+
+source_path, target_path, host = sys.argv[1:4]
+
+with open(source_path, "r", encoding="utf-8") as source_file:
+    payload = json.load(source_file)
+
+origins = ["http://localhost:18789"]
+trimmed_host = host.strip()
+if trimmed_host:
+    origins.insert(0, f"https://{trimmed_host}")
+
+payload.setdefault("gateway", {}).setdefault("controlUi", {})["allowedOrigins"] = origins
+
+with open(target_path, "w", encoding="utf-8") as target_file:
+    json.dump(payload, target_file, indent=2)
+    target_file.write("\n")
+PY
+    EFFECTIVE_OPENCLAW_CONFIG_FILE="${TEMP_OPENCLAW_CONFIG_FILE}"
+    log "Materialized host-aware OpenClaw config for ingress origin https://${HOST}"
+  else
+    log "WARNING: --host was set with a custom config file; ensure gateway.controlUi.allowedOrigins includes https://${HOST}"
+  fi
 fi
 
 log "Installing OpenClaw with mandatory kernel-level network monitoring into namespace: ${NAMESPACE}"
@@ -625,7 +667,7 @@ fi
 # Install/Upgrade OpenClaw
 log "Installing/Upgrading OpenClaw via Helm"
 log "NOTE: Wiring secret '${SECRET_NAME}' to chart via app-template.controllers.main.containers.main.envFrom"
-log "NOTE: Using managed OpenClaw config from: ${OPENCLAW_CONFIG_FILE} (mode: ${OPENCLAW_CONFIG_MODE})"
+log "NOTE: Using managed OpenClaw config from: ${EFFECTIVE_OPENCLAW_CONFIG_FILE} (mode: ${OPENCLAW_CONFIG_MODE})"
 
 CHART_VERSION_TO_USE="${CHART_VERSION_OPENCLAW}"
 if [[ "${CHART_VERSION_TO_USE}" == "latest" ]]; then
@@ -647,7 +689,7 @@ HELM_OPENCLAW_ARGS=(
   --values "${VALUES_FILE}"
   --values "${SKILLS_VALUES_FILE}"
   --set-string "configMode=${OPENCLAW_CONFIG_MODE}"
-  --set-file "app-template.configMaps.config.data.openclaw\\.json=${OPENCLAW_CONFIG_FILE}"
+  --set-file "app-template.configMaps.config.data.openclaw\.json=${EFFECTIVE_OPENCLAW_CONFIG_FILE}"
   --set-string "app-template.controllers.main.containers.main.envFrom[0].secretRef.name=${SECRET_NAME}"
   --set-string "app-template.controllers.main.containers.main.env.PATH=${RUNTIME_BIN_DIR}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
   --set-string "app-template.controllers.main.containers.main.env.NODE_PATH=${OTEL_RUNTIME_DIR}/node_modules"
