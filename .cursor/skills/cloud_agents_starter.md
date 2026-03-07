@@ -43,7 +43,7 @@ Workflow:
 1. `make build`
 2. `go test ./cmd/... ./internal/...`
 3. `./bin/netcup-kube remote --help`
-4. `./bin/netcup-kube ssh tunnel status`
+4. `./bin/netcup-kube ssh --help`
 
 Success signal: build succeeds, tests pass, and command help/status return without panic.
 
@@ -75,9 +75,9 @@ Workflow:
 3. Remote smoke (non-destructive):
    - `./bin/netcup-kube remote --host <host-or-ip> --user <user> smoke`
 4. Tunnel-based kubectl access:
-   - `./bin/netcup-kube ssh tunnel start`
+   - `./bin/netcup-kube ssh tunnel start --host <host-or-ip> --user <user>`
    - `kubectl cluster-info`
-   - `./bin/netcup-kube ssh tunnel stop`
+   - `./bin/netcup-kube ssh tunnel stop --host <host-or-ip> --user <user>`
 
 Success signal: SSH works, remote smoke completes, tunnel enables `kubectl cluster-info`.
 
