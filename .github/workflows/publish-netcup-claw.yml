@@ -4,8 +4,6 @@ on:
   push:
     branches:
       - main
-      # Temporary: keep Docker build active on this PR branch.
-      - copilot/publish-netcup-claw-image
     tags:
       - 'v*'
   workflow_dispatch:
