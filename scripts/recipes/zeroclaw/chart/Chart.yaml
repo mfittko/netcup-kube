@@ -1,0 +1,13 @@
+apiVersion: v2
+name: zeroclaw
+description: ZeroClaw AI agent runtime with netcup-claw operational CLI
+type: application
+version: 0.1.0
+appVersion: "latest"
+keywords:
+  - zeroclaw
+  - ai
+  - agent
+home: https://github.com/mfittko/netcup-kube
+sources:
+  - https://github.com/mfittko/netcup-kube

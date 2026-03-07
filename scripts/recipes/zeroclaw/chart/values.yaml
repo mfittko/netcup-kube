@@ -1,0 +1,51 @@
+# ZeroClaw Helm chart default values
+
+replicaCount: 1
+
+image:
+  repository: ghcr.io/zeroclaw-labs/zeroclaw
+  pullPolicy: IfNotPresent
+  tag: "latest"
+
+initContainer:
+  image:
+    # netcup-claw init container image — published to GHCR by this repo's
+    # publish-netcup-claw workflow. The binary is copied to /shared-bin/ so
+    # the main ZeroClaw container can use it at /shared-bin/netcup-claw.
+    repository: ghcr.io/mfittko/netcup-claw
+    pullPolicy: IfNotPresent
+    tag: "latest"
+
+nameOverride: ""
+fullnameOverride: ""
+
+service:
+  type: ClusterIP
+  port: 42617
+
+persistence:
+  enabled: true
+  storageClass: ""
+  size: 5Gi
+
+# Secret name containing ZeroClaw credentials (must be pre-created).
+# Required keys depend on the provider configured in config.toml.
+credentialsSecret: ""
+
+config:
+  # Inline config.toml content. Defaults to the minimal template shipped
+  # with the chart. Override via --set config.content or --set-file config.content.
+  content: ""
+
+ingress:
+  enabled: false
+  host: ""
+  annotations: {}
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 32Mi
+  limits:
+    cpu: 1000m
+    memory: 256Mi
