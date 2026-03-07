@@ -1,0 +1,92 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: zeroclaw
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: zeroclaw
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: zeroclaw
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      initContainers:
+        - name: copy-netcup-claw
+          image: "{{ .Values.initImage.repository }}:{{ .Values.initImage.tag }}"
+          imagePullPolicy: {{ .Values.initImage.pullPolicy }}
+          command:
+            - sh
+            - -c
+            - cp /usr/local/bin/netcup-claw /shared-bin/netcup-claw && chmod +x /shared-bin/netcup-claw
+          volumeMounts:
+            - name: shared-bin
+              mountPath: /shared-bin
+      containers:
+        - name: zeroclaw
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - zeroclaw
+            - daemon
+          ports:
+            - name: gateway
+              containerPort: {{ .Values.gatewayPort }}
+              protocol: TCP
+          envFrom:
+            - secretRef:
+                name: {{ .Values.secretName }}
+          env:
+            - name: ZEROCLAW_CONFIG
+              value: /home/zeroclaw/.zeroclaw/config.toml
+            - name: PATH
+              value: /shared-bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+          livenessProbe:
+            exec:
+              command:
+                - zeroclaw
+                - status
+            initialDelaySeconds: 5
+            periodSeconds: 30
+            failureThreshold: 3
+          readinessProbe:
+            exec:
+              command:
+                - zeroclaw
+                - status
+            initialDelaySeconds: 3
+            periodSeconds: 15
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: zeroclaw-data
+              mountPath: /home/zeroclaw/.zeroclaw
+            - name: zeroclaw-config
+              mountPath: /home/zeroclaw/.zeroclaw/config.toml
+              subPath: config.toml
+              readOnly: true
+            - name: shared-bin
+              mountPath: /shared-bin
+      volumes:
+        - name: zeroclaw-data
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ .Release.Name }}-data
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        - name: zeroclaw-config
+          configMap:
+            name: {{ .Release.Name }}-config
+        - name: shared-bin
+          emptyDir: {}

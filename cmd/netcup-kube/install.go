@@ -38,6 +38,7 @@ Available recipes:
   dashboard                Install Kubernetes Dashboard (official web UI)
   llm-proxy                Install llm-proxy (Helm chart; Secret-backed config)
   openclaw                 Install OpenClaw with kernel-level network monitoring
+  zeroclaw                 Install ZeroClaw AI agent (TOML config, Anthropic provider)
 
 Examples:
   netcup-kube install argo-cd --help
