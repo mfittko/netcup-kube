@@ -1,11 +1,7 @@
 name: Publish netcup-claw image
 
 on:
-  push:
-    branches:
-      - main
-    tags:
-      - 'v*'
+  workflow_call:
   workflow_dispatch:
 
 env:
@@ -13,32 +9,7 @@ env:
   IMAGE_NAME: ${{ github.repository_owner }}/netcup-claw
 
 jobs:
-  ci-gate:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.23'
-
-      - name: Install lint tools
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -y shellcheck shfmt
-
-      - name: Lint/format (make check)
-        run: |
-          make check
-
-      - name: Build netcup-claw
-        run: |
-          go build -v ./cmd/netcup-claw
-
   publish:
-    needs: ci-gate
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -61,9 +32,9 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=ref,event=branch,enable={{is_default_branch}},value=latest
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            type=semver,pattern={{version}},enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=semver,pattern={{major}}.{{minor}},enable=${{ startsWith(github.ref, 'refs/tags/v') }}
             type=sha,prefix=sha-,format=short
 
       - name: Set up Docker Buildx
@@ -74,7 +45,7 @@ jobs:
         with:
           context: .
           file: Dockerfile.netcup-claw
-          # Build on branch pushes, publish only on main or version tags.
+          # Build on manual dispatch, publish only on main or version tags.
           push: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v') }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
