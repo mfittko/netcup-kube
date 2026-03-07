@@ -1,21 +1,21 @@
 ---
-name: fxempire-enrichment
-description: Enrich a daily/weekly market analysis cron run with FXEmpire multi-asset price snapshots (commodities, indices, FX, crypto) and latest related news/forecast articles. Use when the user wants a rolling 24h/48h/72h window (weekday/Sat/Sun) and needs to fetch and summarize the actual FXEmpire article pages programmatically for inclusion in an automated market analysis.
+name: fxempire-analysis
+description: Build a daily/weekly FXEmpire analysis report from multi-asset rates (commodities, indices, FX, crypto) plus related news/forecast coverage. Use when you need a reproducible market analysis pipeline, not just raw data pulls.
 ---
 
-# FXEmpire enrichment (multi-asset)
+# FXEmpire analysis pipeline
 
 Use the bundled Node scripts with clear separation of concerns:
 - `scripts/fxempire_rates.mjs` for multi-asset **rates/price snapshot** (commodities, indices, FX, crypto)
 - `scripts/fxempire_articles.mjs` for **news + forecasts** retrieval and snippet extraction only
-- `scripts/fxempire_enrich.mjs` as an orchestrator that combines both outputs into an **in-depth markdown analysis** (with per-commodity outlook)
+- `scripts/fxempire_enrich.mjs` as an orchestrator that combines both into an **in-depth markdown market report**
 
 ## Quick start
 
 Run the orchestrator (auto window = 24h weekdays / 48h Saturday / 72h Sunday, in Europe/Berlin by default):
 
 ```bash
-node skills/fxempire-enrichment/scripts/fxempire_enrich.mjs \
+node skills/fxempire-analysis/scripts/fxempire_enrich.mjs \
   --commodities brent-crude-oil,natural-gas,gold,silver \
   --focus brent-crude-oil
 ```
@@ -25,7 +25,7 @@ Output defaults to **markdown** on stdout (safe for cron piping). Use `--json` f
 Write the report directly to a markdown file (while still returning markdown on stdout):
 
 ```bash
-node skills/fxempire-enrichment/scripts/fxempire_enrich.mjs \
+node skills/fxempire-analysis/scripts/fxempire_enrich.mjs \
   --hours 24 \
   --commodities brent-crude-oil,wti-crude-oil,natural-gas,gold,silver,platinum \
   --output-file /home/node/.openclaw/workspace/state/fxempire/market-analysis-24h.md
@@ -35,16 +35,16 @@ Run concern-specific scripts directly:
 
 ```bash
 # Rates only
-node skills/fxempire-enrichment/scripts/fxempire_rates.mjs \
+node skills/fxempire-analysis/scripts/fxempire_rates.mjs \
   --commodities brent-crude-oil,natural-gas,gold,silver
 
 # Articles only
-node skills/fxempire-enrichment/scripts/fxempire_articles.mjs \
+node skills/fxempire-analysis/scripts/fxempire_articles.mjs \
   --commodities brent-crude-oil,natural-gas,gold,silver \
   --tz Europe/Berlin
 
 # Articles with full extracted body text in JSON (`textFull`)
-node skills/fxempire-enrichment/scripts/fxempire_articles.mjs \
+node skills/fxempire-analysis/scripts/fxempire_articles.mjs \
   --commodities brent-crude-oil,natural-gas,gold,silver \
   --full-text --json
 ```
@@ -91,7 +91,7 @@ Example:
 
 ```bash
 base_brief_command | tee /tmp/brief.md
-node skills/fxempire-enrichment/scripts/fxempire_enrich.mjs --commodities brent-crude-oil,natural-gas,gold,silver >> /tmp/brief.md
+node skills/fxempire-analysis/scripts/fxempire_enrich.mjs --commodities brent-crude-oil,natural-gas,gold,silver >> /tmp/brief.md
 send_to_destination /tmp/brief.md
 ```
 

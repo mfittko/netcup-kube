@@ -117,6 +117,40 @@ function mdEscape(s) {
   return String(s).replace(/\|/g, '\\|');
 }
 
+function toNumOrNull(value) {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : null;
+}
+
+async function fetchCryptoUsdSnapshot(base, slug) {
+  const url = `${base}/crypto-coin/chart?slug=${encodeURIComponent(slug)}&from=1d&quote=usd`;
+  const payload = await fetchJson(url, { timeoutMs: 20000 });
+  const points = Array.isArray(payload?.prices) ? payload.prices : [];
+  if (!points.length) {
+    return { slug, url, last: null, change: null, pct: null };
+  }
+
+  const first = points[0];
+  const last = points[points.length - 1];
+
+  const firstPrice = toNumOrNull(Array.isArray(first) ? first[1] : null);
+  const lastPrice = toNumOrNull(Array.isArray(last) ? last[1] : null);
+  const change = firstPrice !== null && lastPrice !== null ? lastPrice - firstPrice : null;
+  const pct = firstPrice && change !== null ? (change / firstPrice) * 100 : null;
+
+  const lastTimestamp = Array.isArray(last) ? toNumOrNull(last[0]) : null;
+  const lastUpdate = lastTimestamp ? new Date(lastTimestamp).toISOString() : null;
+
+  return {
+    slug,
+    url,
+    last: lastPrice,
+    change,
+    pct,
+    lastUpdate,
+  };
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const base = `https://www.fxempire.com/api/v1/${args.locale}`;
@@ -165,6 +199,32 @@ async function main() {
     }
   }
 
+  const cryptoChartUrls = [];
+  if (groups['crypto-coin'].length) {
+    const snapshots = await Promise.all(
+      groups['crypto-coin'].map(async (slug) => {
+        try {
+          return await fetchCryptoUsdSnapshot(base, slug);
+        } catch (error) {
+          ratesError = ratesError ? `${ratesError}; ${error.message}` : error.message;
+          return null;
+        }
+      })
+    );
+
+    for (const snapshot of snapshots.filter(Boolean)) {
+      cryptoChartUrls.push(snapshot.url);
+      if (snapshot.last === null) continue;
+      mergedRates.prices[snapshot.slug] = {
+        ...(mergedRates.prices[snapshot.slug] || {}),
+        last: snapshot.last,
+        change: snapshot.change,
+        percentChange: snapshot.pct,
+        lastUpdate: snapshot.lastUpdate,
+      };
+    }
+  }
+
   const prices = [];
   if (Object.keys(mergedRates.entities).length || Object.keys(mergedRates.prices).length) {
     for (const slug of args.commodities) {
@@ -187,7 +247,7 @@ async function main() {
       locale: args.locale,
       commodities: args.commodities,
     },
-    ratesUrl: ratesUrls.join(' | '),
+    ratesUrl: [...ratesUrls, ...cryptoChartUrls].join(' | '),
     prices,
     pricesError: ratesError,
   };

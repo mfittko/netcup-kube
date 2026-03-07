@@ -133,11 +133,11 @@ func TestSortedKeys(t *testing.T) {
 }
 
 func TestFilterSkillNames(t *testing.T) {
-	all := []string{"fxempire-enrichment", "hormuz-ais-watch", "weather"}
+	all := []string{"fxempire-analysis", "hormuz-ais-watch", "weather"}
 	excludes := []string{"hormuz-ais-watch", "  "}
 
 	got := filterSkillNames(all, excludes)
-	want := []string{"fxempire-enrichment", "weather"}
+	want := []string{"fxempire-analysis", "weather"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("filterSkillNames() = %v, want %v", got, want)
 	}
@@ -237,12 +237,12 @@ func TestResolveSelectedSkill(t *testing.T) {
 		t.Fatalf("resolveSelectedSkill(nil) = %q, want %q", got, "hormuz-ais-watch")
 	}
 
-	got, err = resolveSelectedSkill([]string{"fxempire-enrichment"})
+	got, err = resolveSelectedSkill([]string{"fxempire-analysis"})
 	if err != nil {
 		t.Fatalf("resolveSelectedSkill(arg) unexpected error: %v", err)
 	}
-	if got != "fxempire-enrichment" {
-		t.Fatalf("resolveSelectedSkill(arg) = %q, want %q", got, "fxempire-enrichment")
+	if got != "fxempire-analysis" {
+		t.Fatalf("resolveSelectedSkill(arg) = %q, want %q", got, "fxempire-analysis")
 	}
 
 	skillName = "  "

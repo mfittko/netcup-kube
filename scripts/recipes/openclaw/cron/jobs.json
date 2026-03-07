@@ -15,7 +15,7 @@
       "payload": {
         "kind": "agentTurn",
         "message": "Fetch the current weather forecast for Berlin using wttr.in (curl -s 'wttr.in/Berlin?format=3' for quick, or wttr.in/Berlin?T for full). Then send the briefing to Discord channel 1475474139040190649 using the message tool (action=send, channel=discord, to=channel:1475474139040190649). Keep it concise: temperature, conditions, wind, and any notable weather.",
-        "model": "openai-gpt-5-mini"
+        "model": "openai-codex/gpt-5.1-codex-mini"
       },
       "schedule": {
         "expr": "0 7 * * *",
@@ -37,12 +37,12 @@
       "name": "Daily Market Pulse",
       "payload": {
         "kind": "agentTurn",
-        "message": "You are running the Daily Market Pulse for #market-analytics.\n\nINPUTS (read first):\n- /home/node/.openclaw/workspace/market/fxempire-market-analysis-24h.md (already generated and published by the FXEmpire job)\n- /home/node/.openclaw/workspace/sentinel/state.json\n- /home/node/.openclaw/workspace/market/state.json\n- /home/node/.openclaw/workspace/market/daily-log.md\n\nOPTIONAL WEB RESEARCH:\n- If key data is stale, missing, or contradictory, run minimal web checks and include raw URLs used.\n\nTASK:\n1) Produce a concise daily pulse based on sentinel results + latest FXEmpire analysis + market state/log context.\n2) Highlight alignment or mismatch between geopolitical risks and market/commodity pricing.\n3) Include actionable 24-72h outlook for Brent, WTI, Natural Gas, Gold, Silver, Platinum.\n4) Include a Sources section with raw URLs (from the FXEmpire report and optional web checks).\n\nOUTPUT CONSTRAINTS (Discord announce mode):\n- Compact bullet sections, no markdown tables.\n- Keep output concise enough to avoid truncation.\n\nAFTER posting:\n- Update /home/node/.openclaw/workspace/market/state.json with refreshed key levels, active narratives, and watchlist changes.\n- Append a 2-3 line summary to /home/node/.openclaw/workspace/market/daily-log.md.\n- Do NOT run publisher here; publishing is handled by Daily FXEmpire Analysis.",
-        "model": "gpt-5.2",
+        "message": "You are running the Daily Market Pulse for #market-analytics.\n\nINPUTS (read first):\n- /home/node/.openclaw/workspace/market/fxempire-market-analysis-24h.md (already generated and published by the FXEmpire job)\n- /home/node/.openclaw/workspace/sentinel/state.json\n- /home/node/.openclaw/workspace/market/state.json\n- /home/node/.openclaw/workspace/market/daily-log.md\n\nOPTIONAL WEB RESEARCH:\n- If key data is stale, missing, or contradictory, run minimal web checks and include raw URLs used.\n\nEDITORIAL RULES:\n- Assume Daily Sentinel already covered the geopolitical narrative. Do NOT repeat the same conflict summaries unless they change market pricing.\n- Be delta-first: focus on what changed since the last pulse, what the market is underpricing, and what matters over the next 24-72h.\n- Prioritize MEDIUM/HIGH-impact developments only. Mention LOW-impact items only if they create a concrete market setup.\n- Collapse overlapping risks into one market takeaway instead of repeating the same driver across multiple bullets.\n- Prefer concrete trade/risk framing over generic exposition.\n- Limit the pulse to the 3-5 most decision-useful takeaways.\n\nTASK:\n1) Produce a concise daily pulse based on sentinel results + latest FXEmpire analysis + market state/log context.\n2) Highlight alignment or mismatch between geopolitical risks and market/commodity pricing.\n3) Include actionable 24-72h outlook for Brent, WTI, Natural Gas, Gold, Silver, Platinum.\n4) Include a Sources section with raw URLs (from the FXEmpire report and optional web checks).\n\nOUTPUT CONSTRAINTS (Discord announce mode):\n- Compact bullet sections, no markdown tables.\n- Keep output concise enough to avoid truncation.\n- No repeated asset lists or repeated restatement of the same risk under different headings.\n- If nothing material changed, say that plainly and give only the highest-conviction 24-72h setup.\n\nAFTER posting:\n- Update /home/node/.openclaw/workspace/market/state.json with refreshed key levels, active narratives, and watchlist changes.\n- Append a 2-3 line summary to /home/node/.openclaw/workspace/market/daily-log.md.\n- Do NOT run publisher here; publishing is handled by Daily FXEmpire Analysis.",
+        "model": "gpt-5.4",
         "thinking": "low"
       },
       "schedule": {
-        "expr": "0 6 * * 1-5",
+        "expr": "0 6,18 * * 1-5",
         "kind": "cron",
         "tz": "Europe/Berlin"
       },
@@ -61,12 +61,12 @@
       "name": "Daily FXEmpire Analysis",
       "payload": {
         "kind": "agentTurn",
-        "message": "Run these commands in order:\n1) Generate daily FXEmpire analysis markdown:\nnode /home/node/.openclaw/workspace/skills/fxempire-enrichment/scripts/fxempire_enrich.mjs --hours 24 --commodities brent-crude-oil,wti-crude-oil,natural-gas,gold,silver,platinum,spx,tech100-usd,us30-usd,de30-eur,uk100-gbp,jp225-usd,eur-usd,usd-jpy,gbp-usd,bitcoin,ethereum,solana,ripple,cardano --tags brent-crude-oil=co-brent-crude-oil,wti-crude-oil=co-wti-crude-oil,natural-gas=co-natural-gas,gold=co-gold,silver=co-silver,platinum=co-platinum,spx=i-spx,tech100-usd=i-tech100-usd,us30-usd=i-us30-usd,de30-eur=i-de30-eur,uk100-gbp=i-uk100-gbp,jp225-usd=i-jp225-usd,eur-usd=c-eur-usd,usd-jpy=c-usd-jpy,gbp-usd=c-gbp-usd,bitcoin=cc-bitcoin,ethereum=cc-ethereum,solana=cc-solana,ripple=cc-ripple,cardano=cc-cardano --max-items 3 --output-file /home/node/.openclaw/workspace/market/fxempire-market-analysis-24h.md\n2) Publish that analysis to GitHub Pages:\nnode /home/node/.openclaw/workspace/skills/briefing-publisher/scripts/publish_briefing.mjs --input-file /home/node/.openclaw/workspace/market/fxempire-market-analysis-24h.md --series market\n\nIf both steps succeed, reply with exactly HEARTBEAT_OK. If a step fails, return only the concise error.",
-        "model": "gpt-5.2",
+        "message": "Run these commands in order:\n1) Generate daily FXEmpire analysis markdown:\nnode /home/node/.openclaw/workspace/skills/fxempire-analysis/scripts/fxempire_enrich.mjs --hours 24 --commodities brent-crude-oil,wti-crude-oil,natural-gas,gold,silver,platinum,spx,tech100-usd,us30-usd,de30-eur,uk100-gbp,jp225-usd,eur-usd,usd-jpy,gbp-usd,bitcoin,ethereum,solana,ripple,cardano --tags brent-crude-oil=co-brent-crude-oil,wti-crude-oil=co-wti-crude-oil,natural-gas=co-natural-gas,gold=co-gold,silver=co-silver,platinum=co-platinum,spx=i-spx,tech100-usd=i-tech100-usd,us30-usd=i-us30-usd,de30-eur=i-de30-eur,uk100-gbp=i-uk100-gbp,jp225-usd=i-jp225-usd,eur-usd=c-eur-usd,usd-jpy=c-usd-jpy,gbp-usd=c-gbp-usd,bitcoin=cc-bitcoin,ethereum=cc-ethereum,solana=cc-solana,ripple=cc-ripple,cardano=cc-cardano --max-items 3 --output-file /home/node/.openclaw/workspace/market/fxempire-market-analysis-24h.md\n2) Publish that analysis to GitHub Pages:\nnode /home/node/.openclaw/workspace/skills/briefing-publisher/scripts/publish_briefing.mjs --input-file /home/node/.openclaw/workspace/market/fxempire-market-analysis-24h.md --series market\n\nIf both steps succeed, reply with exactly HEARTBEAT_OK. If a step fails, return only the concise error.",
+        "model": "gpt-5.4",
         "thinking": "low"
       },
       "schedule": {
-        "expr": "45 5 * * 1-5",
+        "expr": "45 5,17 * * 1-5",
         "kind": "cron",
         "tz": "Europe/Berlin"
       },
@@ -74,6 +74,7 @@
     },
     {
       "delivery": {
+        "bestEffort": false,
         "channel": "discord",
         "mode": "announce",
         "to": "channel:1475593803984273579"
@@ -83,8 +84,8 @@
       "name": "Weekly Market Radar",
       "payload": {
         "kind": "agentTurn",
-        "message": "You are running a weekly deep market analytics report for #market-analytics. FIRST: Read /home/node/.openclaw/workspace/market/state.json, /home/node/.openclaw/workspace/market/daily-log.md, /home/node/.openclaw/workspace/market/weekly-log.md, AND /home/node/.openclaw/workspace/sentinel/state.json plus /home/node/.openclaw/workspace/sentinel/weekly-log.md for geopolitical context. Your job: 1) Week in review: Summarize biggest moves across indices, sectors, commodities, crypto. Reference daily log entries to build the narrative arc. 2) Narrative shifts: Identify emerging or shifting narratives. Compare against activeNarratives in state.json. 3) Sector rotations: Where is capital flowing? 4) Positioning and sentiment: Crowded trades, extreme short interest, fund flows. 5) Week ahead risks: Major earnings, economic data, central bank meetings, political events. Cross-reference sentinel week-ahead alert list. 6) Precious metals outlook: Gold/silver trend analysis, compare against key levels. Note correlation with geopolitical risk premium from sentinel data. 7) Geopolitical risk pricing: Are markets adequately pricing sentinel-flagged threats? Where are the disconnects or opportunities? 8) Actionable watchlist: 3-5 names or trades for the coming week with rationale, factoring in both market and geopolitical signals. AFTER posting: Update market/state.json with refreshed watchlist, key levels, and active narratives. Append summary to market/weekly-log.md. Clear resolved alerts. Discord-friendly (no tables, bullet lists). Be opinionated where data supports it.",
-        "model": "gpt-5.2",
+        "message": "You are running a weekly deep market analytics report for #market-analytics. FIRST: Read /home/node/.openclaw/workspace/market/fxempire-market-analysis-24h.md, /home/node/.openclaw/workspace/market/state.json, /home/node/.openclaw/workspace/market/daily-log.md, /home/node/.openclaw/workspace/market/weekly-log.md, AND /home/node/.openclaw/workspace/sentinel/state.json plus /home/node/.openclaw/workspace/sentinel/weekly-log.md for geopolitical context. Explicitly ground the weekly narrative in the most recent FXEmpire analysis and state whether that analysis is recent (\u003c24h) or stale. If stale, perform a brief refresh check before final synthesis. Editorial rules: synthesize, do not replay the week day-by-day; collapse repeated themes into regime shifts; prioritize what changed, what persisted, and what the market still misprices; avoid repeating the same driver across sections; keep only the 5 most decision-useful weekly takeaways. Omit low-signal items unless they materially affect next week's setup. If a theme persisted without meaningful change, summarize it once and move on. Your job: 1) Week in review: Summarize biggest moves across indices, sectors, commodities, crypto. Reference daily log entries only to support the narrative arc, not to enumerate every event. 2) Narrative shifts: Identify emerging or shifting narratives. Compare against activeNarratives in state.json. 3) Sector rotations: Where is capital flowing? 4) Positioning and sentiment: Crowded trades, extreme short interest, fund flows. 5) Week ahead risks: Major earnings, economic data, central bank meetings, political events. Cross-reference sentinel week-ahead alert list. 6) Precious metals outlook: Gold/silver trend analysis, compare against key levels. Note correlation with geopolitical risk premium from sentinel data. 7) Geopolitical risk pricing: Are markets adequately pricing sentinel-flagged threats? Where are the disconnects or opportunities? 8) Actionable watchlist: 3-5 names or trades for the coming week with rationale, factoring in both market and geopolitical signals. AFTER posting: Update market/state.json with refreshed watchlist, key levels, and active narratives. Append summary to market/weekly-log.md. Clear resolved alerts. Discord-friendly (no tables, bullet lists). Be opinionated where data supports it.",
+        "model": "gpt-5.4",
         "thinking": "low"
       },
       "schedule": {
@@ -107,12 +108,12 @@
       "name": "Daily Sentinel",
       "payload": {
         "kind": "agentTurn",
-        "message": "You are running a daily geopolitical and world events sentinel scan for #news. FIRST: Read /home/node/.openclaw/workspace/sentinel/state.json and /home/node/.openclaw/workspace/sentinel/daily-log.md for prior context. Also read /home/node/.openclaw/workspace/state/truthsocial-trump-watch/latest-posts.json and treat it as a primary signal source for U.S. geopolitical intent/messaging. Compare new findings against activeThreats and watchZones. Your job: 1) Armed conflicts and military: Active wars, escalations, military buildups, strikes, naval movements, drone attacks. Track trajectory vs yesterday. 2) Political instability: Coups, mass protests, government collapses, contested elections, sanctions, diplomatic breakdowns. 3) Severe weather and natural disasters: Hurricanes, earthquakes, floods, droughts — especially those affecting supply chains, shipping lanes, or commodity production. 4) Elections and policy shifts: Upcoming votes, polling shifts, surprise policy announcements, regulatory changes. 5) Energy and supply chain: Shipping lane disruptions (Suez, Hormuz, Panama), pipeline incidents, OPEC decisions, port closures. 6) Cyber and infrastructure: Major cyberattacks, grid failures, telecom outages affecting markets or economies. 7) Trump Truth signal: summarize notable new posts (if any), classify geopolitical/market relevance, and map each to potential near-term transmission channels. 8) Market impact assessment: For each flagged event, rate potential market impact (LOW/MEDIUM/HIGH) and which asset classes are most exposed. AFTER posting: Update sentinel/state.json with current activeThreats, watchZones, escalationTimeline, and any marketImpactAlerts. Append 2-3 line summary to sentinel/daily-log.md. Format as concise briefing. Use 🔴 HIGH 🟡 MEDIUM 🟢 LOW for impact ratings. Discord-friendly (no tables). If the world is quiet, say so briefly.",
-        "model": "gpt-5.2",
+        "message": "You are running a daily geopolitical and world events sentinel scan for #news. FIRST: Read /home/node/.openclaw/workspace/sentinel/state.json and /home/node/.openclaw/workspace/sentinel/daily-log.md for prior context. Also read /home/node/.openclaw/workspace/state/truthsocial-trump-watch/latest-posts.json and treat it as a primary signal source for U.S. geopolitical intent/messaging. Compare new findings against activeThreats and watchZones. Editorial rules: be delta-first and ruthlessly non-redundant. Assume the reader already knows the standing baseline risks from prior runs. Lead with only new or materially changed medium/high-risk developments. If a major risk is still live but unchanged, mention it only if that reminder adds decision value; otherwise omit it. Do not re-post information already covered during the last 48 hours unless there is new evidence, a changed trajectory, a changed market implication, or a meaningful update in severity/probability. Collapse overlapping drivers (for example Iran war + Hormuz + Lebanon spillover) into one coherent risk block when they stem from the same underlying escalation. Do not repeat the same asset/transmission list in multiple sections. Omit low-risk items by default; include them only if they create a genuine new escalation path or supply-chain consequence. Omit empty/non-signal sections entirely. Never mention the absence of a signal unless that absence itself changes the risk picture. Never echo internal instruction language such as count limits, prioritization labels, or editorial rules in the final output. Only mention a Trump Truth signal when there is a genuinely new post or when an earlier post has a materially new implication because events changed today; otherwise omit the Truth Social item entirely. Do not include fallback lines such as 'none', 'still current', or a recap of an older post with unchanged implications. Prefer short bullets in this format: what changed -\u003e why it matters -\u003e exposed assets. End with a short natural-language watchlist of concrete things to monitor next. If there are no material deltas, say so clearly in one line, optionally add one short line on the still-live dominant risk cluster only if useful, and stop. Your job: 1) Armed conflicts and military: Active wars, escalations, military buildups, strikes, naval movements, drone attacks. Track trajectory vs yesterday. 2) Political instability: Coups, mass protests, government collapses, contested elections, sanctions, diplomatic breakdowns. 3) Severe weather and natural disasters: Hurricanes, earthquakes, floods, droughts - especially those affecting supply chains, shipping lanes, or commodity production. 4) Elections and policy shifts: Upcoming votes, polling shifts, surprise policy announcements, regulatory changes. 5) Energy and supply chain: Shipping lane disruptions (Suez, Hormuz, Panama), pipeline incidents, OPEC decisions, port closures. 6) Cyber and infrastructure: Major cyberattacks, grid failures, telecom outages affecting markets or economies. 7) Trump Truth signal: include only genuinely new posts with geopolitical or market relevance, and map each to potential near-term transmission channels. 8) Market impact assessment: For each flagged event, rate potential market impact (LOW/MEDIUM/HIGH) and which asset classes are most exposed. AFTER posting: Update sentinel/state.json with current activeThreats, watchZones, escalationTimeline, and any marketImpactAlerts. Append 2-3 line summary to sentinel/daily-log.md. Format as concise briefing. Use 🔴 HIGH 🟡 MEDIUM 🟢 LOW for impact ratings. Discord-friendly (no tables). If the world is quiet, say so briefly.",
+        "model": "gpt-5.4",
         "thinking": "low"
       },
       "schedule": {
-        "expr": "30 5 * * *",
+        "expr": "30 5,17 * * 1-5",
         "kind": "cron",
         "tz": "Europe/Berlin"
       },
@@ -131,8 +132,8 @@
       "name": "Weekly Sentinel",
       "payload": {
         "kind": "agentTurn",
-        "message": "You are running a weekly deep geopolitical and world events analysis for #news. FIRST: Read /home/node/.openclaw/workspace/sentinel/state.json, /home/node/.openclaw/workspace/sentinel/daily-log.md, and /home/node/.openclaw/workspace/sentinel/weekly-log.md for full weekly context. Your job: 1) Threat landscape: Map all active global threats — conflicts, political crises, natural disasters. What escalated, de-escalated, or emerged this week? 2) Escalation tracker: For each active conflict or crisis, assess trajectory (ESCALATING/STABLE/DE-ESCALATING) with evidence. 3) Election and policy calendar: Upcoming elections, referendums, policy deadlines, treaty expirations in the next 2-4 weeks. 4) Supply chain and energy risk map: Current disruptions and emerging risks to global trade, energy, and commodities. 5) Black swan watch: Low-probability but high-impact scenarios developing on the horizon. 6) Market transmission channels: For each major threat, explain HOW it could transmit into market moves — which sectors, currencies, commodities are exposed and through what mechanism. 7) Week ahead alert list: Rank the top 5 geopolitical risks for the coming week by probability x impact. AFTER posting: Update sentinel/state.json with refreshed threats, watchZones, timeline. Append summary to sentinel/weekly-log.md. Format as structured briefing. Use 🔴🟡🟢 ratings. Discord-friendly (no tables). Be direct and analytical.",
-        "model": "gpt-5.2",
+        "message": "You are running a weekly deep geopolitical and world events analysis for #news. FIRST: Read /home/node/.openclaw/workspace/sentinel/state.json, /home/node/.openclaw/workspace/sentinel/daily-log.md, and /home/node/.openclaw/workspace/sentinel/weekly-log.md for full weekly context. Explicitly anchor your report in the most recent Daily Sentinel context and state whether that context is recent (\u003c24h) or stale; if stale, perform a brief refresh sweep before final synthesis. Editorial rules: synthesize, do not replay the week item-by-item. Prioritize medium/high-risk developments, regime shifts, and unresolved threats that matter for next week. Collapse repeated daily developments into one trend line. If several flashpoints share the same underlying driver, discuss them together instead of separately repeating the same explanation. Keep market-transmission notes specific and non-repetitive. Omit low-signal items unless they created a real shift in risk. Do not restate items that were already posted within the last 48 hours unless the weekly view adds a materially new conclusion, changed priority, or broader strategic implication. If a threat was important but unchanged, summarize it in one line rather than re-arguing the case. Omit non-signals and empty sections entirely. Never mention the absence of a signal unless that absence itself changes the strategic picture. Never echo internal instruction language such as count limits, prioritization labels, or editorial rules in the final output. Your job: 1) Threat landscape: Map all active global threats — conflicts, political crises, natural disasters. What escalated, de-escalated, or emerged this week? 2) Escalation tracker: For each active conflict or crisis, assess trajectory (ESCALATING/STABLE/DE-ESCALATING) with evidence. 3) Election and policy calendar: Upcoming elections, referendums, policy deadlines, treaty expirations in the next 2-4 weeks. 4) Supply chain and energy risk map: Current disruptions and emerging risks to global trade, energy, and commodities. 5) Black swan watch: Low-probability but high-impact scenarios developing on the horizon. 6) Market transmission channels: For each major threat, explain HOW it could transmit into market moves — which sectors, currencies, commodities are exposed and through what mechanism. 7) Week ahead alert list: Rank the top geopolitical risks for the coming week by probability x impact. AFTER posting: Update sentinel/state.json with refreshed threats, watchZones, timeline. Append summary to sentinel/weekly-log.md. Format as structured briefing. Use 🔴🟡🟢 ratings. Discord-friendly (no tables). Be direct and analytical.",
+        "model": "gpt-5.4",
         "thinking": "low"
       },
       "schedule": {
@@ -155,8 +156,9 @@
       "name": "Daily GitHub Morning Brief (sofatutor)",
       "payload": {
         "kind": "agentTurn",
-        "message": "Create a morning GitHub briefing for the sofatutor org. Exclude/ignore any issues or PRs labeled 'on hold'. Focus on: (1) PRs where review is requested from me, (2) PRs assigned to me, (3) issues assigned to me, (4) items where I was mentioned, (5) relevant GitHub notifications in sofatutor/* that likely need my action (reason: review_requested/mention/assign/security_alert). For each section, list top items (prefer last 24h; include older only if high priority) with repo#number, title, and URL. End with a 3-item recommended priority list for today. Keep it concise and actionable.",
-        "model": "openai-codex/gpt-5.2"
+        "message": "Create a morning GitHub briefing for the sofatutor org. Exclude or ignore any issues or PRs labeled 'on hold'. Use live GitHub data, not memory. Before writing, explicitly check these buckets: (1) open PRs where review is requested from me in sofatutor/*, (2) open PRs assigned to me in sofatutor/*, (3) open issues assigned to me in sofatutor/*, (4) open items in sofatutor/* where I was mentioned and that still look actionable, (5) relevant GitHub notifications in sofatutor/* that likely need my action (reason: review_requested, mention, assign, security_alert). Prefer items updated in the last 24h, but do not drop still-open actionable carry-over items just because they are older. A section may say 'None' only if you actually checked that bucket after filtering and found zero items. If a bucket has results, include the top actionable items instead of summarizing it as empty. For each item, include repo#number, title, URL, and one short note on why it matters now (for example: fresh review request, waiting on my decision, failing CI, stale but still assigned). Rank by urgency and recency. End with up to 3 recommended priorities that are derived from the actual items you found. If everything is truly empty, say 'No direct GitHub actionables right now' and give at most 2 concise housekeeping checks instead of generic monitoring advice. Keep it concise, factual, and action-oriented.",
+        "model": "gpt-5.4",
+        "thinking": "low"
       },
       "schedule": {
         "expr": "30 7 * * 1-5",
@@ -179,7 +181,7 @@
       "payload": {
         "kind": "agentTurn",
         "message": "Create the weekly AI-Lab Tech Lab briefing. Exclude/ignore any issues or PRs labeled 'on hold'.\\n\\nPrimary sources:\\n1) Sofatutor AI Tech Lab project board: https://github.com/orgs/sofatutor/projects/16/views/6\\n2) Repo: https://github.com/sofatutor/ai-lab\\n\\nWhat to include (keep it concise):\\n- Project board: what’s in the top priority/next columns, what’s blocked, what’s stale (no movement in 7+ days), and what needs my input.\\n- ai-lab repo: PRs needing my review, PRs assigned to me, issues assigned to me, and anything mentioning me (last 7 days).\\n- If there are security alerts/CI failures in ai-lab, call them out.\\n\\nOutput format:\\n1) Top 3 priorities for Tech Lab day\\n2) Board highlights (bullets)\\n3) ai-lab repo highlights (bullets with links)\\n4) ‘Asks for me’ (explicit decisions/reviews needed)",
-        "model": "gpt-5.2"
+        "model": "openai-codex/gpt-5.1-codex-mini"
       },
       "schedule": {
         "expr": "0 8 * * 3",
@@ -189,6 +191,7 @@
       "sessionTarget": "isolated"
     },
     {
+      "deleteAfterRun": false,
       "delivery": {
         "bestEffort": false,
         "channel": "discord",
@@ -200,7 +203,8 @@
       "name": "Hormuz AIS watch",
       "payload": {
         "kind": "agentTurn",
-        "message": "Run the AISStream Hormuz watcher and output only meaningful results. Command: node /home/node/.openclaw/workspace/skills/hormuz-ais-watch/scripts/hormuz_watch.mjs . Rules: (1) If stdout contains vessel alerts, return them verbatim. (2) If there are no alerts and command succeeds, reply with exactly HEARTBEAT_OK. (3) If the command fails after retries, return only the single-line AISSTREAM_ERROR message from stderr. Do not include retry-attempt narration or extra commentary."
+        "message": "Run the AISStream Hormuz watcher and output only meaningful results. Command: node /home/node/.openclaw/workspace/skills/hormuz-ais-watch/scripts/hormuz_watch.mjs . Rules: (1) If stdout contains vessel alerts, return them verbatim. (2) If there are no alerts and command succeeds, reply with exactly HEARTBEAT_OK. (3) If the command fails after retries, return only the single-line AISSTREAM_ERROR message from stderr. Do not include retry-attempt narration or extra commentary.",
+        "model": "openai-codex/gpt-5.1-codex-mini"
       },
       "schedule": {
         "expr": "*/5 * * * *",
@@ -228,6 +232,28 @@
         "expr": "*/5 * * * *",
         "kind": "cron",
         "tz": "UTC"
+      },
+      "sessionTarget": "isolated"
+    },
+    {
+      "delivery": {
+        "channel": "discord",
+        "mode": "announce",
+        "to": "channel:1475978451516391464"
+      },
+      "enabled": true,
+      "id": "82db7a8a-83f7-43b9-b728-7527bdb44703",
+      "name": "Friday GitHub Stale Sweep (sofatutor)",
+      "payload": {
+        "kind": "agentTurn",
+        "message": "Create a GitHub stale-items briefing for the sofatutor org. Exclude or ignore any issues or PRs labeled 'on hold'. Use live GitHub data, not memory. Look back 90 days for mentions, assignments, and notifications, and keep older items too if they are still open and directly actionable for me. Focus on stale but still-open work that may have fallen through the cracks. Before writing, explicitly check these buckets: (1) open PRs in sofatutor/* where review is requested from me and the PR is stale, aging, blocked, or still waiting on my decision, (2) open PRs assigned to me that are still open and either stale or not meaningfully updated, (3) open issues assigned to me that are still open and stale, (4) open PRs and issues in sofatutor/* where I was mentioned or tagged within the last 90 days and the thread still looks actionable for me, (5) open notifications in sofatutor/* from the last 90 days with reason review_requested, mention, assign, security_alert, or author that still point to unresolved work, (6) any especially old open PRs or issues that have been quiet for 14+ days but still appear to need my action. Prefer stale and unresolved over merely recent. Do not flood the report with everything you find; rank the most actionable items. A section may say 'None' only if you actually checked that bucket after filtering and found zero items. For each item, include repo#number, title, URL, age/staleness note, and one short reason it still matters now. Call out signs like waiting on my review, waiting on my answer, no update in N days, merge conflict risk, failing CI, or unresolved mention. Output format: (1) Top stale priorities this Friday, max 3 bullets. (2) PRs needing my action. (3) Issues needing my action. (4) Tagged or mentioned items still open. (5) Notifications worth clearing. End with up to 3 concrete cleanup moves for this afternoon. If there is nothing materially stale or actionable, say 'No stale GitHub actionables right now' and give at most 2 brief housekeeping checks.",
+        "model": "gpt-5.4",
+        "thinking": "low"
+      },
+      "schedule": {
+        "expr": "0 14 * * 5",
+        "kind": "cron",
+        "tz": "Europe/Berlin"
       },
       "sessionTarget": "isolated"
     }
