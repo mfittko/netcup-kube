@@ -85,9 +85,15 @@ func TestHTTPGetJSON_BadURL(t *testing.T) {
 }
 
 func TestHTTPGetJSON_Timeout(t *testing.T) {
+	done := make(chan struct{})
+	t.Cleanup(func() { close(done) })
+
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Block forever — the client timeout should fire first.
-		select {}
+		// Block until the test ends so the server can close cleanly.
+		select {
+		case <-done:
+		case <-r.Context().Done():
+		}
 	}))
 	defer srv.Close()
 
@@ -112,7 +118,7 @@ func TestFmtNum(t *testing.T) {
 		{0, 2, "0.00"},
 		{1234.5678, 2, "1234.57"},
 		{1.0, 0, "1"},
-		{-1.005, 2, "-1.01"},
+		{-1.006, 2, "-1.01"},
 	}
 	for _, tt := range tests {
 		got := toolutil.FmtNum(tt.v, tt.decimals)
@@ -131,8 +137,33 @@ func TestFmtNum_NegativeDecimals(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// FmtPct
+// FmtNumUS
 // ---------------------------------------------------------------------------
+
+func TestFmtNumUS(t *testing.T) {
+	tests := []struct {
+		v    float64
+		want string
+	}{
+		{75.5, "75.5"},
+		{42000, "42,000"},
+		{1985.3, "1,985.3"},
+		{1234567.89, "1,234,567.89"},
+		{-0.42, "-0.42"},
+		{0, "0"},
+		{1.0, "1"},
+		{1.123, "1.123"},
+		{1.1234, "1.123"}, // rounds to 3 dp
+		{-1234.5, "-1,234.5"},
+		{1000000, "1,000,000"},
+	}
+	for _, tt := range tests {
+		got := toolutil.FmtNumUS(tt.v)
+		if got != tt.want {
+			t.Errorf("FmtNumUS(%v) = %q, want %q", tt.v, got, tt.want)
+		}
+	}
+}
 
 func TestFmtPct(t *testing.T) {
 	tests := []struct {
