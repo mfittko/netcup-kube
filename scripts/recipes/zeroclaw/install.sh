@@ -211,6 +211,7 @@ HELM_ARGS=(
   --values "${VALUES_FILE}"
   --set "persistence.size=${STORAGE}"
   --set "secretName=${SECRET_NAME}"
+  --set-file "configToml=${SCRIPT_DIR}/config.toml"
 )
 
 if [[ -n "${IMAGE}" ]]; then

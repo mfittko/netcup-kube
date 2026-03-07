@@ -8,23 +8,4 @@ metadata:
     app.kubernetes.io/instance: {{ .Release.Name }}
 data:
   config.toml: |
-    [provider]
-    kind = "anthropic"
-    model = "claude-sonnet-4-20250514"
-    api_key = "${ANTHROPIC_API_KEY}"
-
-    [memory]
-    backend = "sqlite"
-    auto_save = true
-
-    [runtime]
-    kind = "native"
-    timeout_secs = 300
-
-    [security]
-    sandbox = false
-    rate_limit = 30
-
-    [gateway]
-    bind = "0.0.0.0:{{ .Values.gatewayPort }}"
-    tls = false
+{{ .Values.configToml | indent 4 }}

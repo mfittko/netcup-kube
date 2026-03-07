@@ -8,6 +8,8 @@ metadata:
     app.kubernetes.io/instance: {{ .Release.Name }}
 spec:
   replicas: {{ .Values.replicaCount }}
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app.kubernetes.io/name: zeroclaw
@@ -43,12 +45,17 @@ spec:
           envFrom:
             - secretRef:
                 name: {{ .Values.secretName }}
+          env:
+            - name: ZEROCLAW_CONFIG
+              value: /home/zeroclaw/.zeroclaw/config.toml
+            - name: PATH
+              value: /shared-bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
           livenessProbe:
             exec:
               command:
                 - zeroclaw
                 - status
-            initialDelaySeconds: 30
+            initialDelaySeconds: 5
             periodSeconds: 30
             failureThreshold: 3
           readinessProbe:
@@ -56,7 +63,7 @@ spec:
               command:
                 - zeroclaw
                 - status
-            initialDelaySeconds: 15
+            initialDelaySeconds: 3
             periodSeconds: 15
             failureThreshold: 3
           resources:
