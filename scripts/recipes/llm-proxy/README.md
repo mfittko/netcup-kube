@@ -115,6 +115,25 @@ LLM_PROXY_ENABLE_METRICS=false \
 netcup-kube install llm-proxy
 ```
 
+## Resource sizing (persistent + configurable)
+
+The recipe now defaults to a smaller llm-proxy CPU footprint:
+
+- `resources.requests.cpu=50m`
+- `resources.limits.cpu=500m`
+
+These defaults live in `scripts/recipes/llm-proxy/values.yaml`, so they persist across future rollouts.
+
+You can override workload resources per rollout with environment variables:
+
+```bash
+LLM_PROXY_CPU_REQUEST=100m \
+LLM_PROXY_CPU_LIMIT=1000m \
+LLM_PROXY_MEMORY_REQUEST=128Mi \
+LLM_PROXY_MEMORY_LIMIT=512Mi \
+netcup-kube install llm-proxy
+```
+
 ## Dependencies
 
 ### Redis (default)

@@ -77,6 +77,10 @@ Environment:
   LLM_PROXY_ENABLE_METRICS   true|false (default: false) - enable Prometheus metrics.
   LLM_PROXY_ENABLE_DISPATCHER true|false (default: false) - enable dispatcher workload.
   LLM_PROXY_ENABLE_REDIS_DASHBOARD true|false (default: false) - enable Redis metrics Grafana dashboard (chart-provided).
+  LLM_PROXY_CPU_REQUEST      Optional CPU request override for llm-proxy workload (e.g. 50m).
+  LLM_PROXY_CPU_LIMIT        Optional CPU limit override for llm-proxy workload (e.g. 500m).
+  LLM_PROXY_MEMORY_REQUEST   Optional memory request override for llm-proxy workload (e.g. 128Mi).
+  LLM_PROXY_MEMORY_LIMIT     Optional memory limit override for llm-proxy workload (e.g. 512Mi).
   LLM_PROXY_HOST             Alternative to --host.
   LLM_PROXY_ADMIN_HOST       Alternative to --admin-host.
 
@@ -125,6 +129,10 @@ FORCE_REDIS_UPGRADE="${LLM_PROXY_FORCE_REDIS_UPGRADE:-false}"
 ENABLE_METRICS="${LLM_PROXY_ENABLE_METRICS:-false}"
 ENABLE_DISPATCHER="${LLM_PROXY_ENABLE_DISPATCHER:-false}"
 ENABLE_REDIS_DASHBOARD="${LLM_PROXY_ENABLE_REDIS_DASHBOARD:-false}"
+CPU_REQUEST="${LLM_PROXY_CPU_REQUEST:-}"
+CPU_LIMIT="${LLM_PROXY_CPU_LIMIT:-}"
+MEMORY_REQUEST="${LLM_PROXY_MEMORY_REQUEST:-}"
+MEMORY_LIMIT="${LLM_PROXY_MEMORY_LIMIT:-}"
 
 # Dedicated Redis sizing (Bitnami chart).
 # Redis is used for Streams (event bus) and can also be used for HTTP caching; both are latency-sensitive.
@@ -840,6 +848,22 @@ fi
 
 if [[ -n "${IMAGE_TAG}" ]]; then
   HELM_ARGS+=(--set "image.tag=${IMAGE_TAG}")
+fi
+
+if [[ -n "${CPU_REQUEST}" ]]; then
+  HELM_ARGS+=(--set-string "resources.requests.cpu=${CPU_REQUEST}")
+fi
+
+if [[ -n "${CPU_LIMIT}" ]]; then
+  HELM_ARGS+=(--set-string "resources.limits.cpu=${CPU_LIMIT}")
+fi
+
+if [[ -n "${MEMORY_REQUEST}" ]]; then
+  HELM_ARGS+=(--set-string "resources.requests.memory=${MEMORY_REQUEST}")
+fi
+
+if [[ -n "${MEMORY_LIMIT}" ]]; then
+  HELM_ARGS+=(--set-string "resources.limits.memory=${MEMORY_LIMIT}")
 fi
 
 if [[ -n "${HOSTNAME_MAIN}" ]]; then
