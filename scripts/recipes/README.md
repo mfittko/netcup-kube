@@ -48,6 +48,7 @@ NAMESPACE=prod-db STORAGE=50Gi netcup-kube install postgres
 - **vscode-copilot-proxy**: Internal-only OpenVSCode Server for Copilot Proxy plugin runtime
 - **openclaw**: OpenClaw agent with mandatory kernel-level network monitoring
 - **truthbrush-poller**: Low-latency Truth poller service that forwards new posts to an OpenClaw webhook
+- **zeroclaw**: ZeroClaw AI agent (bundled Helm chart, TOML config, Anthropic provider, dedicated namespace)
 
 ## Usage
 

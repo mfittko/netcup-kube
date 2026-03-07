@@ -1,0 +1,7 @@
+*
+!Dockerfile.netcup-claw
+!go.mod
+!go.sum
+!cmd/netcup-claw/**
+!internal/**
+!LICENSE

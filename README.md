@@ -22,6 +22,14 @@ Building
 - This creates `bin/netcup-kube` binary (not committed to repository)
 - The CLI delegates to shell scripts in `scripts/` for all operations
 
+Container image (`netcup-claw`)
+- Canonical image reference: `ghcr.io/mfittko/netcup-claw`
+- Published by GitHub Actions workflow: `.github/workflows/publish-netcup-claw.yml`
+- Tags:
+  - `latest` on `main`
+  - Semver tags on `v*` pushes (for example `v1.2.3`, `v1.2`)
+  - Immutable short-SHA tags (`sha-<shortsha>`)
+
 Remote bootstrap from Netcup root credentials
 - Use the Go CLI subcommand: `./bin/netcup-kube remote`
 - Examples:

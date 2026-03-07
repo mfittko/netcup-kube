@@ -40,6 +40,7 @@ Available recipes:
   llm-proxy                Install llm-proxy (Helm chart; Secret-backed config)
 	vscode-copilot-proxy     Install internal-only OpenVSCode Server for Copilot Proxy
   openclaw                 Install OpenClaw with kernel-level network monitoring
+  zeroclaw                 Install ZeroClaw AI agent (TOML config, Anthropic provider)
 
 Examples:
   netcup-kube install argo-cd --help

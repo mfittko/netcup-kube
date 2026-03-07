@@ -1,0 +1,75 @@
+# ZeroClaw Helm chart values
+# Override these values via -f or --set during helm install.
+
+replicaCount: 1
+
+image:
+  repository: ghcr.io/zeroclaw-labs/zeroclaw
+  tag: latest
+  pullPolicy: IfNotPresent
+
+initImage:
+  repository: ghcr.io/mfittko/netcup-claw
+  tag: latest
+  pullPolicy: IfNotPresent
+
+# Name of the pre-created Kubernetes Secret with ZeroClaw credentials.
+# Must be created before installation:
+#   kubectl create secret generic zeroclaw-credentials \
+#     --from-literal=ANTHROPIC_API_KEY=... \
+#     --namespace zeroclaw
+secretName: zeroclaw-credentials
+
+# Gateway port ZeroClaw listens on.
+gatewayPort: 42617
+
+# Persistent volume claim for ZeroClaw state directory.
+persistence:
+  enabled: true
+  size: 5Gi
+  storageClass: ""
+  accessMode: ReadWriteOnce
+
+# Resource requests and limits for the ZeroClaw container.
+resources:
+  requests:
+    cpu: 50m
+    memory: 32Mi
+  limits:
+    cpu: 1000m
+    memory: 256Mi
+
+# Ingress configuration (optional). Set host to enable.
+ingress:
+  enabled: false
+  host: ""
+  entrypoint: web
+
+# Service configuration.
+service:
+  type: ClusterIP
+  port: 42617
+
+# Default config.toml content. Override at install time via:
+#   --set-file configToml=scripts/recipes/zeroclaw/config.toml
+configToml: |
+  [provider]
+  kind = "anthropic"
+  model = "claude-sonnet-4-20250514"
+  api_key = "${ANTHROPIC_API_KEY}"
+
+  [memory]
+  backend = "sqlite"
+  auto_save = true
+
+  [runtime]
+  kind = "native"
+  timeout_secs = 300
+
+  [security]
+  sandbox = false
+  rate_limit = 30
+
+  [gateway]
+  bind = "0.0.0.0:42617"
+  tls = false

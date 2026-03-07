@@ -1,0 +1,7 @@
+# ZeroClaw recipe values
+# This file is the default values file used by install.sh.
+# Customize storage size and other overrides here.
+
+persistence:
+  enabled: true
+  size: 5Gi

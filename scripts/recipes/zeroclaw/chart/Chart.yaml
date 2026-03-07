@@ -1,0 +1,13 @@
+apiVersion: v2
+name: zeroclaw
+description: ZeroClaw AI agent with netcup-claw backend
+type: application
+version: 0.1.0
+appVersion: "latest"
+keywords:
+  - zeroclaw
+  - ai
+  - agent
+home: https://github.com/zeroclaw-labs/zeroclaw
+maintainers:
+  - name: netcup-kube
