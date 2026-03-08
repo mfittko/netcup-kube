@@ -308,13 +308,9 @@ Examples:
 	RunE: runFXEmpireRates,
 }
 
-func runFXEmpireRates(_ *cobra.Command, _ []string) error {
-	// Resolve instrument list (defaults match JS defaults).
-	instruments := fxInstruments
-	if len(instruments) == 0 {
-		instruments = []string{"brent-crude-oil", "natural-gas", "gold", "silver"}
-	}
-
+// computeFXEmpireRates fetches rates for the given instruments and returns a
+// fxPayload. Called by both runFXEmpireRates and the fxempire-enrich command.
+func computeFXEmpireRates(locale string, instruments []string) fxPayload {
 	base := "https://www.fxempire.com/api/v1"
 
 	// Group slugs by API category.
@@ -340,22 +336,22 @@ func runFXEmpireRates(_ *cobra.Command, _ []string) error {
 	if len(groups["commodities"]) > 0 {
 		ratesURLs = append(ratesURLs, fmt.Sprintf(
 			"%s/%s/commodities/rates?instruments=%s&includeFullData=true&includeSparkLines=true",
-			base, fxLocale, url.QueryEscape(strings.Join(groups["commodities"], ","))))
+			base, locale, url.QueryEscape(strings.Join(groups["commodities"], ","))))
 	}
 	if len(groups["indices"]) > 0 {
 		ratesURLs = append(ratesURLs, fmt.Sprintf(
 			"%s/%s/indices/rates?instruments=%s&includeFullData=true&includeSparkLines=true",
-			base, fxLocale, url.QueryEscape(strings.Join(groups["indices"], ","))))
+			base, locale, url.QueryEscape(strings.Join(groups["indices"], ","))))
 	}
 	if len(groups["currencies"]) > 0 {
 		ratesURLs = append(ratesURLs, fmt.Sprintf(
 			"%s/%s/currencies/rates?category=&includeSparkLines=true&includeFullData=true&instruments=%s",
-			base, fxLocale, url.QueryEscape(strings.Join(groups["currencies"], ","))))
+			base, locale, url.QueryEscape(strings.Join(groups["currencies"], ","))))
 	}
 	if len(groups["crypto-coin"]) > 0 {
 		ratesURLs = append(ratesURLs, fmt.Sprintf(
 			"%s/%s/crypto-coin/rates?instruments=%s&includeFullData=true",
-			base, fxLocale, url.QueryEscape(strings.Join(groups["crypto-coin"], ","))))
+			base, locale, url.QueryEscape(strings.Join(groups["crypto-coin"], ","))))
 	}
 
 	// Fetch and merge all standard rates endpoints.
@@ -384,7 +380,7 @@ func runFXEmpireRates(_ *cobra.Command, _ []string) error {
 	// Fetch crypto chart snapshots and merge into prices (overrides rates data).
 	var cryptoChartURLs []string
 	for _, slug := range groups["crypto-coin"] {
-		snap, err := fetchCryptoUSDSnapshot(base, fxLocale, slug)
+		snap, err := fetchCryptoUSDSnapshot(base, locale, slug)
 		cryptoChartURLs = append(cryptoChartURLs, snap.chartURL)
 		if err != nil {
 			if ratesErr != "" {
@@ -456,17 +452,27 @@ func runFXEmpireRates(_ *cobra.Command, _ []string) error {
 		pricesErrPtr = &ratesErr
 	}
 
-	payload := fxPayload{
+	return fxPayload{
 		Meta: fxMeta{
 			// Use millisecond precision to match JS new Date().toISOString().
 			Now:         time.Now().UTC().Format("2006-01-02T15:04:05.000Z"),
-			Locale:      fxLocale,
+			Locale:      locale,
 			Commodities: instruments,
 		},
 		RatesURL:    ratesURLStr,
 		Prices:      prices,
 		PricesError: pricesErrPtr,
 	}
+}
+
+func runFXEmpireRates(_ *cobra.Command, _ []string) error {
+	// Resolve instrument list (defaults match JS defaults).
+	instruments := fxInstruments
+	if len(instruments) == 0 {
+		instruments = []string{"brent-crude-oil", "natural-gas", "gold", "silver"}
+	}
+
+	payload := computeFXEmpireRates(fxLocale, instruments)
 
 	if fxJSON {
 		b, err := json.MarshalIndent(payload, "", "  ")

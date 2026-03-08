@@ -10,10 +10,16 @@ var toolCmd = &cobra.Command{
 	Long: `Backend-agnostic data tools for OpenClaw skills.
 
 Sub-commands:
-  fxempire-rates  - Fetch and format FXEmpire market rates`,
+  fxempire-rates    - Fetch and format FXEmpire market rates
+  market-candles    - Fetch OHLCV market candle data (FXEmpire or Oanda)
+  fxempire-articles - Fetch FXEmpire news and forecast articles
+  fxempire-enrich   - Fetch and enrich FXEmpire data with article analysis`,
 }
 
 func init() {
 	toolCmd.AddCommand(fxempireRatesCmd)
+	toolCmd.AddCommand(marketCandlesCmd)
+	toolCmd.AddCommand(fxempireArticlesCmd)
+	toolCmd.AddCommand(fxempireEnrichCmd)
 	rootCmd.AddCommand(toolCmd)
 }
