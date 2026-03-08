@@ -100,7 +100,41 @@ type articlesPayload struct {
 	Articles []Article    `json:"articles"`
 }
 
+// flexibleDate is a JSON field that accepts either an RFC3339 string date
+// (e.g. "2024-01-15T10:00:00Z") or a numeric millisecond timestamp
+// (e.g. 1705276800000).  The FXEmpire news hub uses string dates while the
+// forecasts hub uses numeric milliseconds, so both forms must be handled.
+type flexibleDate struct {
+	// ms holds the value as Unix milliseconds; zero means absent/unparseable.
+	ms int64
+}
+
+// UnmarshalJSON implements json.Unmarshaler for flexibleDate.
+func (d *flexibleDate) UnmarshalJSON(data []byte) error {
+	// Try numeric first (forecasts endpoint returns raw numbers).
+	var num json.Number
+	if err := json.Unmarshal(data, &num); err == nil {
+		if f, err := num.Float64(); err == nil && f > 0 {
+			d.ms = int64(f)
+			return nil
+		}
+	}
+	// Try unquoted string (RFC3339 or similar).
+	var s string
+	if err := json.Unmarshal(data, &s); err == nil && s != "" {
+		if t, err := time.Parse(time.RFC3339, s); err == nil {
+			d.ms = t.UnixMilli()
+			return nil
+		}
+	}
+	// Unrecognized format — leave as zero (caller treats zero as absent).
+	return nil
+}
+
 // rawHubArticle is the per-article shape from the FXEmpire hub API.
+// The `date` field is typed as flexibleDate because the forecasts endpoint
+// returns a numeric millisecond timestamp while the news endpoint returns an
+// RFC3339 string.
 type rawHubArticle struct {
 	ID          int            `json:"id"`
 	Title       string         `json:"title"`
@@ -110,7 +144,7 @@ type rawHubArticle struct {
 	Tags        []string       `json:"tags"`
 	Type        string         `json:"type"`
 	Timestamp   json.Number    `json:"timestamp"`
-	Date        string         `json:"date"`
+	Date        flexibleDate   `json:"date"`
 	Author      rawArticleAuth `json:"author"`
 	ArticleURL  string         `json:"articleUrl"`
 	FullURL     string         `json:"fullUrl"`
@@ -224,16 +258,13 @@ func resolveArticleURL(articleURL, fullURL, slug string, id int, articleType str
 // ---------------------------------------------------------------------------
 
 // rawArticleTimestamp extracts a millisecond timestamp from a rawHubArticle.
+// It prefers the `timestamp` field; if absent or zero it falls back to `date`
+// (which handles both RFC3339 strings and numeric ms via flexibleDate).
 func rawArticleTimestamp(raw rawHubArticle) int64 {
 	if tsFl, err := raw.Timestamp.Float64(); err == nil && tsFl > 0 {
 		return int64(tsFl)
 	}
-	if raw.Date != "" {
-		if t, err := time.Parse(time.RFC3339, raw.Date); err == nil {
-			return t.UnixMilli()
-		}
-	}
-	return 0
+	return raw.Date.ms
 }
 
 // normalizeHubArticle converts a rawHubArticle into the normalized Article.

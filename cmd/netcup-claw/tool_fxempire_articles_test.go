@@ -1,10 +1,97 @@
 package main
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
 )
+
+// ---------------------------------------------------------------------------
+// flexibleDate – regression for numeric date form from forecasts endpoint
+// ---------------------------------------------------------------------------
+
+func TestFlexibleDate_NumericMilliseconds(t *testing.T) {
+	// The live FXEmpire forecasts endpoint returns date as a numeric millisecond
+	// timestamp (e.g. 1705276800000 = 2024-01-15T00:00:00.000Z).
+	// Reproduces the bug reported in issue #65 comment 2900883790.
+	type wrapper struct {
+		Date flexibleDate `json:"date"`
+	}
+	var got wrapper
+	if err := json.Unmarshal([]byte(`{"date":1705276800000}`), &got); err != nil {
+		t.Fatalf("unexpected unmarshal error: %v", err)
+	}
+	wantMs := int64(1705276800000)
+	if got.Date.ms != wantMs {
+		t.Errorf("flexibleDate(numeric) = %d, want %d", got.Date.ms, wantMs)
+	}
+}
+
+func TestFlexibleDate_RFC3339String(t *testing.T) {
+	type wrapper struct {
+		Date flexibleDate `json:"date"`
+	}
+	var got wrapper
+	if err := json.Unmarshal([]byte(`{"date":"2024-01-15T00:00:00Z"}`), &got); err != nil {
+		t.Fatalf("unexpected unmarshal error: %v", err)
+	}
+	want := time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC).UnixMilli()
+	if got.Date.ms != want {
+		t.Errorf("flexibleDate(string) = %d, want %d", got.Date.ms, want)
+	}
+}
+
+func TestFlexibleDate_AbsentField(t *testing.T) {
+	type wrapper struct {
+		Date flexibleDate `json:"date"`
+	}
+	var got wrapper
+	if err := json.Unmarshal([]byte(`{}`), &got); err != nil {
+		t.Fatalf("unexpected unmarshal error: %v", err)
+	}
+	if got.Date.ms != 0 {
+		t.Errorf("flexibleDate(absent) = %d, want 0", got.Date.ms)
+	}
+}
+
+func TestFlexibleDate_NullField(t *testing.T) {
+	type wrapper struct {
+		Date flexibleDate `json:"date"`
+	}
+	var got wrapper
+	if err := json.Unmarshal([]byte(`{"date":null}`), &got); err != nil {
+		t.Fatalf("unexpected unmarshal error: %v", err)
+	}
+	if got.Date.ms != 0 {
+		t.Errorf("flexibleDate(null) = %d, want 0", got.Date.ms)
+	}
+}
+
+func TestRawArticleTimestamp_NumericDate(t *testing.T) {
+	// Regression: forecasts endpoint returns numeric ms in "date" field.
+	// rawArticleTimestamp must yield the correct ms value.
+	raw := rawHubArticle{
+		ID:   1,
+		Date: flexibleDate{ms: 1705276800000},
+	}
+	if got := rawArticleTimestamp(raw); got != 1705276800000 {
+		t.Errorf("rawArticleTimestamp(numeric date) = %d, want 1705276800000", got)
+	}
+}
+
+func TestRawArticleTimestamp_TimestampFieldTakesPriority(t *testing.T) {
+	// When both `timestamp` and `date` are present, `timestamp` wins.
+	raw := rawHubArticle{
+		ID:        1,
+		Timestamp: "9999999999999",
+		Date:      flexibleDate{ms: 1705276800000},
+	}
+	got := rawArticleTimestamp(raw)
+	if got != 9999999999999 {
+		t.Errorf("rawArticleTimestamp should prefer timestamp field: got %d", got)
+	}
+}
 
 // ---------------------------------------------------------------------------
 // windowHoursForDate
@@ -145,11 +232,11 @@ func TestNormalizeHubArticle_Basic(t *testing.T) {
 }
 
 func TestNormalizeHubArticle_DateFallback(t *testing.T) {
-	// Timestamp field is missing, fall back to Date string.
+	// Timestamp field is missing; fall back to Date (RFC3339 string form).
 	raw := rawHubArticle{
 		ID:    1,
 		Title: "Test",
-		Date:  "2024-01-15T10:00:00Z",
+		Date:  flexibleDate{ms: time.Date(2024, 1, 15, 10, 0, 0, 0, time.UTC).UnixMilli()},
 	}
 	a := normalizeHubArticle(raw, "news", "co-gold", "gold")
 	if a.Timestamp == 0 {
