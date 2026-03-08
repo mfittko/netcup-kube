@@ -13,7 +13,8 @@ Sub-commands:
   fxempire-rates    - Fetch and format FXEmpire market rates
   market-candles    - Fetch OHLCV market candle data (FXEmpire or Oanda)
   fxempire-articles - Fetch FXEmpire news and forecast articles
-  fxempire-enrich   - Fetch and enrich FXEmpire data with article analysis`,
+  fxempire-enrich   - Fetch and enrich FXEmpire data with article analysis
+  publish-briefing  - Publish markdown briefings to GitHub Pages`,
 }
 
 func init() {
@@ -21,5 +22,6 @@ func init() {
 	toolCmd.AddCommand(marketCandlesCmd)
 	toolCmd.AddCommand(fxempireArticlesCmd)
 	toolCmd.AddCommand(fxempireEnrichCmd)
+	toolCmd.AddCommand(publishBriefingCmd)
 	rootCmd.AddCommand(toolCmd)
 }
