@@ -347,6 +347,26 @@ var boilerplateCutMarkers = []string{
 	"Scan QR code to install app",
 }
 
+// minBoilerplateMarkerPosition is the minimum character index at which a
+// boilerplate marker must appear before we trim.  Markers earlier than this
+// are assumed to be part of legitimate article text.
+const minBoilerplateMarkerPosition = 200
+
+// minStructuredBodyLength is the minimum character length for a JSON-LD /
+// __NEXT_DATA__ articleBody to be considered usable.
+const minStructuredBodyLength = 200
+
+// maxURLsInArticle is the maximum number of hyperlinks allowed before a page
+// is considered navigation/boilerplate rather than article content.
+const maxURLsInArticle = 8
+
+// minArticleTextLength is the minimum length of stripped article text (in
+// characters) required before we accept it as a valid article snippet.
+const minArticleTextLength = 300
+
+// defaultTextSnippetLength is the default maximum snippet length in characters.
+const defaultTextSnippetLength = 900
+
 // stripHTMLText strips HTML tags and decodes entities, inserting newlines at block boundaries.
 func stripHTMLText(src string) string {
 	s := reScriptStyle.ReplaceAllString(src, " ")
@@ -372,7 +392,7 @@ func stripHTMLText(src string) string {
 func trimBoilerplate(text string) string {
 	for _, marker := range boilerplateCutMarkers {
 		idx := strings.Index(text, marker)
-		if idx > 200 {
+		if idx > minBoilerplateMarkerPosition {
 			text = strings.TrimSpace(text[:idx])
 		}
 	}
@@ -413,14 +433,14 @@ func extractStructuredBody(pageHTML string) string {
 		if err := json.Unmarshal([]byte(m[1]), &parsed); err != nil {
 			continue
 		}
-		if body := deepFindArticleBody(parsed); len(body) > 200 {
-			return body
-		}
+		if body := deepFindArticleBody(parsed); len(body) > minStructuredBodyLength {
+				return body
+			}
 	}
 	if m := reNextData.FindStringSubmatch(pageHTML); len(m) >= 2 {
 		var parsed interface{}
 		if err := json.Unmarshal([]byte(m[1]), &parsed); err == nil {
-			if body := deepFindArticleBody(parsed); len(body) > 200 {
+			if body := deepFindArticleBody(parsed); len(body) > minStructuredBodyLength {
 				return body
 			}
 		}
@@ -450,10 +470,10 @@ func fetchArticleText(fullURL string, maxChars int) *string {
 	if reNavBoiler.MatchString(cleaned) {
 		return nil
 	}
-	if len(reTooManyURLs.FindAllString(cleaned, -1)) > 8 {
+	if len(reTooManyURLs.FindAllString(cleaned, -1)) > maxURLsInArticle {
 		return nil
 	}
-	if len(cleaned) < 300 {
+	if len(cleaned) < minArticleTextLength {
 		return nil
 	}
 	if maxChars > 0 && len(cleaned) > maxChars {
@@ -679,14 +699,14 @@ func fetchArticlesPayload(locale, tzName string, hoursOverride *float64, commodi
 				capped[i].TextFull = fetchArticleText(*capped[i].FullURL, maxTextChars)
 				if capped[i].TextFull != nil {
 					n := len(*capped[i].TextFull)
-					if n > 900 {
-						n = 900
+					if n > defaultTextSnippetLength {
+						n = defaultTextSnippetLength
 					}
 					s := (*capped[i].TextFull)[:n]
 					capped[i].TextSnippet = &s
 				}
 			} else {
-				capped[i].TextSnippet = fetchArticleText(*capped[i].FullURL, 900)
+				capped[i].TextSnippet = fetchArticleText(*capped[i].FullURL, defaultTextSnippetLength)
 			}
 			time.Sleep(100 * time.Millisecond)
 		}

@@ -167,6 +167,14 @@ func confidenceLevel(articleCount int, pct *float64, bull, bear int) string {
 	}
 }
 
+// minSentenceBreakIndex is the minimum character position in normalizeTakeaway
+// before which sentence boundaries are not considered for truncation.
+const minSentenceBreakIndex = 280
+
+// minTakeawayTruncationPoint is the minimum character position accepted as a
+// truncation point when no sentence boundary or space boundary is found.
+const minTakeawayTruncationPoint = 200
+
 // normalizeTakeaway trims and sentence-breaks a text snippet to ≤700 chars.
 // Mirrors normalizeTakeaway() in fxempire_enrich.mjs.
 func normalizeTakeaway(text string) string {
@@ -179,10 +187,10 @@ func normalizeTakeaway(text string) string {
 		return s
 	}
 	window := s[:maxChars]
-	// Find last sentence boundary ≥280 chars in.
+	// Find last sentence boundary ≥minSentenceBreakIndex chars in.
 	lastBoundary := -1
 	for i, r := range window {
-		if i < 280 {
+		if i < minSentenceBreakIndex {
 			continue
 		}
 		if r == '.' || r == '!' || r == '?' {
@@ -194,7 +202,7 @@ func normalizeTakeaway(text string) string {
 	}
 	lastSpace := strings.LastIndex(window, " ")
 	cut := lastSpace
-	if cut < 200 {
+	if cut < minTakeawayTruncationPoint {
 		cut = maxChars
 	}
 	return window[:cut] + "…"
