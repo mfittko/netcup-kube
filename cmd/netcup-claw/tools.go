@@ -13,7 +13,8 @@ Sub-commands:
   fxempire-rates    - Fetch and format FXEmpire market rates
   market-candles    - Fetch OHLCV market candle data (FXEmpire or Oanda)
   fxempire-articles - Fetch FXEmpire news and forecast articles
-  fxempire-enrich   - Fetch and enrich FXEmpire data with article analysis`,
+  fxempire-enrich   - Fetch and enrich FXEmpire data with article analysis
+  truthsocial-watch - Fetch and monitor recent Truth Social posts`,
 }
 
 func init() {
