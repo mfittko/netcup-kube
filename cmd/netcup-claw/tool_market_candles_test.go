@@ -325,3 +325,19 @@ func TestCandleFinite(t *testing.T) {
 		t.Error("NaN should not be finite")
 	}
 }
+
+func TestRunMarketCandles_InvalidProvider(t *testing.T) {
+	oldProvider := mcProvider
+	defer func() {
+		mcProvider = oldProvider
+	}()
+
+	mcProvider = "invalid-provider"
+	err := runMarketCandles(nil, nil)
+	if err == nil {
+		t.Fatal("expected error for invalid provider")
+	}
+	if !strings.Contains(err.Error(), "must be one of fxempire|oanda") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}

@@ -245,6 +245,10 @@ Examples:
 }
 
 func runMarketCandles(_ *cobra.Command, _ []string) error {
+	if mcProvider != "fxempire" && mcProvider != "oanda" {
+		return fmt.Errorf("invalid --provider %q: must be one of fxempire|oanda", mcProvider)
+	}
+
 	var requestURL string
 	if mcProvider == "oanda" {
 		requestURL = buildOandaCandlesURL(mcInstrument, mcGranularity, mcAlignmentTimezone, mcCount, mcTo)
@@ -307,6 +311,7 @@ func init() {
 	marketCandlesCmd.Flags().Int64Var(&mcTo, "to", 0, "End timestamp in Unix seconds (Oanda only)")
 	marketCandlesCmd.Flags().StringVar(&mcAlignmentTimezone, "alignment-timezone", "UTC", "Alignment timezone (e.g. UTC, Europe/Berlin)")
 	marketCandlesCmd.Flags().BoolVar(&mcJSON, "json", true, "Output as JSON (market-candles always outputs JSON)")
+	_ = marketCandlesCmd.Flags().MarkHidden("json")
 	marketCandlesCmd.Flags().BoolVar(&mcPretty, "pretty", true, "Pretty-print JSON output (use --pretty=false for compact)")
 	marketCandlesCmd.Flags().StringVar(&mcVendor, "vendor", "oanda", "Data vendor hint (FXEmpire only)")
 	marketCandlesCmd.Flags().StringVar(&mcPrice, "price", "M", "Price type: M (mid)|B (bid)|A (ask) (FXEmpire only)")

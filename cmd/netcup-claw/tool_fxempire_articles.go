@@ -523,6 +523,7 @@ func fetchHubArticlesForTag(base, articleType, tag string, pageSize, maxPages in
 	for page := 1; page <= maxPages; page++ {
 		items, totalPages, err := fetchHubPage(base, articleType, tag, pageSize, page)
 		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to fetch FXEmpire hub page (type=%s, tag=%s, page=%d): %v\n", articleType, tag, page, err)
 			break
 		}
 		if len(items) == 0 {
@@ -663,6 +664,8 @@ func fetchArticlesPayload(locale, tzName string, hoursOverride *float64, commodi
 			for _, d := range details {
 				detailsMap[d.ID] = d
 			}
+		} else {
+			fmt.Fprintf(os.Stderr, "warning: failed to fetch FXEmpire article details for ids [%d:%d]: %v\n", i, end, err)
 		}
 		time.Sleep(120 * time.Millisecond)
 	}

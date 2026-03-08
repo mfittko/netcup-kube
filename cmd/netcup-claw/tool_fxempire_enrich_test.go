@@ -1,6 +1,7 @@
 package main
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -278,4 +279,20 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func TestBuildAnalysisOrder_FocusIncluded(t *testing.T) {
+	order := buildAnalysisOrder([]string{"gold", "silver", "brent-crude-oil"}, "silver")
+	want := []string{"silver", "gold", "brent-crude-oil"}
+	if !reflect.DeepEqual(order, want) {
+		t.Fatalf("unexpected order: got %v want %v", order, want)
+	}
+}
+
+func TestBuildAnalysisOrder_FocusNotIncluded(t *testing.T) {
+	order := buildAnalysisOrder([]string{"gold", "silver"}, "brent-crude-oil")
+	want := []string{"gold", "silver"}
+	if !reflect.DeepEqual(order, want) {
+		t.Fatalf("unexpected order: got %v want %v", order, want)
+	}
 }

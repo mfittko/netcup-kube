@@ -225,15 +225,6 @@ func articleText(a Article) string {
 	return ""
 }
 
-// ptrFloat64 returns a pointer to a float64 value, or nil if the value is 0 and
-// the original was not provided.
-func ptrF(v float64, ok bool) *float64 {
-	if !ok {
-		return nil
-	}
-	return &v
-}
-
 // ---------------------------------------------------------------------------
 // Analysis builder
 // ---------------------------------------------------------------------------
@@ -435,6 +426,27 @@ func pctOrNA(v *float64) string {
 	return fmt.Sprintf("%.2f%%", *v)
 }
 
+func buildAnalysisOrder(commodities []string, focus string) []string {
+	seen := map[string]bool{}
+	order := make([]string, 0, len(commodities))
+	if focus != "" {
+		for _, slug := range commodities {
+			if slug == focus {
+				order = append(order, focus)
+				seen[focus] = true
+				break
+			}
+		}
+	}
+	for _, slug := range commodities {
+		if !seen[slug] {
+			order = append(order, slug)
+			seen[slug] = true
+		}
+	}
+	return order
+}
+
 // ---------------------------------------------------------------------------
 // Cobra command
 // ---------------------------------------------------------------------------
@@ -473,7 +485,7 @@ func runFXEmpireEnrich(cmd *cobra.Command, _ []string) error {
 		hoursOverride = &h
 	}
 
-	// Fetch rates and articles concurrently (simple sequential for now).
+	// Fetch rates and articles sequentially (can be parallelized in the future if needed).
 	ratesPayload := computeFXEmpireRates(feLocale, commodities)
 	articlesPayload := fetchArticlesPayload(feLocale, feTZ, hoursOverride, commodities, feTags,
 		feMaxItems, fePageSize, feMaxPages, feFullText, feMaxTextChars)
@@ -500,19 +512,8 @@ func runFXEmpireEnrich(cmd *cobra.Command, _ []string) error {
 		hoursPtr = &h
 	}
 
-	// Determine analysis order: focus slug first, then remaining commodities.
-	seen := map[string]bool{}
-	var order []string
-	if feFocus != "" {
-		order = append(order, feFocus)
-		seen[feFocus] = true
-	}
-	for _, slug := range commodities {
-		if !seen[slug] {
-			order = append(order, slug)
-			seen[slug] = true
-		}
-	}
+	// Determine analysis order: focus slug first (if selected), then remaining commodities.
+	order := buildAnalysisOrder(commodities, feFocus)
 
 	// Build per-commodity analysis.
 	analyses := make([]commodityAnalysis, 0, len(order))
