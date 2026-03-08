@@ -154,7 +154,7 @@ type publishBriefingFeedInput struct {
 	Items       []publishBriefingRSSEntry
 }
 
-type publishBriefingGithubClient struct {
+type publishBriefingGitHubClient struct {
 	baseURL    string
 	token      string
 	httpClient *http.Client
@@ -372,6 +372,10 @@ func titleCasePublishBriefingSeries(series string) string {
 		}
 		part = strings.ReplaceAll(part, "-", " ")
 		part = strings.ReplaceAll(part, "_", " ")
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
 		out = append(out, strings.ToUpper(part[:1])+part[1:])
 	}
 	return strings.Join(out, " / ")
@@ -604,8 +608,8 @@ func derivePublishBriefingPaths(series, stamp string) publishBriefingPaths {
 	}
 }
 
-func newPublishBriefingGitHubClient(token string) *publishBriefingGithubClient {
-	return &publishBriefingGithubClient{
+func newPublishBriefingGitHubClient(token string) *publishBriefingGitHubClient {
+	return &publishBriefingGitHubClient{
 		baseURL: strings.TrimRight(publishBriefingGitHubAPIBaseURL, "/"),
 		token:   token,
 		httpClient: &http.Client{
@@ -614,7 +618,7 @@ func newPublishBriefingGitHubClient(token string) *publishBriefingGithubClient {
 	}
 }
 
-func (c *publishBriefingGithubClient) request(method, urlPath string, body any, out any) error {
+func (c *publishBriefingGitHubClient) request(method, urlPath string, body any, out any) error {
 	fullURL := c.baseURL + urlPath
 	var bodyReader io.Reader
 	if body != nil {
@@ -681,7 +685,7 @@ func (e *publishBriefingHTTPError) Status() int {
 	return e.status
 }
 
-func getPublishBriefingBranchHeadSHA(client *publishBriefingGithubClient, owner, repo, branch string) (string, error) {
+func getPublishBriefingBranchHeadSHA(client *publishBriefingGitHubClient, owner, repo, branch string) (string, error) {
 	var data publishBriefingGitRef
 	if err := client.request(http.MethodGet, "/repos/"+owner+"/"+repo+"/git/ref/heads/"+publishBriefingBranchRefPath(branch), nil, &data); err != nil {
 		return "", err
@@ -692,13 +696,13 @@ func getPublishBriefingBranchHeadSHA(client *publishBriefingGithubClient, owner,
 	return data.Object.SHA, nil
 }
 
-func getPublishBriefingCommit(client *publishBriefingGithubClient, owner, repo, sha string) (publishBriefingGitCommit, error) {
+func getPublishBriefingCommit(client *publishBriefingGitHubClient, owner, repo, sha string) (publishBriefingGitCommit, error) {
 	var data publishBriefingGitCommit
 	err := client.request(http.MethodGet, "/repos/"+owner+"/"+repo+"/git/commits/"+url.PathEscape(sha), nil, &data)
 	return data, err
 }
 
-func createPublishBriefingBlob(client *publishBriefingGithubClient, owner, repo, content string) (publishBriefingBlob, error) {
+func createPublishBriefingBlob(client *publishBriefingGitHubClient, owner, repo, content string) (publishBriefingBlob, error) {
 	var data publishBriefingBlob
 	err := client.request(http.MethodPost, "/repos/"+owner+"/"+repo+"/git/blobs", map[string]string{
 		"content":  content,
@@ -707,7 +711,7 @@ func createPublishBriefingBlob(client *publishBriefingGithubClient, owner, repo,
 	return data, err
 }
 
-func createPublishBriefingTree(client *publishBriefingGithubClient, owner, repo, baseTreeSHA string, tree []map[string]string) (publishBriefingTree, error) {
+func createPublishBriefingTree(client *publishBriefingGitHubClient, owner, repo, baseTreeSHA string, tree []map[string]string) (publishBriefingTree, error) {
 	var data publishBriefingTree
 	err := client.request(http.MethodPost, "/repos/"+owner+"/"+repo+"/git/trees", map[string]any{
 		"base_tree": baseTreeSHA,
@@ -716,7 +720,7 @@ func createPublishBriefingTree(client *publishBriefingGithubClient, owner, repo,
 	return data, err
 }
 
-func createPublishBriefingCommitObject(client *publishBriefingGithubClient, owner, repo, message, treeSHA, parentSHA string) (publishBriefingCommit, error) {
+func createPublishBriefingCommitObject(client *publishBriefingGitHubClient, owner, repo, message, treeSHA, parentSHA string) (publishBriefingCommit, error) {
 	var data publishBriefingCommit
 	err := client.request(http.MethodPost, "/repos/"+owner+"/"+repo+"/git/commits", map[string]any{
 		"message": message,
@@ -726,14 +730,14 @@ func createPublishBriefingCommitObject(client *publishBriefingGithubClient, owne
 	return data, err
 }
 
-func updatePublishBriefingBranchHead(client *publishBriefingGithubClient, owner, repo, branch, sha string) error {
+func updatePublishBriefingBranchHead(client *publishBriefingGitHubClient, owner, repo, branch, sha string) error {
 	return client.request(http.MethodPatch, "/repos/"+owner+"/"+repo+"/git/refs/heads/"+publishBriefingBranchRefPath(branch), map[string]any{
 		"sha":   sha,
 		"force": false,
 	}, nil)
 }
 
-func commitPublishBriefingFilesBatch(client *publishBriefingGithubClient, owner, repo, branch, message string, files []publishBriefingGitFile) (string, error) {
+func commitPublishBriefingFilesBatch(client *publishBriefingGitHubClient, owner, repo, branch, message string, files []publishBriefingGitFile) (string, error) {
 	headSHA, err := getPublishBriefingBranchHeadSHA(client, owner, repo, branch)
 	if err != nil {
 		return "", err
@@ -772,7 +776,7 @@ func commitPublishBriefingFilesBatch(client *publishBriefingGithubClient, owner,
 	return commit.SHA, nil
 }
 
-func getPublishBriefingTextFile(client *publishBriefingGithubClient, owner, repo, branch, filePath string) (string, error) {
+func getPublishBriefingTextFile(client *publishBriefingGitHubClient, owner, repo, branch, filePath string) (string, error) {
 	encodedPath := strings.ReplaceAll(url.PathEscape(filePath), "%2F", "/")
 	var data publishBriefingContents
 	err := client.request(http.MethodGet, "/repos/"+owner+"/"+repo+"/contents/"+encodedPath+"?ref="+url.QueryEscape(branch), nil, &data)

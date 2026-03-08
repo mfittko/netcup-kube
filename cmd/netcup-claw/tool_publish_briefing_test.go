@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/xml"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -293,7 +294,7 @@ func TestRunPublishBriefingLivePublishCreatesAtomicTree(t *testing.T) {
 				t.Fatalf("decode blob request: %v", err)
 			}
 			blobCounter++
-			sha := "blobsha-" + string(rune('0'+blobCounter))
+			sha := fmt.Sprintf("blobsha-%d", blobCounter)
 			blobs = append(blobs, blobRequest{SHA: sha, Content: body["content"]})
 			w.Header().Set("Content-Type", "application/json")
 			io.WriteString(w, `{"sha":"`+sha+`"}`)
