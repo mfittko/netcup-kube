@@ -45,7 +45,7 @@
   "agents": {
     "defaults": {
       "model": {
-        "primary": "gpt"
+        "primary": "openai-codex/gpt-5.2"
       },
       "models": {
         "anthropic/claude-opus-4-6": {
@@ -54,18 +54,10 @@
             "cacheRetention": "short"
           }
         },
-        "anthropic/claude-sonnet-4-6": {
-          "alias": "sonnet",
-          "params": {
-            "cacheRetention": "short"
-          }
-        },
         "openai-codex/gpt-5.1-codex-mini": {
-          "alias": "gpt-mini"
+          "alias": "codex-mini"
         },
-        "openai-codex/gpt-5.4": {
-          "alias": "gpt"
-        },
+        "openai-codex/gpt-5.2": {},
         "openai-codex/gpt-5.3-codex": {
           "alias": "codex"
         }
