@@ -133,13 +133,18 @@
     "discord": {
       "enabled": true,
       "token": "${DISCORD_BOT_TOKEN}",
-      "groupPolicy": "open",
+      "groupPolicy": "allowlist",
       "actions": {
         "channels": true
       },
-      "dmPolicy": "open",
+      "dmPolicy": "disabled",
       "allowFrom": [
-        "*"
+        "1475474139040190649",
+        "1475496232586706954",
+        "1475593803984273579",
+        "1475601273003970770",
+        "1475978451516391464",
+        "1478308399618855003"
       ],
       "dm": {
         "enabled": true
