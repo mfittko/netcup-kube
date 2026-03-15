@@ -86,11 +86,31 @@ netcup-kube install <recipe> [recipe-options]
 
 `openclaw` recipe config management:
 - `--config-file <path>` — Supply an OpenClaw JSON/JSON5 template from repo or local path.
-- `--config-mode <merge|overwrite>` — Control how the chart `init-config` container reconciles persisted `/home/node/.openclaw/openclaw.json`.
+- `--config-mode <merge|overwrite>` — Control how the chart `init-config` container reconciles persisted `/home/node/.openclaw/openclaw.json` (default: `overwrite`).
 - `--agent-workspace-dir <path>` — Supply agent workspace overrides/backup path (`agents/<agentId>/*.md`, `backup/`).
 - `--workspace-bootstrap-mode <overwrite|off>` — Control backup + override apply behavior for detected agent workspaces (default: `off`).
 - `--upgrade` — Resolve latest available `openclaw/openclaw` chart version for this run, then force rollout restart of deployment `openclaw` after Helm succeeds.
 - `OPENCLAW_HOST` — Env default alternative to `--host`.
+
+`netcup-claw config` management:
+- `netcup-claw config validate [--file <path>]` — Validate a local OpenClaw config file against the image currently deployed in-cluster.
+- `netcup-claw config deploy [--file <path>] [--sync-runtime=false]` — Validate the local config, update ConfigMap `openclaw`, and by default sync the same config into the runtime PVC before restarting the deployment.
+
+`netcup-claw cron` management:
+- `netcup-claw cron backup` — Pull the current runtime cron snapshot into the local backup path.
+- `netcup-claw cron pull` — Pull the current runtime cron snapshot into the local workspace file.
+- `netcup-claw cron sync [--file <path>] [--prune]` — Upsert local cron jobs into the running scheduler via `openclaw cron edit/add`.
+- `netcup-claw cron deploy [--file <path>] [--prune]` — Backup then sync the local cron jobs baseline.
+- `netcup-claw cron delete <job-id>` / `netcup-claw cron delete --name "<job name>"` — Delete a runtime cron job.
+
+`netcup-claw` Codex auth convenience:
+- `netcup-claw codex-login` — Run `openclaw models auth login --provider openai-codex` in the pod with TTY enabled.
+- `netcup-claw reauth` / `netcup-claw reauth-codex` — Aliases of `netcup-claw codex-login`.
+
+OpenClaw daily agent-config cron baseline:
+- Local definition: `scripts/recipes/openclaw/cron/jobs.json`
+- Reusable skill: `scripts/recipes/openclaw/skills/openclaw-config-scan/SKILL.md`
+- Daily job `Daily Agent Config` posts to Discord channel `1475496232586706954` and is intended to invoke the reusable config-scan skill rather than embedding the full scan logic inline. The skill should report only notable items, including available OpenClaw Helm/chart updates when the running deployment is behind.
 
 **Common Options:**
 - `--help`, `-h` — Show recipe-specific help

@@ -21,7 +21,7 @@ Options:
   --namespace <name>   Namespace to install into (default: openclaw).
   --secret <name>      Name of pre-created Kubernetes Secret with OpenClaw credentials (default: openclaw-credentials).
   --config-file <path> Path to OpenClaw JSON/JSON5 config template (default: scripts/recipes/openclaw/openclaw.json).
-  --config-mode <mode> Config reconciliation mode: merge|overwrite (default: merge).
+  --config-mode <mode> Config reconciliation mode: merge|overwrite (default: overwrite).
   --agent-workspace-dir <path>
                        Path to agent workspace templates/backup (default: scripts/recipes/openclaw/agent-workspace).
   --workspace-bootstrap-mode <mode>
@@ -64,7 +64,7 @@ EOF
 NAMESPACE="${NAMESPACE_OPENCLAW}"
 SECRET_NAME="${OPENCLAW_SECRET_NAME:-openclaw-credentials}"
 OPENCLAW_CONFIG_FILE="${SCRIPT_DIR}/openclaw.json"
-OPENCLAW_CONFIG_MODE="${OPENCLAW_CONFIG_MODE:-merge}"
+OPENCLAW_CONFIG_MODE="${OPENCLAW_CONFIG_MODE:-overwrite}"
 AGENT_WORKSPACE_DIR="${OPENCLAW_AGENT_WORKSPACE_DIR:-${SCRIPT_DIR}/agent-workspace}"
 WORKSPACE_BOOTSTRAP_MODE="${OPENCLAW_WORKSPACE_BOOTSTRAP_MODE:-off}"
 METORO_TOKEN="${METORO_BEARER_TOKEN:-}"

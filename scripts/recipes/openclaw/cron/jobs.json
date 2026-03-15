@@ -237,6 +237,7 @@
     },
     {
       "delivery": {
+        "bestEffort": false,
         "channel": "discord",
         "mode": "announce",
         "to": "channel:1475978451516391464"
@@ -252,6 +253,29 @@
       },
       "schedule": {
         "expr": "0 14 * * 5",
+        "kind": "cron",
+        "tz": "Europe/Berlin"
+      },
+      "sessionTarget": "isolated"
+    },
+    {
+      "agentId": "main",
+      "delivery": {
+        "channel": "discord",
+        "mode": "announce",
+        "to": "channel:1475496232586706954"
+      },
+      "enabled": true,
+      "id": "e143dabc-0799-43a3-9430-e1ddeed56eeb",
+      "name": "Daily Agent Config",
+      "payload": {
+        "kind": "agentTurn",
+        "message": "Use the `openclaw-config-scan` skill. Run the daily OpenClaw maintenance scan for the agent-config operator channel and report only notable items. Include OpenClaw Helm/app update availability if the running deployment is behind the latest stable chart. Treat OAuth/token expiry as notable only when expiry is within 3 days. Keep the response concise and Discord-friendly. If nothing needs attention, reply with exactly: No config actionables right now.",
+        "model": "openai-codex/gpt-5.4",
+        "thinking": "low"
+      },
+      "schedule": {
+        "expr": "0 8 * * *",
         "kind": "cron",
         "tz": "Europe/Berlin"
       },

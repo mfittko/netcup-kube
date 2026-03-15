@@ -123,8 +123,10 @@ This keeps secrets out of git while making config declarative and reviewable.
 
 You can control reconciliation behavior with:
 
-- `--config-mode merge` (default): merge chart config into existing persisted `openclaw.json`
-- `--config-mode overwrite`: replace persisted `openclaw.json` with the repository-managed config each deploy
+- `--config-mode overwrite` (default): replace persisted `openclaw.json` with the repository-managed config each deploy
+- `--config-mode merge`: merge chart config into existing persisted `openclaw.json` when you intentionally want to preserve runtime-only state
+
+For this repository, `overwrite` is the safe default. It avoids preserving stale PVC-backed config keys across upgrades, which can keep older runtime state alive even when the repo config is valid.
 
 You can also provide an alternate config file with:
 
@@ -155,6 +157,12 @@ Cron jobs can also be synced via `netcup-claw`:
 - `netcup-claw cron delete <job-id>` (explicitly delete one runtime job)
 - `netcup-claw cron delete --name "<job name>"` (resolve/delete by exact name)
 
+OpenAI Codex re-auth convenience wrapper:
+
+- `netcup-claw codex-login`
+- Aliases: `netcup-claw reauth`, `netcup-claw reauth-codex`
+- Behavior: runs `openclaw models auth login --provider openai-codex` in the pod with an interactive TTY so you can refresh the OAuth token quickly.
+
 Approvals can also be synced via `netcup-claw`:
 
 - `netcup-claw approvals backup`
@@ -166,8 +174,15 @@ Config can also be synced via `netcup-claw`:
 
 - `netcup-claw config backup`
 - `netcup-claw config pull`
+- `netcup-claw config validate`
 - `netcup-claw config deploy`
 - `netcup-claw config push` (alias of deploy)
+
+Config deploy behavior:
+
+- `netcup-claw config validate --file scripts/recipes/openclaw/openclaw.json` validates the local file against the currently deployed OpenClaw image before rollout.
+- `netcup-claw config deploy` now validates first, updates the ConfigMap, and syncs the same file into the runtime PVC before restarting the deployment.
+- Use `netcup-claw config deploy --sync-runtime=false` only if you intentionally want ConfigMap-only behavior and accept persisted runtime config drift.
 
 Defaults:
 
@@ -190,6 +205,12 @@ Skill code can also be managed via `netcup-claw`:
 - `netcup-claw skills pull --all --exclude hormuz-ais-watch`
 - `netcup-claw skills deploy --skill hormuz-ais-watch`
 
+Config scan skill:
+
+- Skill path: `scripts/recipes/openclaw/skills/openclaw-config-scan`
+- Purpose: reusable live runtime/config review that reports only notable maintenance issues, including available OpenClaw Helm/app updates when the deployment is behind.
+- Deploy with: `netcup-claw skills deploy --skill openclaw-config-scan`
+
 Defaults:
 
 - Local workspace root: `scripts/recipes/openclaw/skills`
@@ -208,15 +229,22 @@ The script connects to the in-pod Chrome endpoint (`http://localhost:9222` by de
 
 - `/home/node/.openclaw/workspace/state/truthsocial-trump-watch/state.json`
 
-Cron job included in repo:
+Cron jobs included in repo:
 
 - Name: `Truth Social Trump watch`
 - Schedule: `* * * * *` (UTC)
 - Behavior: sends Discord alert only when new post(s) are detected; no alert spam when unchanged.
 
+- Name: `Daily Agent Config`
+- Schedule: `0 8 * * *` (`Europe/Berlin`)
+- Target: Discord channel `1475496232586706954` (`agent-config`)
+- Behavior: invokes the `openclaw-config-scan` skill and posts only notable findings, including Helm/app update availability when the running deployment is behind the latest stable chart.
+
 Apply/update in-cluster runtime:
 
 ```bash
+netcup-claw codex-login
+netcup-claw skills deploy --skill openclaw-config-scan
 netcup-claw skills deploy --skill truthsocial-trump-watch
 netcup-claw cron sync --file scripts/recipes/openclaw/cron/jobs.json
 ```
@@ -293,7 +321,7 @@ https://us-east.metoro.io
 | `--namespace` | Namespace to install OpenClaw into | `openclaw` |
 | `--secret` | Name of pre-created Kubernetes Secret | `openclaw-credentials` |
 | `--config-file` | Path to OpenClaw JSON/JSON5 config template | `scripts/recipes/openclaw/openclaw.json` |
-| `--config-mode` | OpenClaw config reconciliation mode (`merge` or `overwrite`) | `merge` |
+| `--config-mode` | OpenClaw config reconciliation mode (`merge` or `overwrite`) | `overwrite` |
 | `--agent-workspace-dir` | Path to agent overrides/backup tree (`agents/<id>/*.md`, `backup/`) | `scripts/recipes/openclaw/agent-workspace` |
 | `--workspace-bootstrap-mode` | Agent workspace bootstrap mode (`overwrite`, `off`) | `off` |
 | `--metoro-token` | Metoro bearer token (prefer env var) | **Required** (unless `METORO_BEARER_TOKEN` set) |

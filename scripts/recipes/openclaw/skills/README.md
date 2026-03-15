@@ -36,3 +36,10 @@ FXEmpire live data examples:
   - `node skills/fxempire-live-data/scripts/fxempire_live_data.mjs --mode candles --provider fxempire --market indices --instrument NAS100/USD --granularity M5 --count 120 --from 1772582400`
 - Pull 1-minute NAS100 candles (Oanda proxy):
   - `node skills/fxempire-live-data/scripts/fxempire_live_data.mjs --mode candles --provider oanda --instrument NAS100/USD --granularity M1 --count 500 --alignmentTimezone Europe/Berlin`
+
+OpenClaw config scan examples:
+
+- Deploy skill:
+  - `netcup-claw skills deploy --skill openclaw-config-scan`
+- Use from an agent or cron prompt:
+  - `Use the openclaw-config-scan skill and report only notable actionables, including OpenClaw update availability when behind.`
