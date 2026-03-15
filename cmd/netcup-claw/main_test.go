@@ -69,6 +69,37 @@ func TestOpenclawArgsRequireTTY(t *testing.T) {
 	}
 }
 
+func TestBuildConfigValidationPodManifest(t *testing.T) {
+	manifest := string(buildConfigValidationPodManifest("validate-pod", "ghcr.io/openclaw/openclaw:2026.3.12"))
+
+	for _, want := range []string{
+		"name: validate-pod",
+		"name: validate",
+		"image: ghcr.io/openclaw/openclaw:2026.3.12",
+		"mkdir -p /home/node/.openclaw && sleep 600",
+	} {
+		if !strings.Contains(manifest, want) {
+			t.Fatalf("buildConfigValidationPodManifest() missing %q in manifest:\n%s", want, manifest)
+		}
+	}
+}
+
+func TestBuildConfigSyncPodManifest(t *testing.T) {
+	manifest := string(buildConfigSyncPodManifest("sync-pod", "ghcr.io/openclaw/openclaw:2026.3.12", "openclaw-pvc"))
+
+	for _, want := range []string{
+		"name: sync-pod",
+		"name: sync",
+		"image: ghcr.io/openclaw/openclaw:2026.3.12",
+		"mountPath: /mnt/openclaw",
+		"claimName: openclaw-pvc",
+	} {
+		if !strings.Contains(manifest, want) {
+			t.Fatalf("buildConfigSyncPodManifest() missing %q in manifest:\n%s", want, manifest)
+		}
+	}
+}
+
 func TestWithKubectlExecTTY(t *testing.T) {
 	base := []string{"-n", "openclaw", "exec", "-c", "main", "pod-1", "--", "node", "/app/openclaw.mjs", "status"}
 	got := withKubectlExecTTY(base)
@@ -176,11 +207,12 @@ func TestCronJobSpecEqualForSync(t *testing.T) {
 
 func TestBuildCronAddArgs(t *testing.T) {
 	job := cronJobSpec{
-		ID:            "job-1",
-		Name:          "Truth Social Trump watch",
-		Enabled:       false,
-		AgentID:       "main",
-		SessionTarget: "isolated",
+		ID:             "job-1",
+		Name:           "Truth Social Trump watch",
+		Enabled:        false,
+		DeleteAfterRun: false,
+		AgentID:        "main",
+		SessionTarget:  "isolated",
 	}
 	job.Payload.Kind = "agentTurn"
 	job.Payload.Message = "Run watcher"
@@ -220,6 +252,14 @@ func TestBuildCronAddArgs(t *testing.T) {
 
 	if contains("--no-best-effort-deliver") {
 		t.Fatalf("buildCronAddArgs() should not include --no-best-effort-deliver: %v", got)
+	}
+}
+
+func TestBuildOpenAICodexLoginArgs(t *testing.T) {
+	got := buildOpenAICodexLoginArgs()
+	want := []string{"models", "auth", "login", "--provider", "openai-codex"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("buildOpenAICodexLoginArgs() = %v, want %v", got, want)
 	}
 }
 

@@ -57,6 +57,7 @@ var (
 	configWorkspaceDir    string
 	configDeployFile      string
 	configBackupPath      string
+	configDeploySyncPVC   bool
 
 	// Upgrade flags
 	upgradeVersion       string
@@ -68,6 +69,7 @@ var (
 const (
 	openclawMainContainer = "main"
 	openclawCLIPath       = "/app/openclaw.mjs"
+	openclawConfigPath    = "/home/node/.openclaw/openclaw.json"
 )
 
 var rootCmd = &cobra.Command{
@@ -725,16 +727,18 @@ func writeCronJobsBackup(backupPath string, payload []byte) (string, error) {
 }
 
 type cronJobsFile struct {
-	Jobs []cronJobSpec `json:"jobs"`
+	Jobs    []cronJobSpec `json:"jobs"`
+	Version int           `json:"version"`
 }
 
 type cronJobSpec struct {
-	ID            string `json:"id"`
-	Name          string `json:"name"`
-	Enabled       bool   `json:"enabled"`
-	AgentID       string `json:"agentId"`
-	SessionTarget string `json:"sessionTarget"`
-	Payload       struct {
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	Enabled        bool   `json:"enabled"`
+	DeleteAfterRun bool   `json:"deleteAfterRun"`
+	AgentID        string `json:"agentId"`
+	SessionTarget  string `json:"sessionTarget"`
+	Payload        struct {
 		Kind     string `json:"kind"`
 		Message  string `json:"message"`
 		Model    string `json:"model"`
@@ -1029,6 +1033,7 @@ var configCmd = &cobra.Command{
 Sub-commands:
   backup  - Pull current deployed openclaw.json into local backup path
   pull    - Pull current deployed openclaw.json into local workspace file
+	validate - Validate a local openclaw.json against the running OpenClaw image schema
   deploy  - Push local openclaw.json into ConfigMap and restart rollout`,
 }
 
@@ -1089,6 +1094,36 @@ var configPullCmd = &cobra.Command{
 	},
 }
 
+var configValidateCmd = &cobra.Command{
+	Use:   "validate",
+	Short: "Validate local OpenClaw config against the running image",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		cfg := openclawConfig()
+
+		inputPath := strings.TrimSpace(configDeployFile)
+		if inputPath == "" {
+			inputPath = "scripts/recipes/openclaw/openclaw.json"
+		}
+
+		payload, err := os.ReadFile(inputPath)
+		if err != nil {
+			return fmt.Errorf("failed to read config validate file %s: %w", inputPath, err)
+		}
+
+		var js map[string]any
+		if err := json.Unmarshal(payload, &js); err != nil {
+			return fmt.Errorf("invalid JSON in %s: %w", inputPath, err)
+		}
+
+		if err := validateOpenClawConfigPayload(cfg, payload); err != nil {
+			return fmt.Errorf("config validation failed for %s: %w", inputPath, err)
+		}
+
+		fmt.Printf("config valid: %s\n", inputPath)
+		return nil
+	},
+}
+
 var configDeployCmd = &cobra.Command{
 	Use:     "deploy",
 	Aliases: []string{"push"},
@@ -1109,6 +1144,10 @@ var configDeployCmd = &cobra.Command{
 		var js map[string]any
 		if err := json.Unmarshal(payload, &js); err != nil {
 			return fmt.Errorf("invalid JSON in %s: %w", inputPath, err)
+		}
+
+		if err := validateOpenClawConfigPayload(cfg, payload); err != nil {
+			return fmt.Errorf("config validation failed for %s: %w", inputPath, err)
 		}
 
 		backupPath := strings.TrimSpace(configBackupPath)
@@ -1166,6 +1205,12 @@ var configDeployCmd = &cobra.Command{
 			return fmt.Errorf("failed to apply configmap: %w", err)
 		}
 
+		if configDeploySyncPVC {
+			if err := syncOpenClawRuntimeConfig(cfg, payload); err != nil {
+				return fmt.Errorf("failed to sync runtime config: %w", err)
+			}
+		}
+
 		if err := runKubectl("-n", cfg.Namespace, "rollout", "restart", "deployment/"+deployedConfigDeploymentName()); err != nil {
 			return fmt.Errorf("failed to restart deployment: %w", err)
 		}
@@ -1177,6 +1222,216 @@ var configDeployCmd = &cobra.Command{
 		fmt.Printf("deploy complete: %s\n", inputPath)
 		return nil
 	},
+}
+
+func resolveOpenClawMainImage(cfg openclaw.Config) (string, error) {
+	out, err := runKubectlOutput(
+		"-n", cfg.Namespace,
+		"get",
+		"deployment",
+		deployedConfigDeploymentName(),
+		"-o",
+		`jsonpath={.spec.template.spec.containers[?(@.name=="main")].image}`,
+	)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve openclaw image: %w", err)
+	}
+	image := strings.TrimSpace(string(out))
+	if image == "" {
+		return "", fmt.Errorf("openclaw main container image is empty")
+	}
+	return image, nil
+}
+
+func resolveOpenClawRuntimePVCName(cfg openclaw.Config) (string, error) {
+	out, err := runKubectlOutput(
+		"-n", cfg.Namespace,
+		"get",
+		"deployment",
+		deployedConfigDeploymentName(),
+		"-o",
+		`jsonpath={.spec.template.spec.volumes[?(@.name=="data")].persistentVolumeClaim.claimName}`,
+	)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve OpenClaw PVC name: %w", err)
+	}
+	pvcName := strings.TrimSpace(string(out))
+	if pvcName == "" {
+		return "", fmt.Errorf("OpenClaw PVC name is empty")
+	}
+	return pvcName, nil
+}
+
+func writeTempFile(prefix string, payload []byte) (string, error) {
+	tmpFile, err := os.CreateTemp("", prefix)
+	if err != nil {
+		return "", fmt.Errorf("failed to create temp file: %w", err)
+	}
+	tmpPath := tmpFile.Name()
+	if _, err := tmpFile.Write(payload); err != nil {
+		_ = tmpFile.Close()
+		_ = os.Remove(tmpPath)
+		return "", fmt.Errorf("failed to write temp file %s: %w", tmpPath, err)
+	}
+	if err := tmpFile.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return "", fmt.Errorf("failed to close temp file %s: %w", tmpPath, err)
+	}
+	return tmpPath, nil
+}
+
+func buildConfigValidationPodManifest(podName, image string) []byte {
+	return []byte(fmt.Sprintf(`apiVersion: v1
+kind: Pod
+metadata:
+  name: %s
+spec:
+  restartPolicy: Never
+  containers:
+  - name: validate
+    image: %s
+    command: ["sh", "-lc", "mkdir -p /home/node/.openclaw && sleep 600"]
+`, podName, image))
+}
+
+func buildConfigSyncPodManifest(podName, image, pvcName string) []byte {
+	return []byte(fmt.Sprintf(`apiVersion: v1
+kind: Pod
+metadata:
+  name: %s
+spec:
+  restartPolicy: Never
+  containers:
+  - name: sync
+    image: %s
+    command: ["sh", "-lc", "mkdir -p /mnt/openclaw && sleep 600"]
+    volumeMounts:
+    - name: data
+      mountPath: /mnt/openclaw
+  volumes:
+  - name: data
+    persistentVolumeClaim:
+      claimName: %s
+`, podName, image, pvcName))
+}
+
+func createTempPod(cfg openclaw.Config, podName string, manifest []byte) error {
+	manifestPath, err := writeTempFile("netcup-claw-openclaw-pod-*.yaml", manifest)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = os.Remove(manifestPath)
+	}()
+
+	if err := runKubectl("-n", cfg.Namespace, "apply", "-f", manifestPath); err != nil {
+		return fmt.Errorf("failed to create temp pod %s: %w", podName, err)
+	}
+	if err := runKubectl("-n", cfg.Namespace, "wait", "--for=condition=Ready", "pod/"+podName, "--timeout=90s"); err != nil {
+		return fmt.Errorf("temp pod %s did not become ready: %w", podName, err)
+	}
+	return nil
+}
+
+func deleteTempPod(cfg openclaw.Config, podName string) {
+	_, _ = runKubectlCombinedOutput("-n", cfg.Namespace, "delete", "pod", podName, "--ignore-not-found=true", "--wait=false")
+}
+
+func validateOpenClawConfigPayload(cfg openclaw.Config, payload []byte) error {
+	if err := ensureKubeAPIReachableWithTunnel(); err != nil {
+		return err
+	}
+
+	image, err := resolveOpenClawMainImage(cfg)
+	if err != nil {
+		return err
+	}
+
+	podName := fmt.Sprintf("openclaw-config-validate-%d", time.Now().UTC().UnixNano())
+	defer deleteTempPod(cfg, podName)
+
+	if err := createTempPod(cfg, podName, buildConfigValidationPodManifest(podName, image)); err != nil {
+		return err
+	}
+
+	tmpPath, err := writeTempFile("netcup-claw-openclaw-config-*.json", payload)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = os.Remove(tmpPath)
+	}()
+
+	if err := runKubectl("-n", cfg.Namespace, "cp", tmpPath, podName+":"+openclawConfigPath, "-c", "validate"); err != nil {
+		return fmt.Errorf("failed to copy config into validation pod: %w", err)
+	}
+
+	out, err := runKubectlCombinedOutput(
+		"-n", cfg.Namespace,
+		"exec",
+		"-c", "validate",
+		podName,
+		"--",
+		"node",
+		"--no-warnings",
+		openclawCLIPath,
+		"config",
+		"validate",
+		"--json",
+	)
+	if err != nil {
+		trimmed := strings.TrimSpace(string(out))
+		if trimmed == "" {
+			return err
+		}
+		return fmt.Errorf("%s", trimmed)
+	}
+	return nil
+}
+
+func syncOpenClawRuntimeConfig(cfg openclaw.Config, payload []byte) error {
+	if err := ensureKubeAPIReachableWithTunnel(); err != nil {
+		return err
+	}
+
+	image, err := resolveOpenClawMainImage(cfg)
+	if err != nil {
+		return err
+	}
+	pvcName, err := resolveOpenClawRuntimePVCName(cfg)
+	if err != nil {
+		return err
+	}
+
+	podName := fmt.Sprintf("openclaw-config-sync-%d", time.Now().UTC().UnixNano())
+	defer deleteTempPod(cfg, podName)
+
+	if err := createTempPod(cfg, podName, buildConfigSyncPodManifest(podName, image, pvcName)); err != nil {
+		return err
+	}
+
+	tmpPath, err := writeTempFile("netcup-claw-openclaw-config-*.json", payload)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = os.Remove(tmpPath)
+	}()
+
+	if err := runKubectl("-n", cfg.Namespace, "cp", tmpPath, podName+":/tmp/openclaw.json", "-c", "sync"); err != nil {
+		return fmt.Errorf("failed to copy config into sync pod: %w", err)
+	}
+
+	backupSuffix := time.Now().UTC().Format("20060102-150405")
+	script := fmt.Sprintf(
+		"set -eu; target=/mnt/openclaw/openclaw.json; if [ -f \"$target\" ]; then cp \"$target\" \"$target.bak.%s\"; fi; cp /tmp/openclaw.json \"$target\"; chmod 0600 \"$target\"",
+		backupSuffix,
+	)
+	if err := runKubectl("-n", cfg.Namespace, "exec", "-c", "sync", podName, "--", "sh", "-lc", script); err != nil {
+		return fmt.Errorf("failed to write config into runtime PVC: %w", err)
+	}
+
+	return nil
 }
 
 var agentsCmd = &cobra.Command{
@@ -1892,6 +2147,37 @@ With --name it resolves the current runtime job id by exact name first:
 	},
 }
 
+func buildOpenAICodexLoginArgs() []string {
+	return []string{"models", "auth", "login", "--provider", "openai-codex"}
+}
+
+var codexLoginCmd = &cobra.Command{
+	Use:     "codex-login",
+	Aliases: []string{"reauth", "reauth-codex"},
+	Short:   "Run the OpenAI Codex OAuth re-auth flow in the OpenClaw pod",
+	Long: `Start the interactive OpenAI Codex OAuth login flow inside the running
+OpenClaw pod.
+
+This is a thin wrapper around:
+  netcup-claw openclaw models auth login --provider openai-codex
+
+It requires an interactive terminal because OpenClaw will print a browser URL
+and prompt for the redirect URL after sign-in.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if !hasTerminalStdio() {
+			return fmt.Errorf("codex-login requires an interactive TTY")
+		}
+
+		cfg, pod, err := resolveOpenClawPod()
+		if err != nil {
+			return err
+		}
+
+		execArgs := withKubectlExecTTY(buildOpenClawCLIKubectlArgs(cfg.Namespace, pod, buildOpenAICodexLoginArgs()))
+		return runKubectl(execArgs...)
+	},
+}
+
 var skillsCmd = &cobra.Command{
 	Use:   "skills",
 	Short: "Backup, pull, or deploy OpenClaw skill directories",
@@ -2534,8 +2820,11 @@ func init() {
 	configCmd.PersistentFlags().StringVar(&configWorkspaceDir, "workspace-dir", "", "Local config workspace root (default: scripts/recipes/openclaw/config)")
 	configCmd.PersistentFlags().StringVar(&configBackupPath, "backup-path", "", "Directory or file path for config backups (default: <workspace-dir>/backup, use 'off' to disable on deploy)")
 	configDeployCmd.Flags().StringVar(&configDeployFile, "file", "", "Local OpenClaw config JSON file to deploy (default: scripts/recipes/openclaw/openclaw.json)")
+	configValidateCmd.Flags().StringVar(&configDeployFile, "file", "", "Local OpenClaw config JSON file to validate (default: scripts/recipes/openclaw/openclaw.json)")
+	configDeployCmd.Flags().BoolVar(&configDeploySyncPVC, "sync-runtime", true, "Write the validated config directly into the runtime PVC before rollout restart")
 	configCmd.AddCommand(configBackupCmd)
 	configCmd.AddCommand(configPullCmd)
+	configCmd.AddCommand(configValidateCmd)
 	configCmd.AddCommand(configDeployCmd)
 	rootCmd.AddCommand(configCmd)
 	approvalsCmd.PersistentFlags().StringVar(&approvalsWorkspaceDir, "workspace-dir", "", "Local approvals workspace root (default: scripts/recipes/openclaw/approvals)")
@@ -2558,6 +2847,7 @@ func init() {
 	cronCmd.AddCommand(cronSyncCmd)
 	cronCmd.AddCommand(cronDeleteCmd)
 	rootCmd.AddCommand(cronCmd)
+	rootCmd.AddCommand(codexLoginCmd)
 	skillsCmd.PersistentFlags().StringVar(&skillName, "skill", "hormuz-ais-watch", "Default skill directory name under OpenClaw workspace (overridden by positional [skill])")
 	skillsCmd.PersistentFlags().StringVar(&skillsWorkspaceDir, "workspace-dir", "", "Local skills workspace root (default: scripts/recipes/openclaw/skills)")
 	skillsCmd.PersistentFlags().StringVar(&skillsBackupPath, "backup-path", "", "Directory for skill backups (default: <workspace-dir>/backup, use 'off' to disable on deploy)")

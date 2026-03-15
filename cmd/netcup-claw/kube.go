@@ -92,3 +92,21 @@ func runKubectlOutput(args ...string) ([]byte, error) {
 	}
 	return out, nil
 }
+
+// runKubectlCombinedOutput runs kubectl and returns combined stdout/stderr.
+func runKubectlCombinedOutput(args ...string) ([]byte, error) {
+	cmd := exec.Command("kubectl", args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		if recoverErr := ensureKubeAPIReachableWithTunnel(); recoverErr == nil {
+			retry := exec.Command("kubectl", args...)
+			retryOut, retryErr := retry.CombinedOutput()
+			if retryErr == nil {
+				return retryOut, nil
+			}
+			return retryOut, fmt.Errorf("kubectl error: %w", retryErr)
+		}
+		return out, fmt.Errorf("kubectl error: %w", err)
+	}
+	return out, nil
+}
