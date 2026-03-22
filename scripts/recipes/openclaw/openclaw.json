@@ -45,13 +45,25 @@
   "agents": {
     "defaults": {
       "model": {
-        "primary": "openai-codex/gpt-5.4"
+        "primary": "anthropic/claude-haiku-4-5"
       },
       "models": {
+        "anthropic/claude-haiku-4-5": {
+          "alias": "haiku"
+        },
+        "anthropic/claude-sonnet-4-6": {
+          "alias": "sonnet"
+        },
+        "anthropic/claude-opus-4-6": {
+          "alias": "opus"
+        },
+        "openai-codex/gpt-5.4-mini": {},
+        "openai-codex/gpt-5.4": {
+          "alias": "gpt"
+        },
         "openai-codex/gpt-5.1-codex-mini": {
           "alias": "codex-mini"
         },
-        "openai-codex/gpt-5.4": {},
         "openai-codex/gpt-5.3-codex": {
           "alias": "codex"
         }
@@ -85,7 +97,7 @@
         "name": "Coding",
         "workspace": "/home/node/.openclaw/workspace-coding",
         "agentDir": "/home/node/.openclaw/agents/coding/agent",
-        "model": "openai-codex/gpt-5.3-codex",
+        "model": "sonnet",
         "identity": {
           "name": "Coding Agent",
           "emoji": "🧠"

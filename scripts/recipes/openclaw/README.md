@@ -8,7 +8,16 @@ OpenClaw can execute tools and make outbound calls. This recipe enforces kernel/
 
 This setup is intentionally opinionated for this repository's default operating model:
 - Discord is enabled as the primary channel (`channels.discord.enabled=true`)
-- OpenAI Codex is the default model/auth profile (`openai-codex:*` in `openclaw.json`)
+- Anthropic is the active workflow route (`haiku` -> `anthropic/claude-haiku-4-5`, `sonnet` -> `anthropic/claude-sonnet-4-6`)
+- OpenAI Codex auth remains configured in `openclaw.json` for fallback and manual re-auth operations
+
+Model tiers exposed in the repository-managed OpenClaw config:
+- `haiku` -> `anthropic/claude-haiku-4-5`
+- `sonnet` -> `anthropic/claude-sonnet-4-6`
+- `opus` -> `anthropic/claude-opus-4-6`
+- OpenAI Codex exact model IDs remain in the config for rollback without re-adding them later
+
+For cron jobs and agent config, prefer the `haiku` / `sonnet` / `opus` aliases so provider and version switches stay centralized in `scripts/recipes/openclaw/openclaw.json`. OpenAI Codex entries are still kept in the allowed model list for rollback, but workflow jobs should not hardcode provider-specific model IDs while this Anthropic route is active.
 
 If you run a different channel/provider stack, update `scripts/recipes/openclaw/openclaw.json` (or provide `--config-file`) before install.
 
