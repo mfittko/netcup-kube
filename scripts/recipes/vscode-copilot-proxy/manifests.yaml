@@ -1,0 +1,260 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: __RELEASE__-data
+  namespace: __NAMESPACE__
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: __STORAGE__
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: __RELEASE__
+  namespace: __NAMESPACE__
+  labels:
+    app.kubernetes.io/name: __RELEASE__
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: __RELEASE__
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: __RELEASE__
+    spec:
+      initContainers:
+        - name: bootstrap-proxy-extension
+          image: __IMAGE__
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: EXTENSIONS
+              value: "__EXTENSIONS__"
+            - name: VSIX_URL
+              value: "__VSIX_URL__"
+            - name: ALLOW_MISSING_EXTENSION
+              value: "__ALLOW_MISSING_EXTENSION__"
+          command:
+            - /bin/sh
+            - -lc
+          args:
+            - |
+              set -eu
+
+              EXT_DIR="/var/lib/openvscode/extensions"
+              DATA_DIR="/var/lib/openvscode/data"
+              TOOLS_DIR="/var/lib/openvscode/tools"
+              BIN_DIR="/var/lib/openvscode/bin"
+              mkdir -p "${EXT_DIR}" "${DATA_DIR}/Machine"
+              mkdir -p "${TOOLS_DIR}" "${BIN_DIR}"
+
+              install_extension() {
+                ext="${1}"
+                if command -v openvscode-server > /dev/null 2>&1; then
+                  openvscode-server --install-extension "${ext}" --extensions-dir "${EXT_DIR}" --user-data-dir "${DATA_DIR}" > /tmp/extension-install.log 2>&1
+                  return $?
+                fi
+                /home/.openvscode-server/bin/openvscode-server --install-extension "${ext}" --extensions-dir "${EXT_DIR}" --user-data-dir "${DATA_DIR}" > /tmp/extension-install.log 2>&1
+              }
+
+              installed="false"
+
+              if [ -n "${VSIX_URL}" ] && command -v curl > /dev/null 2>&1; then
+                if curl -fsSL "${VSIX_URL}" -o /tmp/copilot-proxy.vsix && install_extension /tmp/copilot-proxy.vsix; then
+                  installed="true"
+                fi
+              fi
+
+              if [ "${installed}" != "true" ]; then
+                old_ifs="${IFS}"
+                IFS=','
+                for ext in ${EXTENSIONS}; do
+                  ext_trimmed="$(echo "${ext}" | sed 's/^ *//;s/ *$//')"
+                  [ -n "${ext_trimmed}" ] || continue
+                  if install_extension "${ext_trimmed}"; then
+                    installed="true"
+                    break
+                  fi
+                done
+                IFS="${old_ifs}"
+              fi
+
+              if [ "${installed}" != "true" ]; then
+                echo "WARNING: No Copilot-proxy extension could be installed." >&2
+                if [ "${ALLOW_MISSING_EXTENSION}" != "true" ]; then
+                  echo "Set --allow-missing-extension to continue without extension bootstrap." >&2
+                  echo "Installer log follows:" >&2
+                  cat /tmp/extension-install.log >&2 || true
+                  exit 1
+                fi
+              fi
+
+              install_official_copilot_cli() {
+                rm -f "${BIN_DIR}/copilot"
+
+                node_bin=""
+                if command -v node > /dev/null 2>&1; then
+                  node_bin="$(command -v node)"
+                elif [ -x /home/.openvscode-server/node ]; then
+                  node_bin="/home/.openvscode-server/node"
+                fi
+
+                if [ -z "${node_bin}" ]; then
+                  echo "WARNING: could not find node binary to install @github/copilot CLI." >&2
+                  return 0
+                fi
+
+                npm_cli=""
+                if command -v npm > /dev/null 2>&1; then
+                  npm_bin="$(command -v npm)"
+                  npm_cli="$(NODE_PATH='' "${node_bin}" -p 'require("npm/package.json").bin.npm-cli' 2>/dev/null || true)"
+                  if [ -n "${npm_cli}" ] && [ -f "$(dirname "${npm_bin}")/../lib/node_modules/npm/${npm_cli}" ]; then
+                    npm_cli="$(dirname "${npm_bin}")/../lib/node_modules/npm/${npm_cli}"
+                  elif [ -f "${TOOLS_DIR}/npm/bin/npm-cli.js" ]; then
+                    npm_cli="${TOOLS_DIR}/npm/bin/npm-cli.js"
+                  else
+                    npm_cli=""
+                  fi
+                fi
+
+                if [ -z "${npm_cli}" ]; then
+                  npm_tgz="${TOOLS_DIR}/npm.tgz"
+                  npm_extract_dir="${TOOLS_DIR}/npm-src"
+                  rm -rf "${npm_extract_dir}"
+                  if command -v curl > /dev/null 2>&1; then
+                    if curl -fsSL "https://registry.npmjs.org/npm/-/npm-10.9.2.tgz" -o "${npm_tgz}"; then
+                      mkdir -p "${npm_extract_dir}"
+                      tar -xzf "${npm_tgz}" -C "${npm_extract_dir}"
+                      rm -rf "${TOOLS_DIR}/npm"
+                      mv "${npm_extract_dir}/package" "${TOOLS_DIR}/npm"
+                      npm_cli="${TOOLS_DIR}/npm/bin/npm-cli.js"
+                    fi
+                  fi
+                fi
+
+                if [ -z "${npm_cli}" ] || [ ! -f "${npm_cli}" ]; then
+                  echo "WARNING: npm bootstrap unavailable; skipping @github/copilot CLI install." >&2
+                  return 0
+                fi
+
+                copilot_prefix="${TOOLS_DIR}/copilot-cli"
+                rm -rf "${copilot_prefix}"
+                if "${node_bin}" "${npm_cli}" install --silent --no-fund --no-audit --prefix "${copilot_prefix}" @github/copilot; then
+                  copilot_loader="${copilot_prefix}/node_modules/@github/copilot/npm-loader.js"
+                  if [ -f "${copilot_loader}" ]; then
+                    printf '%s\n' \
+                      '#!/bin/sh' \
+                      'set -eu' \
+                      '' \
+                      'node_bin=""' \
+                      'if command -v node > /dev/null 2>&1; then' \
+                      '  node_bin="$(command -v node)"' \
+                      'elif [ -x /home/.openvscode-server/node ]; then' \
+                      '  node_bin="/home/.openvscode-server/node"' \
+                      'fi' \
+                      '' \
+                      'if [ -z "${node_bin}" ]; then' \
+                      '  echo "copilot: node runtime not found" >&2' \
+                      '  exit 127' \
+                      'fi' \
+                      '' \
+                      'exec "${node_bin}" /var/lib/openvscode/tools/copilot-cli/node_modules/@github/copilot/npm-loader.js "$@"' \
+                      > "${BIN_DIR}/copilot"
+                    chmod +x "${BIN_DIR}/copilot"
+                  fi
+                else
+                  echo "WARNING: failed to install @github/copilot CLI; continuing without it." >&2
+                fi
+              }
+
+              install_official_copilot_cli
+
+              printf '%s\n' '{' \
+                '  "telemetry.telemetryLevel": "off",' \
+                '  "security.workspace.trust.enabled": false,' \
+                '  "workbench.startupEditor": "none"' \
+                '}' > "${DATA_DIR}/Machine/settings.json"
+          volumeMounts:
+            - name: openvscode-data
+              mountPath: /var/lib/openvscode
+
+      containers:
+        - name: openvscode-server
+          image: __IMAGE__
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - -lc
+          args:
+            - |
+              set -eu
+              if command -v openvscode-server > /dev/null 2>&1; then
+                exec openvscode-server --host 0.0.0.0 --port 3000 --without-connection-token --extensions-dir /var/lib/openvscode/extensions --user-data-dir /var/lib/openvscode/data /home/workspace
+              fi
+              exec /home/.openvscode-server/bin/openvscode-server --host 0.0.0.0 --port 3000 --without-connection-token --extensions-dir /var/lib/openvscode/extensions --user-data-dir /var/lib/openvscode/data /home/workspace
+          ports:
+            - containerPort: 3000
+              name: http
+            - containerPort: 3030
+              name: proxy
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 20
+          volumeMounts:
+            - name: openvscode-data
+              mountPath: /var/lib/openvscode
+            - name: workspace
+              mountPath: /home/workspace
+      volumes:
+        - name: openvscode-data
+          persistentVolumeClaim:
+            claimName: __RELEASE__-data
+        - name: workspace
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: __RELEASE__
+  namespace: __NAMESPACE__
+  labels:
+    app.kubernetes.io/name: __RELEASE__
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: __RELEASE__
+  ports:
+    - name: http
+      port: 3000
+      targetPort: http
+    - name: proxy
+      port: 3030
+      targetPort: proxy
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: __RELEASE__-internal
+  namespace: __NAMESPACE__
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: __RELEASE__
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector: {}
