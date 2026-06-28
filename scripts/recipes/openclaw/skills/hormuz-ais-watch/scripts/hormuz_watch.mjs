@@ -57,10 +57,11 @@ function inBox(cfg, lat, lon) {
   return cfg.latmin <= lat && lat <= cfg.latmax && cfg.lonmin <= lon && lon <= cfg.lonmax;
 }
 
+const POSITION_REPORT_TYPES = new Set(['PositionReport', 'StandardClassBPositionReport', 'ExtendedClassBPositionReport']);
+
 function parsePositionReport(msg) {
   const mtype = msg?.MessageType;
-  const okTypes = new Set(['PositionReport', 'StandardClassBPositionReport', 'ExtendedClassBPositionReport']);
-  if (!okTypes.has(mtype)) return null;
+  if (!POSITION_REPORT_TYPES.has(mtype)) return null;
 
   const meta = msg?.MetaData ?? {};
   const mmsi = meta?.MMSI;

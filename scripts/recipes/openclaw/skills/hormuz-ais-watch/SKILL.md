@@ -28,9 +28,7 @@ Configure via environment variables:
 - **Bounding box** (defaults in `references/default-hormuz-box.md`)
   - `HORMUZ_LAT_MIN`, `HORMUZ_LAT_MAX`, `HORMUZ_LON_MIN`, `HORMUZ_LON_MAX`
 - **Filters**
-  - `TANKER_TYPE_MIN` / `TANKER_TYPE_MAX` (default 80–89)
   - `MIN_SOG` (default 1.5 knots)
-  - `MIN_LENGTH` (default 200 meters; computed as A+B from AISHub)
 - **Runtime / state**
   - `WINDOW_SECONDS` (default 90; how long to stay connected per cron run)
   - `STATE_FILE` (default `/home/node/.openclaw/workspace/state/hormuz-ais-watch/seen_vessels.json`)

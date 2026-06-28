@@ -560,13 +560,13 @@ async function getTextFile({ token, owner, repo, branch, filePath }) {
   }
 }
 
-function updateIndexContent(oldContent, archiveRelativePath, stamp) {
+function updateIndexContent(oldContent, archiveRelativePath, stamp, series) {
   const entry = `- [${stamp}](${archiveRelativePath})`;
   const feedPath = 'feed.xml';
 
   if (!oldContent.trim()) {
     return buildIndex({
-      series: 'Briefings',
+      series: titleCaseSeries(series),
       entries: [{ label: stamp, link: archiveRelativePath }],
       feedPath,
     });
@@ -724,7 +724,7 @@ async function main() {
       filePath: paths.rootIndexPath,
     });
 
-    const newIndex = updateIndexContent(oldIndex, paths.archiveRelativePath, stamp);
+    const newIndex = updateIndexContent(oldIndex, paths.archiveRelativePath, stamp, series);
 
     const entries = parseIndexEntries(newIndex).map((entry) => {
       const mdPath = `${sitePath}/reports/${series}/${entry.link}`;

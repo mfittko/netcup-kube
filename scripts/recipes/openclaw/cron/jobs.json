@@ -7,14 +7,14 @@
         "bestEffort": true,
         "channel": "discord",
         "mode": "none",
-        "to": "channel:1475474139040190649"
+        "to": "channel:${DISCORD_CHANNEL_WEATHER}"
       },
       "enabled": true,
       "id": "cfe2f1b6-6646-4f7f-b7b9-17ec81426933",
       "name": "Berlin Daily Weather",
       "payload": {
         "kind": "agentTurn",
-        "message": "Fetch the current weather forecast for Berlin using wttr.in (curl -s 'wttr.in/Berlin?format=3' for quick, or wttr.in/Berlin?T for full). Then send the briefing to Discord channel 1475474139040190649 using the message tool (action=send, channel=discord, to=channel:1475474139040190649). Keep it concise: temperature, conditions, wind, and any notable weather.",
+        "message": "Fetch the current weather forecast for Berlin using wttr.in (curl -s 'wttr.in/Berlin?format=3' for quick, or wttr.in/Berlin?T for full). Then send the briefing to Discord channel ${DISCORD_CHANNEL_WEATHER} using the message tool (action=send, channel=discord, to=channel:${DISCORD_CHANNEL_WEATHER}). Keep it concise: temperature, conditions, wind, and any notable weather.",
         "model": "haiku"
       },
       "schedule": {
@@ -30,7 +30,7 @@
         "bestEffort": false,
         "channel": "discord",
         "mode": "announce",
-        "to": "channel:1475593803984273579"
+        "to": "channel:${DISCORD_CHANNEL_MARKET}"
       },
       "enabled": true,
       "id": "b238b913-1f10-4cde-a5f5-692c54081426",
@@ -54,7 +54,7 @@
         "bestEffort": true,
         "channel": "discord",
         "mode": "none",
-        "to": "channel:1475593803984273579"
+        "to": "channel:${DISCORD_CHANNEL_MARKET}"
       },
       "enabled": true,
       "id": "f3e6e8f3-1f41-4f31-b523-c1ff5f5f4ef4",
@@ -77,7 +77,7 @@
         "bestEffort": false,
         "channel": "discord",
         "mode": "announce",
-        "to": "channel:1475593803984273579"
+        "to": "channel:${DISCORD_CHANNEL_MARKET}"
       },
       "enabled": true,
       "id": "a6772e72-5a5a-4bc0-950c-67351aab8fe8",
@@ -101,7 +101,7 @@
         "bestEffort": false,
         "channel": "discord",
         "mode": "announce",
-        "to": "channel:1475601273003970770"
+        "to": "channel:${DISCORD_CHANNEL_NEWS}"
       },
       "enabled": true,
       "id": "48402ec2-465a-4544-8756-a78b61a74e8a",
@@ -125,7 +125,7 @@
         "bestEffort": false,
         "channel": "discord",
         "mode": "announce",
-        "to": "channel:1475601273003970770"
+        "to": "channel:${DISCORD_CHANNEL_NEWS}"
       },
       "enabled": true,
       "id": "cd59ca79-7c18-417a-8f31-59665c5338fc",
@@ -149,7 +149,7 @@
         "bestEffort": false,
         "channel": "discord",
         "mode": "announce",
-        "to": "channel:1475978451516391464"
+        "to": "channel:${DISCORD_CHANNEL_GITHUB_FEED}"
       },
       "enabled": true,
       "id": "dc3e216f-cadc-4ff1-82ac-b4067a427e72",
@@ -173,7 +173,7 @@
         "bestEffort": false,
         "channel": "discord",
         "mode": "announce",
-        "to": "channel:1475978451516391464"
+        "to": "channel:${DISCORD_CHANNEL_GITHUB_FEED}"
       },
       "enabled": true,
       "id": "79988b7d-393b-475a-bf74-bf7bb5c90d15",
@@ -196,7 +196,7 @@
         "bestEffort": false,
         "channel": "discord",
         "mode": "announce",
-        "to": "channel:1478308399618855003"
+        "to": "channel:${DISCORD_CHANNEL_CRON_LOG}"
       },
       "enabled": false,
       "id": "b7c7f22c-3d3d-4981-a36d-e11abf5949ba",
@@ -218,14 +218,14 @@
         "bestEffort": true,
         "channel": "discord",
         "mode": "none",
-        "to": "channel:1478308399618855003"
+        "to": "channel:${DISCORD_CHANNEL_CRON_LOG}"
       },
       "enabled": true,
       "id": "d112796e-c9ff-4e95-b6e6-a539e67e2790",
       "name": "Truth Social Trump watch",
       "payload": {
         "kind": "agentTurn",
-        "message": "Run: node /home/node/.openclaw/workspace/skills/truthsocial-trump-watch/scripts/truthsocial_watch.mjs\n\nRules:\n1) LOG_ALL_POSTS behavior: treat LOG_ALL_POSTS as enabled by default (1/true). Only disable if environment explicitly sets LOG_ALL_POSTS=0 or false.\n2) If stdout is exactly HEARTBEAT_OK, do nothing else and return exactly HEARTBEAT_OK.\n3) If stdout starts with 🟠 New Truth Social post(s):\n   - If LOG_ALL_POSTS is enabled, send the exact stdout to Discord cron-log using message tool with action=send, channel=discord, to=channel:1478308399618855003.\n   - Evaluate whether new post(s) are market-relevant. Market-relevant includes geopolitics/war, sanctions, trade/tariffs, oil/energy supply, central banks/rates/inflation, fiscal policy, major regulation, or direct likely impact on equities/commodities/FX/crypto.\n   - Only if market-relevant, send a concise alert to #news using message tool with action=send, channel=discord, to=channel:1475601273003970770. Include: timestamp, key claim, impacted asset classes, and impact rating (LOW/MEDIUM/HIGH).\n   - Return ALERT_SENT if any message was sent; otherwise return NO_MARKET_SIGNAL.\n4) If the command fails (stderr line starting with TRUTHSOCIAL_WATCH_ERROR or TRUTHSOCIAL_CHALLENGE_PAGE), send that exact single-line error to cron-log channel 1478308399618855003, then return exactly ERROR_REPORTED.\n5) No extra commentary.",
+        "message": "Run: node /home/node/.openclaw/workspace/skills/truthsocial-trump-watch/scripts/truthsocial_watch.mjs\n\nRules:\n1) LOG_ALL_POSTS behavior: treat LOG_ALL_POSTS as enabled by default (1/true). Only disable if environment explicitly sets LOG_ALL_POSTS=0 or false.\n2) If stdout is exactly HEARTBEAT_OK, do nothing else and return exactly HEARTBEAT_OK.\n3) If stdout starts with 🟠 New Truth Social post(s):\n   - If LOG_ALL_POSTS is enabled, send the exact stdout to Discord cron-log using message tool with action=send, channel=discord, to=channel:${DISCORD_CHANNEL_CRON_LOG}.\n   - Evaluate whether new post(s) are market-relevant. Market-relevant includes geopolitics/war, sanctions, trade/tariffs, oil/energy supply, central banks/rates/inflation, fiscal policy, major regulation, or direct likely impact on equities/commodities/FX/crypto.\n   - Only if market-relevant, send a concise alert to #news using message tool with action=send, channel=discord, to=channel:${DISCORD_CHANNEL_NEWS}. Include: timestamp, key claim, impacted asset classes, and impact rating (LOW/MEDIUM/HIGH).\n   - Return ALERT_SENT if any message was sent; otherwise return NO_MARKET_SIGNAL.\n4) If the command fails (stderr line starting with TRUTHSOCIAL_WATCH_ERROR or TRUTHSOCIAL_CHALLENGE_PAGE), send that exact single-line error to cron-log channel ${DISCORD_CHANNEL_CRON_LOG}, then return exactly ERROR_REPORTED.\n5) No extra commentary.",
         "model": "haiku"
       },
       "schedule": {
@@ -240,7 +240,7 @@
         "bestEffort": false,
         "channel": "discord",
         "mode": "announce",
-        "to": "channel:1475978451516391464"
+        "to": "channel:${DISCORD_CHANNEL_GITHUB_FEED}"
       },
       "enabled": true,
       "id": "82db7a8a-83f7-43b9-b728-7527bdb44703",
@@ -263,7 +263,7 @@
       "delivery": {
         "channel": "discord",
         "mode": "announce",
-        "to": "channel:1475496232586706954"
+        "to": "channel:${DISCORD_CHANNEL_AGENT_CONFIG}"
       },
       "enabled": true,
       "id": "e143dabc-0799-43a3-9430-e1ddeed56eeb",

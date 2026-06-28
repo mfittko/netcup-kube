@@ -63,7 +63,7 @@ node skills/briefing-publisher/scripts/publish_briefing.mjs \
 ## Options
 
 - `--input-file <path>` (required): markdown file to publish
-- `--series <path>` (default: `market/daily-pulse`): logical path under `docs/reports/`
+- `--series <path>` (default: `market`): logical path under `docs/reports/`
 - `--repo <owner/name>` (default: `mfittko/ai-briefings`)
 - `--branch <name>` (default: `main`)
 - `--site-base-url <url>` (default: `https://mfittko.github.io/ai-briefings`)

@@ -1,0 +1,11 @@
+# Discord channel IDs for OpenClaw cron jobs.
+# Copy to .env, fill in your actual channel IDs, then run:
+#   envsubst < jobs.json > jobs.local.json
+# and deploy the resulting jobs.local.json instead of jobs.json.
+
+DISCORD_CHANNEL_WEATHER=
+DISCORD_CHANNEL_MARKET=
+DISCORD_CHANNEL_NEWS=
+DISCORD_CHANNEL_CRON_LOG=
+DISCORD_CHANNEL_GITHUB_FEED=
+DISCORD_CHANNEL_AGENT_CONFIG=
