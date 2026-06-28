@@ -100,6 +100,21 @@ func TestBuildConfigSyncPodManifest(t *testing.T) {
 	}
 }
 
+func TestBuildOpenClawRuntimeHardeningScript(t *testing.T) {
+	script := buildOpenClawRuntimeHardeningScript("/mnt/openclaw")
+
+	for _, want := range []string{
+		`runtime_root="/mnt/openclaw"`,
+		`chmod 0700 "$credentials_dir"`,
+		`chmod 0600 "$auth_profiles_file"`,
+		`chmod 0600 "$config_file"`,
+	} {
+		if !strings.Contains(script, want) {
+			t.Fatalf("buildOpenClawRuntimeHardeningScript() missing %q in script:\n%s", want, script)
+		}
+	}
+}
+
 func TestWithKubectlExecTTY(t *testing.T) {
 	base := []string{"-n", "openclaw", "exec", "-c", "main", "pod-1", "--", "node", "/app/openclaw.mjs", "status"}
 	got := withKubectlExecTTY(base)

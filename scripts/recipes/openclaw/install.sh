@@ -700,6 +700,7 @@ OPENCLAW_POD_NAME="$(k -n "${NAMESPACE}" get pods -l app.kubernetes.io/instance=
 openclaw_install_cli_wrapper "${NAMESPACE}" "${OPENCLAW_POD_NAME}" "${RUNTIME_BIN_DIR}"
 openclaw_install_diagnostics_runtime_dependencies "${NAMESPACE}" "${OPENCLAW_POD_NAME}" "${OTEL_RUNTIME_DIR}"
 bootstrap_openclaw_agent_workspace_markdown "${NAMESPACE}" "${OPENCLAW_POD_NAME}" "${AGENT_WORKSPACE_DIR}" "${WORKSPACE_BOOTSTRAP_MODE}"
+openclaw_harden_runtime_permissions "${NAMESPACE}" "${OPENCLAW_POD_NAME}"
 
 # Dynamically determine OpenClaw service name
 OPENCLAW_SVC=$(k -n "${NAMESPACE}" get svc -l app.kubernetes.io/instance=openclaw -o jsonpath='{.items[0].metadata.name}' 2> /dev/null || echo "openclaw")

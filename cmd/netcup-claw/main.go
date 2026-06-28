@@ -70,6 +70,7 @@ const (
 	openclawMainContainer = "main"
 	openclawCLIPath       = "/app/openclaw.mjs"
 	openclawConfigPath    = "/home/node/.openclaw/openclaw.json"
+	openclawRuntimeMount  = "/mnt/openclaw"
 )
 
 var rootCmd = &cobra.Command{
@@ -1034,7 +1035,8 @@ Sub-commands:
   backup  - Pull current deployed openclaw.json into local backup path
   pull    - Pull current deployed openclaw.json into local workspace file
 	validate - Validate a local openclaw.json against the running OpenClaw image schema
-  deploy  - Push local openclaw.json into ConfigMap and restart rollout`,
+	deploy  - Push local openclaw.json into ConfigMap and restart rollout
+	harden  - Normalize sensitive runtime file permissions on the OpenClaw PVC`,
 }
 
 var configBackupCmd = &cobra.Command{
@@ -1224,6 +1226,29 @@ var configDeployCmd = &cobra.Command{
 	},
 }
 
+var configHardenCmd = &cobra.Command{
+	Use:   "harden",
+	Short: "Normalize sensitive OpenClaw runtime file permissions",
+	Long: `Repair sensitive runtime file permissions on the OpenClaw PVC.
+
+This normalizes the permissions for:
+  - /home/node/.openclaw/openclaw.json
+  - /home/node/.openclaw/credentials
+  - /home/node/.openclaw/agents/main/agent/auth-profiles.json
+
+It is safe to run repeatedly and is useful after a scan reports group-writable
+credentials or auth profile files.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		cfg := openclawConfig()
+		if err := hardenOpenClawRuntimePermissions(cfg); err != nil {
+			return err
+		}
+
+		fmt.Println("runtime permissions hardened")
+		return nil
+	},
+}
+
 func resolveOpenClawMainImage(cfg openclaw.Config) (string, error) {
 	out, err := runKubectlOutput(
 		"-n", cfg.Namespace,
@@ -1313,6 +1338,27 @@ spec:
     persistentVolumeClaim:
       claimName: %s
 `, podName, image, pvcName))
+}
+
+func buildOpenClawRuntimeHardeningScript(runtimeRoot string) string {
+	return fmt.Sprintf(`set -eu
+runtime_root=%q
+credentials_dir="$runtime_root/credentials"
+auth_profiles_file="$runtime_root/agents/main/agent/auth-profiles.json"
+config_file="$runtime_root/openclaw.json"
+
+if [ -d "$credentials_dir" ]; then
+	chmod 0700 "$credentials_dir"
+fi
+
+if [ -f "$auth_profiles_file" ]; then
+	chmod 0600 "$auth_profiles_file"
+fi
+
+if [ -f "$config_file" ]; then
+	chmod 0600 "$config_file"
+fi
+`, runtimeRoot)
 }
 
 func createTempPod(cfg openclaw.Config, podName string, manifest []byte) error {
@@ -1424,11 +1470,42 @@ func syncOpenClawRuntimeConfig(cfg openclaw.Config, payload []byte) error {
 
 	backupSuffix := time.Now().UTC().Format("20060102-150405")
 	script := fmt.Sprintf(
-		"set -eu; target=/mnt/openclaw/openclaw.json; if [ -f \"$target\" ]; then cp \"$target\" \"$target.bak.%s\"; fi; cp /tmp/openclaw.json \"$target\"; chmod 0600 \"$target\"",
+		"set -eu; target=%s/openclaw.json; if [ -f \"$target\" ]; then cp \"$target\" \"$target.bak.%s\"; fi; cp /tmp/openclaw.json \"$target\"; %s",
+		openclawRuntimeMount,
 		backupSuffix,
+		strings.ReplaceAll(strings.TrimSpace(buildOpenClawRuntimeHardeningScript(openclawRuntimeMount)), "\n", "; "),
 	)
 	if err := runKubectl("-n", cfg.Namespace, "exec", "-c", "sync", podName, "--", "sh", "-lc", script); err != nil {
 		return fmt.Errorf("failed to write config into runtime PVC: %w", err)
+	}
+
+	return nil
+}
+
+func hardenOpenClawRuntimePermissions(cfg openclaw.Config) error {
+	if err := ensureKubeAPIReachableWithTunnel(); err != nil {
+		return err
+	}
+
+	image, err := resolveOpenClawMainImage(cfg)
+	if err != nil {
+		return err
+	}
+	pvcName, err := resolveOpenClawRuntimePVCName(cfg)
+	if err != nil {
+		return err
+	}
+
+	podName := fmt.Sprintf("openclaw-config-harden-%d", time.Now().UTC().UnixNano())
+	defer deleteTempPod(cfg, podName)
+
+	if err := createTempPod(cfg, podName, buildConfigSyncPodManifest(podName, image, pvcName)); err != nil {
+		return err
+	}
+
+	script := buildOpenClawRuntimeHardeningScript(openclawRuntimeMount)
+	if err := runKubectl("-n", cfg.Namespace, "exec", "-c", "sync", podName, "--", "sh", "-lc", script); err != nil {
+		return fmt.Errorf("failed to harden OpenClaw runtime permissions: %w", err)
 	}
 
 	return nil
@@ -2826,6 +2903,7 @@ func init() {
 	configCmd.AddCommand(configPullCmd)
 	configCmd.AddCommand(configValidateCmd)
 	configCmd.AddCommand(configDeployCmd)
+	configCmd.AddCommand(configHardenCmd)
 	rootCmd.AddCommand(configCmd)
 	approvalsCmd.PersistentFlags().StringVar(&approvalsWorkspaceDir, "workspace-dir", "", "Local approvals workspace root (default: scripts/recipes/openclaw/approvals)")
 	approvalsCmd.PersistentFlags().StringVar(&approvalsBackupPath, "backup-path", "", "Directory or file path for approvals backups (default: <workspace-dir>/backup, use 'off' to disable on deploy)")

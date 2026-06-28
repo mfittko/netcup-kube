@@ -33,6 +33,10 @@ Look for items that are actually actionable:
 - runtime warnings that likely need operator follow-up
 - deployed OpenClaw version drift: if `openclaw status` shows the running chart/app versions and the Helm repo exposes a newer stable chart, report the current chart/app and latest chart only when the deployment is behind
 
+When reporting runtime permission issues for sensitive paths, prefer repo-supported remediation wording:
+- `netcup-claw config harden` for permission drift on `/home/node/.openclaw/credentials`, `/home/node/.openclaw/agents/main/agent/auth-profiles.json`, or `/home/node/.openclaw/openclaw.json`
+- `netcup-claw codex-login` for near-expiry OpenAI Codex OAuth refresh
+
 ## Output rules
 
 - Report only actionables.

@@ -74,3 +74,33 @@ EOF
     log "WARNING: OpenClaw will still run with eBPF monitoring, but plugin-based OTEL telemetry may be incomplete."
   fi
 }
+
+openclaw_harden_runtime_permissions() {
+  local namespace="$1"
+  local pod_name="$2"
+
+  log "Hardening sensitive OpenClaw runtime paths"
+  if ! k -n "${namespace}" exec -i "${pod_name}" -c main -- sh -s << 'EOF'; then
+set -eu
+
+runtime_root="/home/node/.openclaw"
+credentials_dir="${runtime_root}/credentials"
+auth_profiles_file="${runtime_root}/agents/main/agent/auth-profiles.json"
+config_file="${runtime_root}/openclaw.json"
+
+if [ -d "${credentials_dir}" ]; then
+  chmod 0700 "${credentials_dir}"
+fi
+
+if [ -f "${auth_profiles_file}" ]; then
+  chmod 0600 "${auth_profiles_file}"
+fi
+
+if [ -f "${config_file}" ]; then
+  chmod 0600 "${config_file}"
+fi
+EOF
+    log "WARNING: Failed to harden one or more OpenClaw runtime paths."
+    log "WARNING: Verify /home/node/.openclaw/credentials and auth-profiles.json permissions manually."
+  fi
+}

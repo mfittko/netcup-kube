@@ -185,13 +185,15 @@ Config can also be synced via `netcup-claw`:
 - `netcup-claw config pull`
 - `netcup-claw config validate`
 - `netcup-claw config deploy`
+- `netcup-claw config harden`
 - `netcup-claw config push` (alias of deploy)
 
 Config deploy behavior:
 
 - `netcup-claw config validate --file scripts/recipes/openclaw/openclaw.json` validates the local file against the currently deployed OpenClaw image before rollout.
-- `netcup-claw config deploy` now validates first, updates the ConfigMap, and syncs the same file into the runtime PVC before restarting the deployment.
+- `netcup-claw config deploy` now validates first, updates the ConfigMap, syncs the same file into the runtime PVC, and normalizes sensitive runtime file permissions before restarting the deployment.
 - Use `netcup-claw config deploy --sync-runtime=false` only if you intentionally want ConfigMap-only behavior and accept persisted runtime config drift.
+- `netcup-claw config harden` repairs the common sensitive-path permissions flagged by the config scan without changing application config content.
 
 Defaults:
 
@@ -253,10 +255,17 @@ Apply/update in-cluster runtime:
 
 ```bash
 netcup-claw codex-login
+netcup-claw config harden
 netcup-claw skills deploy --skill openclaw-config-scan
 netcup-claw skills deploy --skill truthsocial-trump-watch
 netcup-claw cron sync --file scripts/recipes/openclaw/cron/jobs.json
 ```
+
+If the config scan reports group-writable runtime paths, `netcup-claw config harden` is the preferred one-shot repair. It normalizes:
+
+- `/home/node/.openclaw/credentials` to `0700`
+- `/home/node/.openclaw/agents/main/agent/auth-profiles.json` to `0600`
+- `/home/node/.openclaw/openclaw.json` to `0600`
 
 It wires OTEL environment variables on the OpenClaw pod:
 

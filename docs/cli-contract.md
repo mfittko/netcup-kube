@@ -95,6 +95,7 @@ netcup-kube install <recipe> [recipe-options]
 `netcup-claw config` management:
 - `netcup-claw config validate [--file <path>]` — Validate a local OpenClaw config file against the image currently deployed in-cluster.
 - `netcup-claw config deploy [--file <path>] [--sync-runtime=false]` — Validate the local config, update ConfigMap `openclaw`, and by default sync the same config into the runtime PVC before restarting the deployment.
+- `netcup-claw config harden` — Normalize sensitive runtime file permissions on the OpenClaw PVC (`credentials` dir, `auth-profiles.json`, `openclaw.json`) without changing config content.
 
 `netcup-claw cron` management:
 - `netcup-claw cron backup` — Pull the current runtime cron snapshot into the local backup path.
