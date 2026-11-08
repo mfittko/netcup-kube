@@ -11,13 +11,14 @@ Self-hosted GitHub Actions runner image for the upcoming `github-runners` recipe
 - Google Chrome stable (installed through Playwright's `chrome` channel; **amd64 only**)
 - Common CI tooling: git, curl, jq, build-essential, zip/unzip, openssh-client
 
-Browsers live in `/ms-playwright` (`PLAYWRIGHT_BROWSERS_PATH`) and are world-readable, so jobs
-that run as any user find them. Playwright is installed globally (`NODE_PATH` is set), so
-`require('playwright')` works without a project-local install; a project-local Playwright must
-match the pinned version to reuse these browsers. `/ms-playwright` is read-only for jobs, so a
-job whose project-local Playwright differs must first point `PLAYWRIGHT_BROWSERS_PATH` at a
-writable path, for example `export PLAYWRIGHT_BROWSERS_PATH="$HOME/.cache/ms-playwright"`, and
-then run `npx playwright install`.
+Browsers live in `/ms-playwright` (`PLAYWRIGHT_BROWSERS_PATH`), which is owned by `runner` and
+world-readable. Playwright is installed globally (`NODE_PATH` is set), so `require('playwright')`
+works without a project-local install. Jobs running as `runner` can keep the usual
+`npx playwright install` step: with the pinned Playwright version it finds the browsers already
+present and installs nothing, and with a different version it installs that version's browsers
+alongside them in `/ms-playwright`. A job that runs as another user cannot write there; it can
+point `PLAYWRIGHT_BROWSERS_PATH` at a writable path, for example
+`export PLAYWRIGHT_BROWSERS_PATH="$HOME/.cache/ms-playwright"`, before `npx playwright install`.
 
 ## Build
 
@@ -43,9 +44,12 @@ keep `RUNNER_VERSION` reasonably current.
 ## Publishing
 
 `.github/workflows/publish-runner-image.yml` builds on every change to this directory (PRs only
-build and smoke-test). Only runs on `main` publish: a push to `main` publishes `latest`,
-`runner-<version>` and `sha-<short>`, and the weekly schedule and manual dispatch from `main`
-publish `latest` and `runner-<version>`. The weekly rebuild skips the layer cache and pulls the
+build and smoke-test). Only runs on `main` publish: a push run on `main` that completes publishes
+`latest`, `runner-<version>` and `sha-<short>`, and the weekly schedule and manual dispatch from
+`main` publish `latest` and `runner-<version>`. Runs on `main` are serialized and never cancel a
+running build, but GitHub keeps only one queued run: a push run still queued when a newer run on
+`main` is queued is cancelled, so `sha-<short>` exists only for push runs that complete, and
+`latest` always tracks the newest completed run. The weekly rebuild skips the layer cache and pulls the
 base image again, so it picks up Google Chrome stable and OS and base-image package updates. The
 Playwright-bundled chromium, firefox and webkit builds are pinned by `PLAYWRIGHT_VERSION` and change
 only when that version is bumped. A manual dispatch from any other branch only builds and

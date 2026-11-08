@@ -50,7 +50,9 @@ RUN set -eux; \
   rm -rf /var/lib/apt/lists/*; \
   chown -R runner:runner /home/runner
 
-# Playwright + browsers + system deps into a world-readable shared path.
+# Playwright + browsers + system deps into a world-readable shared path, owned
+# by `runner` so `npx playwright install` in jobs can write its lock and marker
+# files there (and add browsers for a different Playwright version).
 # Google Chrome only ships for amd64, so it is skipped on other arches.
 RUN set -eux; \
   npm install -g "playwright@${PLAYWRIGHT_VERSION}"; \
@@ -58,6 +60,7 @@ RUN set -eux; \
   if [ "${TARGETARCH:-amd64}" = "amd64" ]; then browsers="${browsers} chrome"; fi; \
   playwright install --with-deps ${browsers}; \
   chmod -R a+rX "${PLAYWRIGHT_BROWSERS_PATH}"; \
+  chown -R runner:runner "${PLAYWRIGHT_BROWSERS_PATH}"; \
   rm -rf /var/lib/apt/lists/* /root/.npm /tmp/*
 
 ENV NODE_PATH=/usr/local/lib/node_modules

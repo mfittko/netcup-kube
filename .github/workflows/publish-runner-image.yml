@@ -21,6 +21,9 @@ env:
   IMAGE_NAME: ${{ github.repository_owner }}/github-runner
 
 # Serialize runs per ref so overlapping main/schedule runs cannot race on `latest`.
+# A running build is never cancelled, but GitHub keeps only one pending run per
+# group: a queued push run is cancelled when a newer run joins, so `sha-<short>`
+# is published only for push runs that complete.
 concurrency:
   group: publish-runner-image-${{ github.ref }}
   cancel-in-progress: false
@@ -99,6 +102,8 @@ jobs:
           docker run --rm github-runner:test test -x /home/runner/run.sh
           docker run --rm github-runner:test google-chrome --version
           docker run --rm github-runner:test playwright --version
+          # `playwright install` as user runner must succeed on /ms-playwright.
+          docker run --rm github-runner:test playwright install chromium
 
       - name: Log in to the container registry
         if: steps.gate.outputs.publish == 'true'
