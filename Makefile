@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 
-SCRIPTS := $(shell find scripts -type f -name "*.sh")
+SCRIPTS := $(shell find scripts images -type f -name "*.sh")
 
 # Go build variables
 GO_CMD := go
@@ -19,10 +19,10 @@ CLAW_GO_MAIN := ./cmd/$(CLAW_BINARY_NAME)
 .PHONY: fmt fmt-check lint check test build build-go clean test-go go-deps
 
 fmt:
-	shfmt -w -i 2 -ci -sr scripts
+	shfmt -w -i 2 -ci -sr scripts images
 
 fmt-check:
-	shfmt -d -i 2 -ci -sr scripts
+	shfmt -d -i 2 -ci -sr scripts images
 
 lint:
 	shellcheck -x $(SCRIPTS)

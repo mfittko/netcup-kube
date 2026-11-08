@@ -46,8 +46,10 @@ keep `RUNNER_VERSION` reasonably current.
 build and smoke-test). Only runs on `main` publish: a push to `main` publishes `latest`,
 `runner-<version>` and `sha-<short>`, and the weekly schedule and manual dispatch from `main`
 publish `latest` and `runner-<version>`. The weekly rebuild skips the layer cache and pulls the
-base image again so it picks up browser and base-image updates. A manual dispatch from any other
-branch only builds and smoke-tests.
+base image again, so it picks up Google Chrome stable and OS and base-image package updates. The
+Playwright-bundled chromium, firefox and webkit builds are pinned by `PLAYWRIGHT_VERSION` and change
+only when that version is bumped. A manual dispatch from any other branch only builds and
+smoke-tests.
 
 New GHCR packages are **private** by default. Either make the package public, or give the
 cluster an image pull secret. The upcoming `github-runners` recipe (issue 75) will accept it

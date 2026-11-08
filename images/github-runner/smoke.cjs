@@ -1,5 +1,6 @@
 // Smoke test: every pre-installed browser must launch headless and render a page.
-// Run inside the image:  docker run --rm --shm-size=1g <image> node /smoke.cjs
+// Run inside the image:
+//   docker run --rm --shm-size=1g -v "$PWD/images/github-runner/smoke.cjs:/smoke.cjs:ro" <image> node /smoke.cjs
 const { chromium, firefox, webkit } = require('playwright');
 
 const targets = [

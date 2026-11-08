@@ -24,6 +24,7 @@ check "workflow_dispatch on refs/heads/main" true workflow_dispatch refs/heads/m
 
 # Rejected forms: build and smoke-test only.
 check "pull_request" false pull_request refs/pull/1/merge
+check "pull_request with default-branch ref" false pull_request refs/heads/main
 check "workflow_dispatch on refs/heads/feature-branch" false workflow_dispatch refs/heads/feature-branch
 
 [[ "${failures}" -eq 0 ]] || exit 1

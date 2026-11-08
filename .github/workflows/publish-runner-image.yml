@@ -12,7 +12,8 @@ on:
       - '.github/workflows/publish-runner-image.yml'
   workflow_dispatch:
   schedule:
-    # Weekly rebuild to pick up Chrome / browser / base-image updates.
+    # Weekly rebuild to pick up Google Chrome stable and OS / base-image updates
+    # (Playwright-bundled browsers change only when PLAYWRIGHT_VERSION is bumped).
     - cron: '17 4 * * 1'
 
 env:
@@ -69,13 +70,14 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=raw,value=runner-${{ steps.versions.outputs.runner }},enable={{is_default_branch}}
-            type=sha,prefix=sha-,format=short,enable=${{ github.event_name == 'push' }}
+            type=raw,value=latest,enable=${{ steps.gate.outputs.publish == 'true' }}
+            type=raw,value=runner-${{ steps.versions.outputs.runner }},enable=${{ steps.gate.outputs.publish == 'true' }}
+            type=sha,prefix=sha-,format=short,enable=${{ steps.gate.outputs.publish == 'true' && github.event_name == 'push' }}
 
       # Built once; the smoke-tested image is the one that gets pushed. Scheduled
       # rebuilds skip the layer cache and re-pull the base image so they pick up
-      # Chrome / browser / base-image updates.
+      # Google Chrome stable and OS / base-image updates; the Playwright-bundled
+      # chromium, firefox and webkit change only when PLAYWRIGHT_VERSION is bumped.
       - name: Build image (amd64)
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
