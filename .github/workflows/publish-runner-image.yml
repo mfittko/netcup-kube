@@ -55,6 +55,8 @@ jobs:
             -v "${PWD}/images/github-runner/smoke.cjs:/smoke.cjs:ro" \
             github-runner:test node /smoke.cjs
           docker run --rm github-runner:test test -x /home/runner/run.sh
+          docker run --rm github-runner:test google-chrome --version
+          docker run --rm github-runner:test playwright --version
 
       - name: Log in to the container registry
         if: github.event_name != 'pull_request'
