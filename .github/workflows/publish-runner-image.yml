@@ -1,0 +1,87 @@
+name: Publish runner image
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'images/github-runner/**'
+      - '.github/workflows/publish-runner-image.yml'
+  pull_request:
+    paths:
+      - 'images/github-runner/**'
+      - '.github/workflows/publish-runner-image.yml'
+  workflow_dispatch:
+  schedule:
+    # Weekly rebuild to pick up Chrome / browser / base-image updates.
+    - cron: '17 4 * * 1'
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository_owner }}/github-runner
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Read pinned versions
+        id: versions
+        run: |
+          runner_version="$(sed -n 's/^ARG RUNNER_VERSION=//p' images/github-runner/Dockerfile)"
+          [[ -n "${runner_version}" ]] || { echo "RUNNER_VERSION not found in Dockerfile" >&2; exit 1; }
+          echo "runner=${runner_version}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - name: Build image (amd64) for smoke test
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: images/github-runner
+          platforms: linux/amd64
+          load: true
+          tags: github-runner:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test (all browsers launch headless)
+        run: |
+          docker run --rm --shm-size=1g \
+            -v "${PWD}/images/github-runner/smoke.cjs:/smoke.cjs:ro" \
+            github-runner:test node /smoke.cjs
+          docker run --rm github-runner:test test -x /home/runner/run.sh
+
+      - name: Log in to the container registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels)
+        if: github.event_name != 'pull_request'
+        id: meta
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=runner-${{ steps.versions.outputs.runner }},enable={{is_default_branch}}
+            type=sha,prefix=sha-,format=short
+
+      - name: Push image
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: images/github-runner
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
