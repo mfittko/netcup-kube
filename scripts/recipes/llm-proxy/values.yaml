@@ -6,10 +6,10 @@
 replicaCount: 8
 
 image:
-  repository: ghcr.io/sofatutor/llm-proxy
-  # Keep tag explicit so installs work out-of-the-box.
-  # For production, pin to a released version and set LLM_PROXY_CHART_VERSION accordingly.
-  tag: latest
+  # mfittko/g-way continues the archived sofatutor/llm-proxy (same code at v0.1.4).
+  repository: ghcr.io/mfittko/g-way
+  # Pinned to a released version; bump together with LLM_PROXY_CHART_VERSION.
+  tag: v0.1.4
 
 service:
   type: ClusterIP

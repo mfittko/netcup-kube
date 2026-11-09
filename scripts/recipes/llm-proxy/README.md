@@ -188,7 +188,7 @@ netcup-kube install llm-proxy
 By default, the recipe uses the **published OCI Helm chart** from GitHub Container Registry:
 
 ```
-oci://ghcr.io/sofatutor/charts/llm-proxy
+oci://ghcr.io/mfittko/charts/llm-proxy
 ```
 
 You can override the chart version:
