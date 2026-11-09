@@ -143,14 +143,18 @@ PREPULL="gha-${NAME}-prepull"
 if [[ "${UNINSTALL}" == "true" ]]; then
   recipe_confirm_or_die "Uninstall runner scale set '${NAME}' (repo ${REPO}) from namespace ${RUNNER_NS}"
   log "Uninstalling runner scale set ${NAME}"
-  helm uninstall "${NAME}" --namespace "${RUNNER_NS}" --wait || true
-  recipe_kdelete daemonset "${PREPULL}" -n "${RUNNER_NS}"
-  recipe_kdelete secret "${SECRET}" -n "${RUNNER_NS}"
+  # ARC needs the Secret to deregister the scale set from GitHub, so a failed
+  # or timed-out uninstall stops here (set -e) and keeps the Secret.
+  if helm status "${NAME}" --namespace "${RUNNER_NS}" > /dev/null 2>&1; then
+    run helm uninstall "${NAME}" --namespace "${RUNNER_NS}" --wait --timeout 5m
+  fi
+  run recipe_kdelete daemonset "${PREPULL}" -n "${RUNNER_NS}"
+  run recipe_kdelete secret "${SECRET}" -n "${RUNNER_NS}"
   exit 0
 fi
 
-recipe_ensure_namespace "${CONTROLLER_NS}"
-recipe_ensure_namespace "${RUNNER_NS}"
+run recipe_ensure_namespace "${CONTROLLER_NS}"
+run recipe_ensure_namespace "${RUNNER_NS}"
 
 # Credential: from --token-file or GITHUB_PAT; otherwise reuse the existing Secret.
 TOKEN=""
@@ -160,17 +164,20 @@ if [[ -n "${TOKEN_FILE}" ]]; then
 elif [[ -n "${GITHUB_PAT:-}" ]]; then
   TOKEN="${GITHUB_PAT}"
 fi
-if [[ -n "${TOKEN}" ]]; then
-  log "Storing the GitHub token in Secret ${RUNNER_NS}/${SECRET}"
+apply_token_secret() {
   # The token goes through stdin, never through a command-line argument.
   printf '%s' "${TOKEN}" | k create secret generic "${SECRET}" -n "${RUNNER_NS}" \
     --from-file=github_token=/dev/stdin --dry-run=client -o yaml | k apply -f -
+}
+if [[ -n "${TOKEN}" ]]; then
+  log "Storing the GitHub token in Secret ${RUNNER_NS}/${SECRET}"
+  run apply_token_secret
 elif ! k get secret "${SECRET}" -n "${RUNNER_NS}" > /dev/null 2>&1; then
   die "No GitHub token: pass --token-file or GITHUB_PAT (Secret ${RUNNER_NS}/${SECRET} does not exist yet)"
 fi
 
 log "Installing/Upgrading the ARC controller in namespace ${CONTROLLER_NS}"
-helm upgrade --install arc \
+run helm upgrade --install arc \
   oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set-controller \
   --namespace "${CONTROLLER_NS}" \
   --version "${CHART_VERSION_ARC}" \
@@ -178,7 +185,7 @@ helm upgrade --install arc \
   --timeout 5m
 
 log "Pre-pulling ${IMAGE} on every node"
-k apply -f - << EOF
+run k apply -f - << EOF
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
@@ -203,8 +210,13 @@ spec:
           resources: {requests: {cpu: 1m, memory: 8Mi}, limits: {memory: 16Mi}}
 EOF
 
+# A pod turns ready only after its init container pulled the image, so the
+# scale set is installed only once every node holds the runner image.
+log "Waiting for the runner image pull on every node"
+run k -n "${RUNNER_NS}" rollout status "daemonset/${PREPULL}" --timeout=15m
+
 log "Installing/Upgrading runner scale set ${NAME} for ${REPO} (min ${MIN_RUNNERS}, max ${MAX_RUNNERS})"
-helm upgrade --install "${NAME}" \
+run helm upgrade --install "${NAME}" \
   oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set \
   --namespace "${RUNNER_NS}" \
   --version "${CHART_VERSION_ARC}" \
