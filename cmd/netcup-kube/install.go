@@ -293,11 +293,18 @@ func ensureTunnelRunning(envFile, projectRoot string) error {
 		env = make(map[string]string)
 	}
 
-	remoteHost := env["MGMT_HOST"]
+	// Same precedence as `netcup-kube ssh tunnel`: TUNNEL_* overrides MGMT_*.
+	remoteHost := env["TUNNEL_HOST"]
+	if remoteHost == "" {
+		remoteHost = env["MGMT_HOST"]
+	}
 	if remoteHost == "" {
 		remoteHost = env["MGMT_IP"]
 	}
-	remoteUser := env["MGMT_USER"]
+	remoteUser := env["TUNNEL_USER"]
+	if remoteUser == "" {
+		remoteUser = env["MGMT_USER"]
+	}
 	if remoteUser == "" {
 		remoteUser = "ops"
 	}
@@ -324,7 +331,7 @@ func ensureTunnelRunning(envFile, projectRoot string) error {
 	fmt.Println("SSH tunnel not running. Starting tunnel...")
 
 	if err := mgr.Start(); err != nil {
-		troubleshooting := fmt.Sprintf("\n\nTroubleshooting:\n  - Verify MGMT_HOST=%s and MGMT_USER=%s are correct\n  - Check SSH access: ssh %s@%s\n  - Start tunnel manually: netcup-kube ssh tunnel start",
+		troubleshooting := fmt.Sprintf("\n\nTroubleshooting:\n  - Verify TUNNEL_HOST/MGMT_HOST=%s and TUNNEL_USER/MGMT_USER=%s are correct\n  - Check SSH access: ssh %s@%s\n  - Start tunnel manually: netcup-kube ssh tunnel start",
 			remoteHost, remoteUser, remoteUser, remoteHost)
 		return fmt.Errorf("failed to start SSH tunnel: %w%s", err, troubleshooting)
 	}
