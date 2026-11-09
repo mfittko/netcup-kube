@@ -45,6 +45,7 @@ NAMESPACE=prod-db STORAGE=50Gi netcup-kube install postgres
 - **dashboard**: Kubernetes Dashboard
 - **redisinsight**: Redis GUI for development
 - **llm-proxy**: Install llm-proxy from its Helm chart (Secret-backed config)
+- **github-runners**: GitHub Actions self-hosted runners (actions-runner-controller scale set, GitHub App auth, ephemeral autoscaling pods)
 - **openclaw**: OpenClaw agent with mandatory kernel-level network monitoring
 - **zeroclaw**: ZeroClaw AI agent (bundled Helm chart, TOML config, Anthropic provider, dedicated namespace)
 

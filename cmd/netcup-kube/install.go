@@ -37,6 +37,7 @@ Available recipes:
   kube-prometheus-stack    Install Grafana + Prometheus + Alertmanager
   dashboard                Install Kubernetes Dashboard (official web UI)
   llm-proxy                Install llm-proxy (Helm chart; Secret-backed config)
+  github-runners           Install GitHub Actions self-hosted runners (actions-runner-controller)
   openclaw                 Install OpenClaw with kernel-level network monitoring
   zeroclaw                 Install ZeroClaw AI agent (TOML config, Anthropic provider)
 

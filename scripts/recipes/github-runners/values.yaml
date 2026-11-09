@@ -1,0 +1,30 @@
+# Base values for the gha-runner-scale-set chart (see install.sh).
+# install.sh passes the per-install settings with --set: githubConfigUrl, githubConfigSecret,
+# runnerScaleSetName, minRunners, maxRunners, the runner image and the optional image pull secret.
+
+template:
+  spec:
+    # The published runner image is linux/amd64 only.
+    nodeSelector:
+      kubernetes.io/arch: amd64
+    containers:
+      - name: runner
+        # Placeholder; install.sh overrides it (default: IMAGE_RUNNER_DEFAULT in recipes.conf).
+        image: ghcr.io/mfittko/ci-runner:pw1.64.1-node26.10.0-pnpm10.28.2
+        command: ["/home/runner/run.sh"]
+        resources:
+          requests:
+            cpu: 500m
+            memory: 1Gi
+          limits:
+            memory: 4Gi
+        volumeMounts:
+          - name: dshm
+            mountPath: /dev/shm
+    volumes:
+      # Browsers crash with the 64Mi Kubernetes default /dev/shm; the memory-backed volume
+      # counts against the container memory limit above.
+      - name: dshm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 1Gi

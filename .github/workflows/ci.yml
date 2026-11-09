@@ -18,6 +18,9 @@ jobs:
       - name: Lint/format (make check)
         run: |
           make check
+      - name: Recipe tests (make test-recipes)
+        run: |
+          make test-recipes
 
   go-test:
     runs-on: ubuntu-latest

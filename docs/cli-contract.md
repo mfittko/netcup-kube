@@ -76,6 +76,7 @@ netcup-kube install <recipe> [recipe-options]
 - `postgres` — Install PostgreSQL (Bitnami Helm chart)
 - `redis` — Install Redis (Bitnami Helm chart)
 - `llm-proxy` — Install llm-proxy (Helm chart; Secret-backed config)
+- `github-runners` — Install GitHub Actions self-hosted runners (actions-runner-controller runner scale set; GitHub App auth)
 - `sealed-secrets` — Install Sealed Secrets (encrypt secrets for Git)
 - `redisinsight` — Install RedisInsight (Redis GUI)
 - `kube-prometheus-stack` — Install Grafana + Prometheus + Alertmanager
@@ -95,6 +96,16 @@ netcup-kube install <recipe> [recipe-options]
 - `--secret <name>` — Name of the pre-created Kubernetes Secret with `ANTHROPIC_API_KEY` (required).
 - `--image <repo:tag>` — Override the default ZeroClaw image (must be `repo:tag` format; digest refs like `repo@sha256:...` are not supported by the Helm chart values and will be rejected).
 - `--storage <size>` — PVC size for `~/.zeroclaw/` state (default: `5Gi`).
+
+`github-runners` recipe options:
+- `--github-url <url>` — GitHub org or repo URL the runners register with (required to install).
+- `--name <name>` — Scale set (Helm release) name and `runs-on` label (default: `netcup-kube`).
+- `--secret <name>` — Existing GitHub App Secret in the `arc-runners` namespace (default: `<name>-github-app`; keys `github_app_id`, `github_app_installation_id`, `github_app_private_key`).
+- `--app-id <id>`, `--installation-id <id>`, `--private-key-file <path>` — Create/update that Secret from a GitHub App; the key is read from the file and never passed on a command line (env: `GITHUB_APP_ID`, `GITHUB_APP_INSTALLATION_ID`, `GITHUB_APP_PRIVATE_KEY_FILE`).
+- `--image <repo:tag>` — Runner image (default: `IMAGE_RUNNER_DEFAULT` in `recipes.conf`, the `ci-runner` image published by `mfittko/actions`).
+- `--image-pull-secret <name>` — imagePullSecret for the runner pods (needed when the image's GHCR package is private).
+- `--min-runners <n>` / `--max-runners <n>` — Scale bounds (default: `0` / `4`).
+- `--uninstall` — Uninstall the scale set (keeps the shared controller); `--uninstall-controller` — Uninstall the controller, refused while any scale set remains. Both need `CONFIRM=true` on a non-TTY.
 
 **Common Options:**
 - `--help`, `-h` — Show recipe-specific help

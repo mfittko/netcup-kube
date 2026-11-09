@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 
-SCRIPTS := $(shell find scripts -type f -name "*.sh")
+SCRIPTS := $(shell find scripts tests/recipes -type f -name "*.sh")
 
 # Go build variables
 GO_CMD := go
@@ -16,13 +16,13 @@ CLAW_BINARY_NAME := netcup-claw
 CLAW_BINARY_PATH := bin/$(CLAW_BINARY_NAME)
 CLAW_GO_MAIN := ./cmd/$(CLAW_BINARY_NAME)
 
-.PHONY: fmt fmt-check lint check test build build-go clean test-go go-deps
+.PHONY: fmt fmt-check lint check test test-recipes build build-go clean test-go go-deps
 
 fmt:
-	shfmt -w -i 2 -ci -sr scripts
+	shfmt -w -i 2 -ci -sr scripts tests/recipes
 
 fmt-check:
-	shfmt -d -i 2 -ci -sr scripts
+	shfmt -d -i 2 -ci -sr scripts tests/recipes
 
 lint:
 	shellcheck -x $(SCRIPTS)
@@ -50,6 +50,9 @@ test-go:
 go-deps:
 	$(GO_MOD) download
 	$(GO_MOD) tidy
+
+test-recipes:
+	bash tests/recipes/github-runners.test.sh
 
 test: build-linux
 	./tests/integration/run.sh
