@@ -21,7 +21,7 @@ Options:
   --repo <owner/name>       GitHub repository the runners serve (required).
   --name <name>             Scale set name, which is also the runs-on label (default: the repo name).
   --image <repo:tag>        Runner image (default: IMAGE_GHA_RUNNER from recipes.conf).
-  --min-runners <n>         Idle runners kept ready (default: 0).
+  --min-runners <n>         Idle runners kept ready (default: 1).
   --max-runners <n>         Concurrent runners (default: 2).
   --cpu-request <q>         CPU request per runner (default: 1).
   --cpu-limit <q>           CPU limit per runner (default: 2).
@@ -56,7 +56,7 @@ EOF
 REPO=""
 NAME=""
 IMAGE="${IMAGE_GHA_RUNNER}"
-MIN_RUNNERS="0"
+MIN_RUNNERS="1"
 MAX_RUNNERS="2"
 CPU_REQUEST="1"
 CPU_LIMIT="2"
