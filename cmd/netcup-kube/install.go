@@ -285,6 +285,24 @@ func fetchKubeconfig(envFile, localKubeconfig, configDir string) error {
 	return nil
 }
 
+// resolveTunnelTarget picks the tunnel user, host and local port from env.
+// Same precedence as `netcup-kube ssh tunnel`: TUNNEL_* overrides MGMT_*.
+func resolveTunnelTarget(env map[string]string) (user, host, localPort string) {
+	host = firstNonEmpty(env["TUNNEL_HOST"], env["MGMT_HOST"], env["MGMT_IP"])
+	user = firstNonEmpty(env["TUNNEL_USER"], env["MGMT_USER"], "ops")
+	localPort = firstNonEmpty(env["TUNNEL_LOCAL_PORT"], "6443")
+	return user, host, localPort
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
 func ensureTunnelRunning(envFile, projectRoot string) error {
 	// Load env file to get tunnel settings
 	env, err := config.LoadEnvFileToMap(envFile)
@@ -293,18 +311,7 @@ func ensureTunnelRunning(envFile, projectRoot string) error {
 		env = make(map[string]string)
 	}
 
-	remoteHost := env["MGMT_HOST"]
-	if remoteHost == "" {
-		remoteHost = env["MGMT_IP"]
-	}
-	remoteUser := env["MGMT_USER"]
-	if remoteUser == "" {
-		remoteUser = "ops"
-	}
-	tunnelPort := env["TUNNEL_LOCAL_PORT"]
-	if tunnelPort == "" {
-		tunnelPort = "6443"
-	}
+	remoteUser, remoteHost, tunnelPort := resolveTunnelTarget(env)
 
 	if remoteHost == "" || remoteUser == "" {
 		// Can't check tunnel without host/user info
@@ -324,7 +331,7 @@ func ensureTunnelRunning(envFile, projectRoot string) error {
 	fmt.Println("SSH tunnel not running. Starting tunnel...")
 
 	if err := mgr.Start(); err != nil {
-		troubleshooting := fmt.Sprintf("\n\nTroubleshooting:\n  - Verify MGMT_HOST=%s and MGMT_USER=%s are correct\n  - Check SSH access: ssh %s@%s\n  - Start tunnel manually: netcup-kube ssh tunnel start",
+		troubleshooting := fmt.Sprintf("\n\nTroubleshooting:\n  - Verify TUNNEL_HOST/MGMT_HOST=%s and TUNNEL_USER/MGMT_USER=%s are correct\n  - Check SSH access: ssh %s@%s\n  - Start tunnel manually: netcup-kube ssh tunnel start",
 			remoteHost, remoteUser, remoteUser, remoteHost)
 		return fmt.Errorf("failed to start SSH tunnel: %w%s", err, troubleshooting)
 	}
