@@ -20,6 +20,7 @@ Options:
   --client-service <name>  Set client.service.name on all OTLP trace spans
                            (e.g. /k8s/openclaw/openclaw). Default: unset (no rewrite).
                            Allowed characters: A-Z a-z 0-9 / . _ : -
+                           Must start with a letter, digit or /.
                            The collector config is shared and the last install wins:
                            re-running without this flag removes the OpenClaw span rewrite.
                            Pass --client-service /k8s/<ns>/openclaw (or re-run the openclaw
