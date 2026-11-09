@@ -20,13 +20,15 @@ Usage:
 Options:
   --repo <owner/name>       GitHub repository the runners serve (required).
   --name <name>             Scale set name, which is also the runs-on label (default: the repo name).
+                            Must be a lowercase DNS label (letters, digits, '-') of at most
+                            51 characters. A repo whose name does not fit needs an explicit --name.
   --image <repo:tag>        Runner image (default: IMAGE_GHA_RUNNER from recipes.conf).
   --min-runners <n>         Idle runners kept ready (default: 1).
   --max-runners <n>         Concurrent runners (default: 2).
   --cpu-request <q>         CPU request per runner (default: 1).
   --cpu-limit <q>           CPU limit per runner (default: 2).
-  --memory-request <q>      Memory request per runner (default: 3Gi).
-  --memory-limit <q>        Memory limit per runner (default: 3584Mi).
+  --memory-request <q>      Memory request per runner (default: 3584Mi).
+  --memory-limit <q>        Memory limit per runner (default: 4Gi).
   --token-file <path>       File with a GitHub token for ARC (see Credentials).
   --uninstall               Remove this repo's scale set, its secret and its image pre-pull.
                             The shared controller stays installed.
@@ -37,7 +39,8 @@ Credentials:
   "Administration: Read and write" (repository runners). Pass it with
   --token-file or the GITHUB_PAT environment variable. It is stored only in a
   Kubernetes Secret and never printed. On a later run without a token, the
-  existing Secret is reused.
+  existing Secret is reused when the scale set release exists or the Secret
+  was written for the same --repo.
 
 Environment:
   KUBECONFIG          Kubeconfig to use. If not set, defaults to /etc/rancher/k3s/k3s.yaml (on the node).
@@ -60,8 +63,8 @@ MIN_RUNNERS="1"
 MAX_RUNNERS="2"
 CPU_REQUEST="1"
 CPU_LIMIT="2"
-MEMORY_REQUEST="3Gi"
-MEMORY_LIMIT="3584Mi"
+MEMORY_REQUEST="3584Mi"
+MEMORY_LIMIT="4Gi"
 TOKEN_FILE=""
 TOKEN_FILE_GIVEN="false"
 UNINSTALL="false"
@@ -147,7 +150,10 @@ if ! [[ "${REPO}" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] ||
 fi
 NAME="${NAME:-${REPO_NAME}}"
 [[ "${NAME}" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$ ]] || die "--name must be a DNS label (lowercase letters, digits, '-'): ${NAME}"
-[[ -n "${IMAGE}" ]] || die "--image must not be empty"
+# The pre-pull label value gha-<name>-prepull must fit the 63-character label limit.
+((${#NAME} <= 51)) || die "--name must be at most 51 characters: ${NAME}"
+# The image goes unquoted into two YAML documents, so allow only reference characters.
+[[ "${IMAGE}" =~ ^[A-Za-z0-9][A-Za-z0-9._/:@-]*$ ]] || die "--image must be an image reference (for example registry/repo:tag or repo@sha256:...): '${IMAGE}'"
 COUNT_RE='^(0|[1-9][0-9]*)$'
 [[ "${MIN_RUNNERS}" =~ ${COUNT_RE} && "${MAX_RUNNERS}" =~ ${COUNT_RE} ]] || die "--min-runners and --max-runners must be whole numbers without leading zeros"
 ((MIN_RUNNERS <= MAX_RUNNERS)) || die "--min-runners must not exceed --max-runners"
@@ -199,10 +205,8 @@ if [[ "${UNINSTALL}" == "true" ]]; then
   exit 0
 fi
 
-run recipe_ensure_namespace "${CONTROLLER_NS}"
-run recipe_ensure_namespace "${RUNNER_NS}"
-
-# Credential: from --token-file or GITHUB_PAT; otherwise reuse the existing Secret.
+# Credential: from --token-file or GITHUB_PAT; otherwise reuse the existing
+# Secret. All checks run before the first mutation.
 TOKEN=""
 if [[ "${TOKEN_FILE_GIVEN}" == "true" ]]; then
   [[ -n "${TOKEN_FILE}" ]] || die "--token-file requires a path"
@@ -212,16 +216,30 @@ if [[ "${TOKEN_FILE_GIVEN}" == "true" ]]; then
 elif [[ -n "${GITHUB_PAT:-}" ]]; then
   TOKEN="${GITHUB_PAT//[[:space:]]/}"
 fi
+REPO_ANNOTATION="gha-runners.netcup-kube/repo"
+if [[ -z "${TOKEN}" ]]; then
+  # The Secret keys on NAME only. Reuse it when the guard above bound the
+  # release to REPO, or when the Secret records REPO itself.
+  if ! annotated_repo="$(k get secret "${SECRET}" -n "${RUNNER_NS}" \
+    -o "jsonpath={.metadata.annotations.${REPO_ANNOTATION//./\\.}}" 2> /dev/null)"; then
+    die "No GitHub token: pass --token-file or GITHUB_PAT (Secret ${RUNNER_NS}/${SECRET} does not exist yet)"
+  fi
+  [[ "${RELEASE_EXISTS}" == "true" || "${annotated_repo}" == "${REPO}" ]] ||
+    die "Secret ${RUNNER_NS}/${SECRET} was written for '${annotated_repo}', not ${REPO}. Pass --token-file or GITHUB_PAT, or a distinct --name."
+fi
+
+run recipe_ensure_namespace "${CONTROLLER_NS}"
+run recipe_ensure_namespace "${RUNNER_NS}"
+
 apply_token_secret() {
   # The token goes through stdin, never through a command-line argument.
   printf '%s' "${TOKEN}" | k create secret generic "${SECRET}" -n "${RUNNER_NS}" \
-    --from-file=github_token=/dev/stdin --dry-run=client -o yaml | k apply -f -
+    --from-file=github_token=/dev/stdin --dry-run=client -o yaml |
+    k annotate --local -f - "${REPO_ANNOTATION}=${REPO}" -o yaml | k apply -f -
 }
 if [[ -n "${TOKEN}" ]]; then
   log "Storing the GitHub token in Secret ${RUNNER_NS}/${SECRET}"
   run apply_token_secret
-elif ! k get secret "${SECRET}" -n "${RUNNER_NS}" > /dev/null 2>&1; then
-  die "No GitHub token: pass --token-file or GITHUB_PAT (Secret ${RUNNER_NS}/${SECRET} does not exist yet)"
 fi
 
 log "Installing/Upgrading the ARC controller in namespace ${CONTROLLER_NS}"
