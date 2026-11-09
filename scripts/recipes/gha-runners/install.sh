@@ -21,7 +21,9 @@ Options:
   --repo <owner/name>       GitHub repository the runners serve (required).
   --name <name>             Scale set name, which is also the runs-on label (default: the repo name).
                             Must be a lowercase DNS label (letters, digits, '-') of at most
-                            45 characters. A repo whose name does not fit needs an explicit --name.
+                            45 characters. A name that YAML reads as a number, boolean, null
+                            or date (for example 123, true, no) is refused.
+                            A repo whose name does not fit needs an explicit --name.
   --image <repo:tag>        Runner image (default: IMAGE_GHA_RUNNER from recipes.conf).
   --min-runners <n>         Idle runners kept ready (default: 1).
   --max-runners <n>         Concurrent runners (default: 2).
@@ -153,6 +155,11 @@ NAME="${NAME:-${REPO_NAME}}"
 # The gha-runner-scale-set chart caps runnerScaleSetName at 45 characters; this also
 # keeps the pre-pull label value gha-<name>-prepull within the 63-character label limit.
 ((${#NAME} <= 45)) || die "--name must be at most 45 characters: ${NAME}"
+# The chart renders runnerScaleSetName unquoted, so a name that YAML reads as a
+# number, boolean, null or date would reach the scale set as a non-string.
+YAML_TYPED_RE='^([0-9]+|0x[0-9a-f]+|0o[0-7]+|0b[01]+|[0-9]+e-?[0-9]+|[0-9]{4}-[0-9]{1,2}-[0-9]{1,2}|y|yes|n|no|true|false|on|off|null)$'
+[[ ! "${NAME}" =~ ${YAML_TYPED_RE} ]] ||
+  die "--name '${NAME}' reads as a YAML number, boolean, null or date; pass an explicit --name that YAML reads as a string (for example --name runners-${NAME})"
 # The image goes unquoted into two YAML documents, so allow only reference characters.
 [[ "${IMAGE}" =~ ^[A-Za-z0-9][A-Za-z0-9._/:@-]*$ && "${IMAGE}" != *: ]] || die "--image must be an image reference (for example registry/repo:tag or repo@sha256:...): '${IMAGE}'"
 COUNT_RE='^(0|[1-9][0-9]*)$'

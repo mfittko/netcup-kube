@@ -118,6 +118,15 @@ expect 1 "--name must be at most 45 characters" -- --repo o/app --name "${name45
 expect 1 "--name must be at most 45 characters" -- --repo o/app --name "${name45}aaaaaa"
 expect 1 "--name must be at most 45 characters" -- --repo o/app --name "${name45}aaaaaaa"
 expect 1 "--name must be a DNS label" -- --repo o/MyRepo
+# A name YAML reads as a non-string is refused, from --repo or from --name.
+for n in 123 0 0x1f 0o17 0b101 1e3 1e-3 2024-01-02 y yes n no true false on off null; do
+  expect 1 "--name '${n}' reads as a YAML number" -- --repo "o/${n}"
+  expect 1 "pass an explicit --name" -- --repo o/app --name "${n}"
+done
+for n in app1 1a 123-runners yes-runner nullx 0x 1e 2024-01; do
+  expect 0 "runner scale set ${n} for" -- --repo o/app --name "${n}"
+done
+expect 0 "runner scale set runners-123 for" -- --repo o/123 --name runners-123
 
 # Image reference (the default IMAGE_GHA_RUNNER is the first accepted form).
 for img in ghcr.io/mfittko/ci-runner:pw1.64.1-node26.10.0-pnpm10.28.2 ghcr.io/x/runner@sha256:0123abcd registry.local:5000/a/b:tag; do
