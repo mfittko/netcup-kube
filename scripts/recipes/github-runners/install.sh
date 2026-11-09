@@ -36,9 +36,11 @@ Options:
                               private (new GHCR packages are private until made public).
   --min-runners <n>           Minimum idle runners (default: 0).
   --max-runners <n>           Maximum runners (default: 4).
-  --uninstall                 Uninstall the scale set (Helm release <name>); the shared controller, the
-                              GitHub App Secret and the runners namespace are left in place.
-  --uninstall-controller      Uninstall the shared controller; refuses while any scale set remains.
+  --uninstall                 Uninstall the scale set (Helm release <name>) and wait until its resources are
+                              gone; the shared controller, the GitHub App Secret and the runners namespace
+                              are left in place. A release that does not exist is not an error.
+  --uninstall-controller      Uninstall the shared controller; refuses while any scale set or ARC runner
+                              object remains in the runners namespace (checked after confirmation).
   -h, --help                  Show this help.
 
 Environment:
@@ -52,6 +54,8 @@ Environment:
 Notes:
   - Installs the controller (release 'arc', namespace arc-systems) and one scale set (namespace
     arc-runners) from the OCI charts ghcr.io/actions/actions-runner-controller-charts/*.
+  - There is no --namespace or --host option: the namespaces are fixed by NAMESPACE_ARC_SYSTEMS and
+    NAMESPACE_ARC_RUNNERS in recipes.conf, and the recipe creates no Ingress.
   - Re-running is idempotent. Several scale sets (--name) can share one controller.
   - Create the GitHub App Secret in the runners namespace, or pass --app-id/--installation-id/
     --private-key-file and the recipe creates it. See the recipe README.
@@ -84,6 +88,11 @@ need_value() {
   [[ $# -ge 2 && -n "$2" ]] || die "$1 requires a value"
 }
 
+need_eq_value() {
+  # Usage: need_eq_value <--flag=value>; dies when the value after '=' is empty, like need_value.
+  need_value "${1%%=*}" "${1#*=}"
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --github-url)
@@ -91,13 +100,19 @@ while [[ $# -gt 0 ]]; do
       GITHUB_URL="$2"
       shift
       ;;
-    --github-url=*) GITHUB_URL="${1#*=}" ;;
+    --github-url=*)
+      need_eq_value "$1"
+      GITHUB_URL="${1#*=}"
+      ;;
     --name)
       need_value "$@"
       NAME="$2"
       shift
       ;;
-    --name=*) NAME="${1#*=}" ;;
+    --name=*)
+      need_eq_value "$1"
+      NAME="${1#*=}"
+      ;;
     --secret)
       need_value "$@"
       APP_AUTH_REF="$2"
@@ -105,6 +120,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --secret=*)
+      need_eq_value "$1"
       APP_AUTH_REF="${1#*=}"
       SECRET_EXPLICIT="true"
       ;;
@@ -115,6 +131,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --app-id=*)
+      need_eq_value "$1"
       APP_ID="${1#*=}"
       APP_FLAG_USED="true"
       ;;
@@ -125,6 +142,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --installation-id=*)
+      need_eq_value "$1"
       INSTALLATION_ID="${1#*=}"
       APP_FLAG_USED="true"
       ;;
@@ -135,6 +153,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --private-key-file=*)
+      need_eq_value "$1"
       KEY_FILE="${1#*=}"
       APP_FLAG_USED="true"
       ;;
@@ -143,25 +162,37 @@ while [[ $# -gt 0 ]]; do
       IMAGE="$2"
       shift
       ;;
-    --image=*) IMAGE="${1#*=}" ;;
+    --image=*)
+      need_eq_value "$1"
+      IMAGE="${1#*=}"
+      ;;
     --image-pull-secret)
       need_value "$@"
       PULL_AUTH_REF="$2"
       shift
       ;;
-    --image-pull-secret=*) PULL_AUTH_REF="${1#*=}" ;;
+    --image-pull-secret=*)
+      need_eq_value "$1"
+      PULL_AUTH_REF="${1#*=}"
+      ;;
     --min-runners)
       need_value "$@"
       MIN_RUNNERS="$2"
       shift
       ;;
-    --min-runners=*) MIN_RUNNERS="${1#*=}" ;;
+    --min-runners=*)
+      need_eq_value "$1"
+      MIN_RUNNERS="${1#*=}"
+      ;;
     --max-runners)
       need_value "$@"
       MAX_RUNNERS="$2"
       shift
       ;;
-    --max-runners=*) MAX_RUNNERS="${1#*=}" ;;
+    --max-runners=*)
+      need_eq_value "$1"
+      MAX_RUNNERS="${1#*=}"
+      ;;
     --uninstall) UNINSTALL="true" ;;
     --uninstall-controller) UNINSTALL_CONTROLLER="true" ;;
     -h | --help | help)
@@ -194,35 +225,77 @@ if [[ -z "${KUBECONFIG:-}" && -f /etc/rancher/k3s/k3s.yaml ]]; then
   export KUBECONFIG="/etc/rancher/k3s/k3s.yaml"
 fi
 
+helm_uninstall() {
+  # Usage: helm_uninstall <release> <namespace> [helm args...]. A release that does not exist is a
+  # no-op so re-runs stay idempotent; every other failure (unreachable cluster, RBAC, timeout) is fatal.
+  local release="$1" ns="$2" out
+  shift 2
+  if [[ "${DRY_RUN:-false}" == "true" ]]; then
+    run helm uninstall "${release}" --namespace "${ns}" "$@"
+    return 0
+  fi
+  if out="$(helm uninstall "${release}" --namespace "${ns}" "$@" 2>&1)"; then
+    [[ -z "${out}" ]] || printf '%s\n' "${out}"
+    return 0
+  fi
+  if [[ "${out}" == *"release: not found"* ]]; then
+    log "Helm release ${release} not found in namespace ${ns}; nothing to uninstall."
+    return 0
+  fi
+  die "helm uninstall ${release} (namespace ${ns}) failed: ${out}"
+}
+
+without_dry_run_scale_set() {
+  # In a dry run nothing was removed, so drop the scale set being uninstalled from a listing on stdin.
+  if [[ "${DRY_RUN:-false}" == "true" && "${UNINSTALL}" == "true" ]]; then
+    grep -v -E -- "${1}" || true
+  else
+    cat
+  fi
+}
+
+controller_guard() {
+  # Fail-closed check that nothing still needs the controller. It runs after the confirmation prompt,
+  # immediately before the controller is removed, so a scale set installed meanwhile is still seen.
+  local remaining objects
+  # Every release, including a half-installed one (hence --all), may still need the controller.
+  if ! remaining="$(helm list --namespace "${NS_RUNNERS}" --all --short 2> /dev/null)"; then
+    if [[ "${DRY_RUN:-false}" == "true" ]]; then
+      log "[DRY_RUN] could not list Helm releases in ${NS_RUNNERS}; assuming none remain"
+      remaining=""
+    else
+      die "Cannot list Helm releases in namespace ${NS_RUNNERS}; refusing to uninstall the controller without knowing whether scale sets remain."
+    fi
+  fi
+  remaining="$(printf '%s\n' "${remaining}" | without_dry_run_scale_set "^${NAME}\$" | tr '\n' ' ' | sed 's/ *$//')"
+  [[ -z "${remaining}" ]] ||
+    die "Refusing to uninstall the controller: scale set(s) still installed in ${NS_RUNNERS}: ${remaining}. Uninstall them first (--uninstall --name <name>)."
+  # A removed release can leave runner objects whose finalizers only the controller processes.
+  if ! objects="$(k get autoscalingrunnersets.actions.github.com,ephemeralrunners.actions.github.com --namespace "${NS_RUNNERS}" -o name 2> /dev/null)"; then
+    if [[ "${DRY_RUN:-false}" == "true" ]]; then
+      log "[DRY_RUN] could not list ARC runner objects in ${NS_RUNNERS}; assuming none remain"
+      objects=""
+    else
+      die "Cannot list ARC runner objects (autoscalingrunnersets, ephemeralrunners) in namespace ${NS_RUNNERS}; refusing to uninstall the controller without knowing whether they still need it."
+    fi
+  fi
+  objects="$(printf '%s\n' "${objects}" | without_dry_run_scale_set "/${NAME}(-|\$)" | tr '\n' ' ' | sed 's/ *$//')"
+  [[ -z "${objects}" ]] ||
+    die "Refusing to uninstall the controller: ARC runner objects still exist in ${NS_RUNNERS} and need the controller to finalize them: ${objects}. Wait until they are gone, then retry."
+}
+
 if [[ "${UNINSTALL}" == "true" || "${UNINSTALL_CONTROLLER}" == "true" ]]; then
   if [[ "${UNINSTALL}" == "true" ]]; then
     recipe_confirm_or_die "Uninstall runner scale set '${NAME}' (Helm release in namespace ${NS_RUNNERS})"
     log "Uninstalling scale set ${NAME} from namespace ${NS_RUNNERS}"
-    run helm uninstall "${NAME}" --namespace "${NS_RUNNERS}" ||
-      log "WARNING: helm uninstall ${NAME} failed or the release does not exist; the controller guard below re-checks what remains."
+    # --wait keeps the controller running until it has finalized the scale set's runner objects.
+    helm_uninstall "${NAME}" "${NS_RUNNERS}" --wait --timeout 5m
   fi
   if [[ "${UNINSTALL_CONTROLLER}" == "true" ]]; then
-    # The listing is authoritative and fail-closed: without it there is no way to know whether a
-    # scale set (including a half-installed one, hence --all) still needs the controller.
-    if ! remaining="$(helm list --namespace "${NS_RUNNERS}" --all --short 2> /dev/null)"; then
-      if [[ "${DRY_RUN:-false}" == "true" ]]; then
-        log "[DRY_RUN] could not list Helm releases in ${NS_RUNNERS}; assuming none remain"
-        remaining=""
-      else
-        die "Cannot list Helm releases in namespace ${NS_RUNNERS}; refusing to uninstall the controller without knowing whether scale sets remain."
-      fi
-    fi
-    if [[ "${DRY_RUN:-false}" == "true" && "${UNINSTALL}" == "true" ]]; then
-      # Nothing was actually removed in a dry run, so the scale set is still listed.
-      remaining="$(printf '%s\n' "${remaining}" | grep -v -x -- "${NAME}" || true)"
-    fi
-    remaining="$(printf '%s' "${remaining}" | tr '\n' ' ' | sed 's/ *$//')"
-    [[ -z "${remaining}" ]] ||
-      die "Refusing to uninstall the controller: scale set(s) still installed in ${NS_RUNNERS}: ${remaining}. Uninstall them first (--uninstall --name <name>)."
     recipe_confirm_or_die "Uninstall the actions-runner-controller (Helm release '${CONTROLLER_RELEASE}' in namespace ${NS_SYSTEMS})"
+    controller_guard
     log "Uninstalling controller ${CONTROLLER_RELEASE} from namespace ${NS_SYSTEMS}"
-    run helm uninstall "${CONTROLLER_RELEASE}" --namespace "${NS_SYSTEMS}" ||
-      log "WARNING: helm uninstall ${CONTROLLER_RELEASE} failed or the release does not exist."
+    helm_uninstall "${CONTROLLER_RELEASE}" "${NS_SYSTEMS}"
   fi
   exit 0
 fi
@@ -233,6 +306,8 @@ fi
 url_path="${GITHUB_URL#https://}"
 url_path="/${url_path#*/}"
 url_path="${url_path%/}/"
+# Lowercased so the .git suffix check also catches .GIT and .Git.
+url_path="$(printf '%s' "${url_path}" | tr '[:upper:]' '[:lower:]')"
 case "${url_path}" in
   */./* | */../* | *.git/) die "--github-url must not contain '.' or '..' path segments or a .git suffix (got '${GITHUB_URL}')" ;;
 esac
@@ -269,9 +344,19 @@ if [[ -n "${APP_ID}" || -n "${INSTALLATION_ID}" || -n "${KEY_FILE}" ]]; then
   CREATE_SECRET="true"
 fi
 
+secret_lookup_error() {
+  # Usage: secret_lookup_error <name>; succeeds when the Secret is readable, else prints kubectl's
+  # error message (stderr only; the Secret's data on stdout is discarded and never printed).
+  local err
+  err="$(k get secret "$1" --namespace "${NS_RUNNERS}" 2>&1 > /dev/null)" && return 0
+  printf '%s' "${err:-kubectl get secret failed}" | tr '\n' ' ' | sed 's/ *$//'
+  return 1
+}
+
 if [[ "${CREATE_SECRET}" == "false" && "${DRY_RUN:-false}" != "true" ]]; then
-  k get secret "${APP_AUTH_REF}" --namespace "${NS_RUNNERS}" > /dev/null 2>&1 ||
-    die "GitHub App secret '${APP_AUTH_REF}' not found in namespace ${NS_RUNNERS}. Create it (keys github_app_id, github_app_installation_id, github_app_private_key) or pass --app-id, --installation-id and --private-key-file. See scripts/recipes/github-runners/README.md."
+  if ! app_secret_err="$(secret_lookup_error "${APP_AUTH_REF}")"; then
+    die "GitHub App secret '${APP_AUTH_REF}' not found or not readable in namespace ${NS_RUNNERS} (kubectl: ${app_secret_err}). If the cluster is reachable, create it (keys github_app_id, github_app_installation_id, github_app_private_key) or pass --app-id, --installation-id and --private-key-file. See scripts/recipes/github-runners/README.md."
+  fi
 fi
 
 if [[ "${CREATE_SECRET}" == "true" ]]; then
@@ -289,8 +374,9 @@ if [[ "${CREATE_SECRET}" == "true" ]]; then
 fi
 
 if [[ -n "${PULL_AUTH_REF}" && "${DRY_RUN:-false}" != "true" ]]; then
-  k get secret "${PULL_AUTH_REF}" --namespace "${NS_RUNNERS}" > /dev/null 2>&1 ||
-    log "WARNING: image pull secret '${PULL_AUTH_REF}' not found in namespace ${NS_RUNNERS}; runner pods will fail to pull ${IMAGE} until it exists."
+  if ! pull_secret_err="$(secret_lookup_error "${PULL_AUTH_REF}")"; then
+    log "WARNING: image pull secret '${PULL_AUTH_REF}' not found or not readable in namespace ${NS_RUNNERS} (kubectl: ${pull_secret_err}); runner pods will fail to pull ${IMAGE} until it exists."
+  fi
 fi
 
 log "Installing actions-runner-controller ${CHART_VERSION_ARC} into namespace ${NS_SYSTEMS}"

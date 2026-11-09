@@ -3,6 +3,12 @@
 # No cluster, network or GitHub access is needed; the stubs only record their arguments.
 set -euo pipefail
 
+# The installer and the stubs read these; only the per-case prefixes below may set them, so the
+# result never depends on the environment the suite runs in.
+unset DRY_RUN CONFIRM GITHUB_APP_ID GITHUB_APP_INSTALLATION_ID GITHUB_APP_PRIVATE_KEY_FILE \
+  HELM_LIST_OUTPUT HELM_LIST_FAIL HELM_UNINSTALL_FAIL HELM_UNINSTALL_NOTFOUND \
+  KUBECTL_MISSING_SECRET KUBECTL_MISSING_SECRET_NAME KUBECTL_ARC_OBJECTS KUBECTL_ARC_FAIL
+
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 INSTALL="${REPO_ROOT}/scripts/recipes/github-runners/install.sh"
 WORK="$(mktemp -d)"
@@ -13,6 +19,8 @@ CALLS="${WORK}/calls.log"
 mkdir -p "${BIN}"
 
 # helm stub: records every call; `helm list` output is controlled by HELM_LIST_OUTPUT.
+# `helm uninstall <release>` fails like an unreachable cluster when <release> is HELM_UNINSTALL_FAIL,
+# and like a missing release when it is HELM_UNINSTALL_NOTFOUND.
 cat > "${BIN}/helm" << 'EOF'
 #!/usr/bin/env bash
 printf 'helm %s\n' "$*" >> "${CALLS_LOG}"
@@ -23,16 +31,39 @@ if [[ "${1:-}" == "list" ]]; then
   fi
   printf '%s' "${HELM_LIST_OUTPUT:-}"
 fi
+if [[ "${1:-}" == "uninstall" ]]; then
+  if [[ -n "${HELM_UNINSTALL_FAIL:-}" && "${2:-}" == "${HELM_UNINSTALL_FAIL}" ]]; then
+    echo "Error: Kubernetes cluster unreachable: connection refused" >&2
+    exit 1
+  fi
+  if [[ -n "${HELM_UNINSTALL_NOTFOUND:-}" && "${2:-}" == "${HELM_UNINSTALL_NOTFOUND}" ]]; then
+    echo "Error: uninstall: Release not loaded: $2: release: not found" >&2
+    exit 1
+  fi
+  echo "release \"$2\" uninstalled"
+fi
 exit 0
 EOF
 
-# kubectl stub: `get secret` succeeds unless KUBECTL_MISSING_SECRET=true; everything else records and succeeds.
+# kubectl stub: `get secret` fails for every Secret when KUBECTL_MISSING_SECRET=true, or only for the
+# Secret named KUBECTL_MISSING_SECRET_NAME. `get autoscalingrunnersets...` prints KUBECTL_ARC_OBJECTS,
+# or fails when KUBECTL_ARC_FAIL=true. Everything else records and succeeds.
 cat > "${BIN}/kubectl" << 'EOF'
 #!/usr/bin/env bash
 printf 'kubectl %s\n' "$*" >> "${CALLS_LOG}"
-if [[ "${1:-}" == "get" && "${2:-}" == "secret" && "${KUBECTL_MISSING_SECRET:-false}" == "true" ]]; then
-  echo "Error from server (NotFound): secrets not found" >&2
-  exit 1
+if [[ "${1:-}" == "get" && "${2:-}" == "secret" ]]; then
+  if [[ "${KUBECTL_MISSING_SECRET:-false}" == "true" || ("${3:-}" == "${KUBECTL_MISSING_SECRET_NAME:-}" && -n "${3:-}") ]]; then
+    echo "Error from server (NotFound): secrets \"${3:-}\" not found" >&2
+    exit 1
+  fi
+fi
+if [[ "${1:-}" == "get" && "${2:-}" == autoscalingrunnersets* ]]; then
+  if [[ "${KUBECTL_ARC_FAIL:-false}" == "true" ]]; then
+    echo "error: the server doesn't have a resource type \"autoscalingrunnersets\"" >&2
+    exit 1
+  fi
+  printf '%s' "${KUBECTL_ARC_OBJECTS:-}"
+  exit 0
 fi
 if [[ "${1:-}" == "create" ]]; then
   # emulate `--dry-run=client -o yaml` producing a manifest on stdout
@@ -129,7 +160,16 @@ check "unknown flag fails" status_nonzero
 KUBECTL_MISSING_SECRET=true run_install --github-url "${URL}" --secret my-app-secret
 check "missing secret fails" status_nonzero
 check "missing secret message names the secret" out_has "my-app-secret"
+check "missing secret message does not claim the cause" out_has "not found or not readable"
+check "missing secret message carries kubectl's error" out_has "Error from server (NotFound)"
 check "missing secret installs nothing" calls_lack "helm upgrade"
+
+# --- a missing image pull secret only warns -----------------------------------
+KUBECTL_MISSING_SECRET_NAME=ghcr-pull run_install --github-url "${URL}" --secret my-app-secret --image-pull-secret ghcr-pull
+check "missing pull secret still installs" status_is 0
+check "missing pull secret is reported as a WARNING" out_has "WARNING: image pull secret 'ghcr-pull'"
+check "missing pull secret warning carries kubectl's error" out_has "secrets \"ghcr-pull\" not found"
+check "missing pull secret does not stop helm upgrade" calls_have "helm upgrade --install netcup-kube "
 
 # --- happy path with a pre-created secret -----------------------------------
 run_install --github-url "${URL}" --secret my-app-secret
@@ -166,6 +206,23 @@ check "--max-runners=3 applied" calls_have "maxRunners=3"
 check "--image= override applied" calls_have "example.invalid/runner:1"
 check "--image-pull-secret applied" calls_have "imagePullSecrets[0].name=ghcr-pull"
 check "runs-on hint uses the custom name" out_has "runs-on: ci"
+
+# --- both flag forms take a value; an empty --flag= value is rejected like a missing one
+run_install --github-url "${URL}" --secret=my-app
+check "--secret=my-app is accepted" status_is 0
+check "--secret=my-app names the secret" calls_have "githubConfigSecret=my-app"
+run_install --github-url "${URL}" --secret my-app
+check "--secret my-app is accepted" status_is 0
+check "--secret my-app names the secret" calls_have "githubConfigSecret=my-app"
+run_install --github-url "${URL}" --secret my-app-secret --image-pull-secret=ghcr-pull
+check "--image-pull-secret=ghcr-pull is accepted" status_is 0
+check "--image-pull-secret=ghcr-pull is applied" calls_have "imagePullSecrets[0].name=ghcr-pull"
+for empty_flag in --secret= --image-pull-secret= --name= --github-url=; do
+  run_install --github-url "${URL}" --secret my-app-secret "${empty_flag}"
+  check "${empty_flag} (empty) is rejected" status_nonzero
+  check "${empty_flag} (empty) gives the missing-value message" out_has "${empty_flag%=} requires a value"
+  check "${empty_flag} (empty) installs nothing" calls_lack "helm upgrade"
+done
 
 # --- GitHub App secret creation: key is read from a file and never printed --
 # The installer only copies this file into a Secret; any marker text works as the fixture content.
@@ -220,6 +277,39 @@ HELM_LIST_OUTPUT='' CONFIRM=true run_install --uninstall-controller
 check "controller uninstall succeeds when no scale sets remain" status_is 0
 check "controller release is removed" calls_have "helm uninstall arc --namespace arc-systems"
 
+# --- uninstall tolerates only a missing release ---------------------------------
+CONFIRM=true run_install --uninstall
+check "scale-set uninstall waits for its resources to be removed" calls_have "helm uninstall netcup-kube --namespace arc-runners --wait --timeout 5m"
+HELM_UNINSTALL_NOTFOUND=netcup-kube CONFIRM=true run_install --uninstall
+check "uninstalling a scale set that does not exist succeeds" status_is 0
+check "a missing scale set is reported as not found" out_has "not found"
+HELM_UNINSTALL_FAIL=netcup-kube CONFIRM=true run_install --uninstall
+check "a failed scale-set uninstall exits non-zero" status_nonzero
+check "a failed scale-set uninstall shows helm's error" out_has "cluster unreachable"
+HELM_UNINSTALL_FAIL=netcup-kube HELM_LIST_OUTPUT='' CONFIRM=true run_install --uninstall --uninstall-controller
+check "a failed scale-set uninstall stops before the controller" calls_lack "helm uninstall arc "
+HELM_UNINSTALL_NOTFOUND=arc HELM_LIST_OUTPUT='' CONFIRM=true run_install --uninstall-controller
+check "uninstalling a controller that does not exist succeeds" status_is 0
+HELM_UNINSTALL_FAIL=arc HELM_LIST_OUTPUT='' CONFIRM=true run_install --uninstall-controller
+check "a failed controller uninstall exits non-zero" status_nonzero
+check "a failed controller uninstall shows helm's error" out_has "cluster unreachable"
+
+# --- the controller guard runs after the confirmation and checks ARC objects ------
+HELM_LIST_OUTPUT=$'other-scale-set\n' run_install --uninstall-controller
+check "unconfirmed controller uninstall refuses" status_nonzero
+check "the guard listing runs only after the confirmation" calls_lack "helm list"
+HELM_LIST_OUTPUT=$'other-scale-set\n' CONFIRM=true run_install --uninstall-controller
+check "a release listed after the confirmation blocks the controller uninstall" calls_lack "helm uninstall arc "
+KUBECTL_ARC_OBJECTS=$'ephemeralrunner.actions.github.com/netcup-kube-runner-one\n' HELM_LIST_OUTPUT='' CONFIRM=true run_install --uninstall-controller
+check "remaining ARC runner objects block the controller uninstall" status_nonzero
+check "the refusal names the remaining object" out_has "netcup-kube-runner-one"
+check "remaining ARC runner objects keep the controller" calls_lack "helm uninstall arc "
+KUBECTL_ARC_FAIL=true HELM_LIST_OUTPUT='' CONFIRM=true run_install --uninstall-controller
+check "a failed ARC object listing blocks the controller uninstall" status_nonzero
+check "a failed ARC object listing keeps the controller" calls_lack "helm uninstall arc "
+HELM_LIST_OUTPUT='' CONFIRM=true run_install --uninstall-controller
+check "the guard lists autoscalingrunnersets and ephemeralrunners" calls_have "get autoscalingrunnersets.actions.github.com,ephemeralrunners.actions.github.com --namespace arc-runners"
+
 # --- helm --set metacharacters are rejected before anything runs -------------
 run_install --github-url "${URL}" --secret my-app-secret --image 'x:1,template.spec.containers[0].securityContext.privileged=true'
 check "--image with helm --set metacharacters is rejected" status_nonzero
@@ -249,6 +339,16 @@ run_install --github-url "https://github.com/../example-repo"
 check "URL with a .. segment is rejected" status_nonzero
 run_install --github-url "https://github.com/./example-repo"
 check "URL with a . segment is rejected" status_nonzero
+for good_url in "https://github.com/org" "https://github.com/org/repo" "https://github.com/org/repo/"; do
+  run_install --github-url "${good_url}" --secret my-app-secret
+  check "URL ${good_url} is accepted" status_is 0
+  check "URL ${good_url} reaches the chart" calls_have "githubConfigUrl=${good_url}"
+done
+for git_url in "https://github.com/org/repo.git" "https://github.com/org/repo.GIT" "https://github.com/org/repo.Git/"; do
+  run_install --github-url "${git_url}" --secret my-app-secret
+  check "URL ${git_url} (.git suffix, any case) is rejected" status_nonzero
+  check "URL ${git_url} installs nothing" calls_lack "helm upgrade"
+done
 
 # --- integer handling ----------------------------------------------------------
 run_install --github-url "${URL}" --secret my-app-secret --min-runners 08 --max-runners 09
@@ -298,6 +398,10 @@ check "combined uninstall refuses while another scale set remains" status_nonzer
 DRY_RUN=true HELM_LIST_OUTPUT=$'netcup-kube\n' CONFIRM=true run_install --uninstall --uninstall-controller
 check "DRY_RUN combined uninstall ignores the not-yet-removed scale set" status_is 0
 check "DRY_RUN uninstall runs no helm uninstall" calls_lack "helm uninstall"
+DRY_RUN=true KUBECTL_ARC_OBJECTS=$'autoscalingrunnerset.actions.github.com/netcup-kube\nephemeralrunner.actions.github.com/netcup-kube-runner-one\n' CONFIRM=true run_install --uninstall --uninstall-controller
+check "DRY_RUN combined uninstall ignores the not-yet-removed scale set's runner objects" status_is 0
+DRY_RUN=true KUBECTL_ARC_OBJECTS=$'autoscalingrunnerset.actions.github.com/other\n' CONFIRM=true run_install --uninstall --uninstall-controller
+check "DRY_RUN combined uninstall still refuses for another scale set's runner objects" status_nonzero
 
 # --- defaults stay in sync ------------------------------------------------------
 check "recipes.conf carries the default image" grep -q -F "IMAGE_RUNNER_DEFAULT=${DEFAULT_IMAGE}" "${REPO_ROOT}/scripts/recipes/recipes.conf"

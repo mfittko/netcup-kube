@@ -90,9 +90,16 @@ See `netcup-kube install github-runners --help`. Summary:
 `--github-url` takes an org or repo URL such as `https://github.com/<org>/<repo>` (no `.git` suffix).
 Values that reach Helm (`--image`, `--secret`, `--image-pull-secret`) are validated first.
 
-`--uninstall` leaves the GitHub App Secret and the `arc-runners` namespace in place; remove them with
-`kubectl` if you want them gone. `--uninstall-controller` lists every release in `arc-runners`
-(including half-installed ones) and refuses when the listing fails or any scale set remains.
+The recipe takes no `--namespace` or `--host` option (unlike most recipes): it always installs into
+`arc-systems` and `arc-runners`, set by `NAMESPACE_ARC_SYSTEMS` and `NAMESPACE_ARC_RUNNERS` in
+`recipes.conf`.
+
+`--uninstall` waits until the scale set's resources are gone and leaves the GitHub App Secret and the
+`arc-runners` namespace in place; remove them with `kubectl` if you want them gone. A release that
+does not exist is not an error, but any other `helm uninstall` failure (for example an unreachable
+cluster) exits non-zero. `--uninstall-controller`, after the confirmation, lists every release in
+`arc-runners` (including half-installed ones) and every ARC runner object (`autoscalingrunnersets`,
+`ephemeralrunners`), and refuses when a listing fails or anything remains.
 
 `DRY_RUN=true` prints the helm commands instead of running them. `--uninstall` and
 `--uninstall-controller` need `CONFIRM=true` on a non-TTY.
