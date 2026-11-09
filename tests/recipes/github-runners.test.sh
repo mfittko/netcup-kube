@@ -302,6 +302,7 @@ check "DRY_RUN uninstall runs no helm uninstall" calls_lack "helm uninstall"
 # --- defaults stay in sync ------------------------------------------------------
 check "recipes.conf carries the default image" grep -q -F "IMAGE_RUNNER_DEFAULT=${DEFAULT_IMAGE}" "${REPO_ROOT}/scripts/recipes/recipes.conf"
 check "values.yaml placeholder image matches the default" grep -q -F "image: ${DEFAULT_IMAGE}" "${REPO_ROOT}/scripts/recipes/github-runners/values.yaml"
+check "README names the current default image" grep -q -F "${DEFAULT_IMAGE}" "${REPO_ROOT}/scripts/recipes/github-runners/README.md"
 
 echo
 echo "passed: ${PASS}  failed: ${FAIL}"

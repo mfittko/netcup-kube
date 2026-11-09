@@ -52,8 +52,10 @@ official `ghcr.io/actions/actions-runner` image (so `/home/runner/run.sh` and us
 and preinstalls Node, pnpm and Playwright WebKit. It is `linux/amd64` only, so the runner pods are
 pinned to amd64 nodes, and it has no Chrome, Chromium or Firefox: jobs that need them install them.
 
-The tag names the tool versions and there is no `latest`. To move to a new image, change
-`IMAGE_RUNNER_DEFAULT` (or pass `--image`) and re-run the recipe.
+The current default is `ghcr.io/mfittko/ci-runner:pw1.64.1-node26.10.0-pnpm10.28.2`. The tag names the
+tool versions and there is no `latest`. To move to a new image, change `IMAGE_RUNNER_DEFAULT` in
+`recipes.conf` (the test suite keeps this README and `values.yaml` in sync with it) or pass `--image`,
+then re-run the recipe.
 
 ### Pull secret
 
