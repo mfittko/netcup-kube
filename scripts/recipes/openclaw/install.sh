@@ -449,7 +449,7 @@ log "Secret '${SECRET_NAME}' verified"
 
 # Install mandatory kernel-level network monitoring (Metoro) via the metoro recipe
 log "=== Installing mandatory kernel-level network monitoring (Metoro) ==="
-METORO_BEARER_TOKEN="${METORO_TOKEN}" "${SCRIPTS_DIR}/recipes/metoro/install.sh" \
+METORO_BEARER_TOKEN="${METORO_TOKEN}" bash "${SCRIPTS_DIR}/recipes/metoro/install.sh" \
   --namespace "${METORO_NAMESPACE}" \
   --client-service "/k8s/${NAMESPACE}/openclaw" ||
   die "Metoro is required for OpenClaw kernel-level observability. Cannot proceed without network monitoring."

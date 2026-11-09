@@ -24,6 +24,7 @@ Collector routing defaults:
     - `network.protocol.name=<span.url.scheme>`
     - `http.scheme=<span.url.scheme>`
     - `rpc.service=<server.service.name>` (fallback)
+- The collector config is shared, and the last install wins. Running `netcup-kube install metoro` without `--client-service` removes this span rewrite. To keep it, pass `--client-service /k8s/<ns>/openclaw` or re-run the openclaw recipe.
 
 ## Requirements
 

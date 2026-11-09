@@ -19,6 +19,11 @@ Options:
   --namespace <name>       Namespace to install into (default: metoro).
   --client-service <name>  Set client.service.name on all OTLP trace spans
                            (e.g. /k8s/openclaw/openclaw). Default: unset (no rewrite).
+                           Allowed characters: A-Z a-z 0-9 / . _ : -
+                           The collector config is shared and the last install wins:
+                           re-running without this flag removes the OpenClaw span rewrite.
+                           Pass --client-service /k8s/<ns>/openclaw (or re-run the openclaw
+                           recipe) to keep it.
   --uninstall              Uninstall the Metoro exporter and OTLP collector.
   -h, --help               Show this help.
 
@@ -71,6 +76,10 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -n "${NAMESPACE}" ]] || die "Namespace is required"
+# --client-service is interpolated into OTTL and YAML; allow a conservative charset only.
+if [[ -n "${CLIENT_SERVICE}" && ! "${CLIENT_SERVICE}" =~ ^[A-Za-z0-9/._:-]+$ ]]; then
+  die "Invalid --client-service '${CLIENT_SERVICE}': allowed characters are A-Z a-z 0-9 / . _ : -"
+fi
 
 if [[ "${UNINSTALL}" == "true" ]]; then
   recipe_confirm_or_die "Uninstall Metoro exporter and OTLP collector from namespace ${NAMESPACE}"
@@ -86,15 +95,19 @@ if [[ "${UNINSTALL}" == "true" ]]; then
 fi
 
 [[ -n "${METORO_TOKEN}" ]] || die "Metoro token is required. Set METORO_BEARER_TOKEN."
+[[ "${METORO_TOKEN}" != *$'\n'* ]] || die "METORO_BEARER_TOKEN must not contain newlines."
+METORO_TOKEN_YAML="${METORO_TOKEN//\'/\'\'}"
 
 log "Installing Metoro into namespace: ${NAMESPACE}"
 recipe_ensure_namespace "${NAMESPACE}"
 recipe_helm_repo_add "metoro-exporter" "https://metoro-io.github.io/metoro-helm-charts/"
 
+# The token goes to helm as a values stream on stdin, never as a CLI arg (argv is visible in ps).
+# Single-quoted YAML scalar: embedded single quotes are doubled.
 helm upgrade --install metoro-exporter metoro-exporter/metoro-exporter \
   --namespace "${NAMESPACE}" \
   --version "${CHART_VERSION_METORO_EXPORTER}" \
-  --set-string exporter.secret.bearerToken="${METORO_TOKEN}" \
+  --values - \
   --set exporter.replicas=1 \
   --set exporter.autoscaling.horizontalPodAutoscaler.enabled=false \
   --set exporter.resources.requests.cpu=100m \
@@ -103,7 +116,11 @@ helm upgrade --install metoro-exporter metoro-exporter/metoro-exporter \
   --set exporter.resources.limits.memory=1Gi \
   --set redis.master.resourcesPreset=micro \
   --wait \
-  --timeout 10m || die "Failed to install Metoro. Check: kubectl -n ${NAMESPACE} get pods; kubectl -n ${NAMESPACE} logs deployment/metoro-exporter"
+  --timeout 10m << EOF || die "Failed to install Metoro. Check: kubectl -n ${NAMESPACE} get pods; kubectl -n ${NAMESPACE} logs deployment/metoro-exporter"
+exporter:
+  secret:
+    bearerToken: '${METORO_TOKEN_YAML}'
+EOF
 
 log "Verifying Metoro components are healthy"
 k -n "${NAMESPACE}" wait --for=condition=available --timeout=3m deployment/metoro-exporter > /dev/null 2>&1 ||
@@ -137,14 +154,8 @@ EOF
   )"
 fi
 
-log "Deploying in-cluster OTLP collector"
-cat << EOF | k -n "${NAMESPACE}" apply -f -
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: metoro-otel-collector-config
-data:
-  collector.yaml: |
+COLLECTOR_CONFIG="$(
+  cat << EOF
     receivers:
       otlp:
         protocols:
@@ -170,6 +181,20 @@ ${TRANSFORM_PROCESSOR}
           receivers: [otlp]
           processors: ${TRACE_PROCESSORS}
           exporters: [otlphttp/metoro]
+EOF
+)"
+# Pod-template annotation with the config checksum: a config change rolls the collector pod.
+COLLECTOR_CONFIG_CHECKSUM="$(printf '%s' "${COLLECTOR_CONFIG}" | cksum | cut -d' ' -f1)"
+
+log "Deploying in-cluster OTLP collector"
+cat << EOF | k -n "${NAMESPACE}" apply -f -
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: metoro-otel-collector-config
+data:
+  collector.yaml: |
+${COLLECTOR_CONFIG}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -184,6 +209,8 @@ spec:
     metadata:
       labels:
         app: metoro-otel-collector
+      annotations:
+        checksum/config: "${COLLECTOR_CONFIG_CHECKSUM}"
     spec:
       containers:
       - name: otel-collector
