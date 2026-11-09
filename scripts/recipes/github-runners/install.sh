@@ -26,7 +26,7 @@ Options:
   --secret <name>             Existing Secret in the runners namespace holding the GitHub App credentials
                               (keys: github_app_id, github_app_installation_id, github_app_private_key).
                               Default: <name>-github-app.
-  --app-id <id>               Create/update the Secret from a GitHub App instead of using a pre-created one.
+  --app-id <id>               Create/update the Secret from a GitHub App (App id or client id) instead of using a pre-created one.
   --installation-id <id>      GitHub App installation id (with --app-id).
   --private-key-file <path>   GitHub App private key (PEM) file (with --app-id). The key is read from the
                               file and never passed on a command line or printed.
@@ -36,7 +36,8 @@ Options:
                               private (new GHCR packages are private until made public).
   --min-runners <n>           Minimum idle runners (default: 0).
   --max-runners <n>           Maximum runners (default: 4).
-  --uninstall                 Uninstall the scale set (Helm release <name>); the shared controller is kept.
+  --uninstall                 Uninstall the scale set (Helm release <name>); the shared controller, the
+                              GitHub App Secret and the runners namespace are left in place.
   --uninstall-controller      Uninstall the shared controller; refuses while any scale set remains.
   -h, --help                  Show this help.
 
@@ -70,6 +71,8 @@ MIN_RUNNERS="0"
 MAX_RUNNERS="4"
 UNINSTALL="false"
 UNINSTALL_CONTROLLER="false"
+SECRET_EXPLICIT="false"
+APP_FLAG_USED="false"
 
 CONTROLLER_RELEASE="arc"
 NS_SYSTEMS="${NAMESPACE_ARC_SYSTEMS}"
@@ -98,27 +101,43 @@ while [[ $# -gt 0 ]]; do
     --secret)
       need_value "$@"
       APP_AUTH_REF="$2"
+      SECRET_EXPLICIT="true"
       shift
       ;;
-    --secret=*) APP_AUTH_REF="${1#*=}" ;;
+    --secret=*)
+      APP_AUTH_REF="${1#*=}"
+      SECRET_EXPLICIT="true"
+      ;;
     --app-id)
       need_value "$@"
       APP_ID="$2"
+      APP_FLAG_USED="true"
       shift
       ;;
-    --app-id=*) APP_ID="${1#*=}" ;;
+    --app-id=*)
+      APP_ID="${1#*=}"
+      APP_FLAG_USED="true"
+      ;;
     --installation-id)
       need_value "$@"
       INSTALLATION_ID="$2"
+      APP_FLAG_USED="true"
       shift
       ;;
-    --installation-id=*) INSTALLATION_ID="${1#*=}" ;;
+    --installation-id=*)
+      INSTALLATION_ID="${1#*=}"
+      APP_FLAG_USED="true"
+      ;;
     --private-key-file)
       need_value "$@"
       KEY_FILE="$2"
+      APP_FLAG_USED="true"
       shift
       ;;
-    --private-key-file=*) KEY_FILE="${1#*=}" ;;
+    --private-key-file=*)
+      KEY_FILE="${1#*=}"
+      APP_FLAG_USED="true"
+      ;;
     --image)
       need_value "$@"
       IMAGE="$2"
@@ -159,22 +178,42 @@ while [[ $# -gt 0 ]]; do
 done
 
 NAME_RE='^[a-z0-9]([-a-z0-9]*[a-z0-9])?$'
+REF_RE='^[a-z0-9]([-.a-z0-9]*[a-z0-9])?$'
+IMAGE_RE='^[A-Za-z0-9._/:@-]+$'
+APP_ID_RE='^[A-Za-z0-9._-]+$'
 URL_RE='^https://[A-Za-z0-9.-]+(:[0-9]+)?/[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)?/?$'
-INT_RE='^[0-9]+$'
+INT_RE='^[0-9]{1,4}$'
+ID_RE='^[0-9]{1,20}$'
 
 [[ "${NAME}" =~ ${NAME_RE} && ${#NAME} -le 40 ]] ||
   die "--name must be a lowercase DNS label of at most 40 characters (got '${NAME}')"
 [[ -z "${APP_AUTH_REF}" ]] && APP_AUTH_REF="${NAME}-github-app"
 
+[[ "${DRY_RUN:-false}" == "true" ]] || need_cmd helm
+if [[ -z "${KUBECONFIG:-}" && -f /etc/rancher/k3s/k3s.yaml ]]; then
+  export KUBECONFIG="/etc/rancher/k3s/k3s.yaml"
+fi
+
 if [[ "${UNINSTALL}" == "true" || "${UNINSTALL_CONTROLLER}" == "true" ]]; then
   if [[ "${UNINSTALL}" == "true" ]]; then
     recipe_confirm_or_die "Uninstall runner scale set '${NAME}' (Helm release in namespace ${NS_RUNNERS})"
     log "Uninstalling scale set ${NAME} from namespace ${NS_RUNNERS}"
-    run helm uninstall "${NAME}" --namespace "${NS_RUNNERS}" || true
+    run helm uninstall "${NAME}" --namespace "${NS_RUNNERS}" ||
+      log "WARNING: helm uninstall ${NAME} failed or the release does not exist; the controller guard below re-checks what remains."
   fi
   if [[ "${UNINSTALL_CONTROLLER}" == "true" ]]; then
-    remaining="$(helm list --namespace "${NS_RUNNERS}" --short 2> /dev/null || true)"
-    if [[ "${UNINSTALL}" == "true" ]]; then
+    # The listing is authoritative and fail-closed: without it there is no way to know whether a
+    # scale set (including a half-installed one, hence --all) still needs the controller.
+    if ! remaining="$(helm list --namespace "${NS_RUNNERS}" --all --short 2> /dev/null)"; then
+      if [[ "${DRY_RUN:-false}" == "true" ]]; then
+        log "[DRY_RUN] could not list Helm releases in ${NS_RUNNERS}; assuming none remain"
+        remaining=""
+      else
+        die "Cannot list Helm releases in namespace ${NS_RUNNERS}; refusing to uninstall the controller without knowing whether scale sets remain."
+      fi
+    fi
+    if [[ "${DRY_RUN:-false}" == "true" && "${UNINSTALL}" == "true" ]]; then
+      # Nothing was actually removed in a dry run, so the scale set is still listed.
       remaining="$(printf '%s\n' "${remaining}" | grep -v -x -- "${NAME}" || true)"
     fi
     remaining="$(printf '%s' "${remaining}" | tr '\n' ' ' | sed 's/ *$//')"
@@ -182,7 +221,8 @@ if [[ "${UNINSTALL}" == "true" || "${UNINSTALL_CONTROLLER}" == "true" ]]; then
       die "Refusing to uninstall the controller: scale set(s) still installed in ${NS_RUNNERS}: ${remaining}. Uninstall them first (--uninstall --name <name>)."
     recipe_confirm_or_die "Uninstall the actions-runner-controller (Helm release '${CONTROLLER_RELEASE}' in namespace ${NS_SYSTEMS})"
     log "Uninstalling controller ${CONTROLLER_RELEASE} from namespace ${NS_SYSTEMS}"
-    run helm uninstall "${CONTROLLER_RELEASE}" --namespace "${NS_SYSTEMS}" || true
+    run helm uninstall "${CONTROLLER_RELEASE}" --namespace "${NS_SYSTEMS}" ||
+      log "WARNING: helm uninstall ${CONTROLLER_RELEASE} failed or the release does not exist."
   fi
   exit 0
 fi
@@ -190,9 +230,29 @@ fi
 [[ -n "${GITHUB_URL}" ]] || die "--github-url is required (an org or repo URL, e.g. https://github.com/<org>)"
 [[ "${GITHUB_URL}" =~ ${URL_RE} ]] ||
   die "--github-url must be a GitHub org or repo URL like https://github.com/<org> or https://github.com/<org>/<repo> (got '${GITHUB_URL}')"
-[[ "${MIN_RUNNERS}" =~ ${INT_RE} ]] || die "--min-runners must be a non-negative integer (got '${MIN_RUNNERS}')"
-[[ "${MAX_RUNNERS}" =~ ${INT_RE} ]] || die "--max-runners must be a non-negative integer (got '${MAX_RUNNERS}')"
+url_path="${GITHUB_URL#https://}"
+url_path="/${url_path#*/}/"
+case "${url_path}" in
+  */./* | */../* | *.git/) die "--github-url must not contain '.' or '..' path segments or a .git suffix (got '${GITHUB_URL}')" ;;
+esac
+[[ "${IMAGE}" =~ ${IMAGE_RE} ]] ||
+  die "--image must be a container image reference using only letters, digits and . _ / : @ - (got '${IMAGE}')"
+[[ "${APP_AUTH_REF}" =~ ${REF_RE} && ${#APP_AUTH_REF} -le 253 ]] ||
+  die "--secret must be a Kubernetes object name: lowercase letters, digits, '-' and '.' (got '${APP_AUTH_REF}')"
+[[ -z "${PULL_AUTH_REF}" || ("${PULL_AUTH_REF}" =~ ${REF_RE} && ${#PULL_AUTH_REF} -le 253) ]] ||
+  die "--image-pull-secret must be a Kubernetes object name: lowercase letters, digits, '-' and '.' (got '${PULL_AUTH_REF}')"
+[[ "${MIN_RUNNERS}" =~ ${INT_RE} ]] || die "--min-runners must be an integer from 0 to 9999 (got '${MIN_RUNNERS}')"
+[[ "${MAX_RUNNERS}" =~ ${INT_RE} ]] || die "--max-runners must be an integer from 0 to 9999 (got '${MAX_RUNNERS}')"
+MIN_RUNNERS=$((10#${MIN_RUNNERS}))
+MAX_RUNNERS=$((10#${MAX_RUNNERS}))
 ((MIN_RUNNERS <= MAX_RUNNERS)) || die "--min-runners (${MIN_RUNNERS}) must not exceed --max-runners (${MAX_RUNNERS})"
+
+if [[ "${SECRET_EXPLICIT}" == "true" && "${APP_FLAG_USED}" != "true" ]]; then
+  # Credentials that exist only in the environment never overwrite an explicitly named, pre-created secret.
+  APP_ID=""
+  INSTALLATION_ID=""
+  KEY_FILE=""
+fi
 
 CREATE_SECRET="false"
 if [[ -n "${APP_ID}" || -n "${INSTALLATION_ID}" || -n "${KEY_FILE}" ]]; then
@@ -201,9 +261,10 @@ if [[ -n "${APP_ID}" || -n "${INSTALLATION_ID}" || -n "${KEY_FILE}" ]]; then
   [[ -n "${INSTALLATION_ID}" ]] || missing="${missing} --installation-id"
   [[ -n "${KEY_FILE}" ]] || missing="${missing} --private-key-file"
   [[ -z "${missing}" ]] || die "Creating the GitHub App secret needs all of --app-id, --installation-id and --private-key-file; missing:${missing}"
-  [[ "${APP_ID}" =~ ${INT_RE} ]] || die "--app-id must be numeric"
-  [[ "${INSTALLATION_ID}" =~ ${INT_RE} ]] || die "--installation-id must be numeric"
-  [[ -r "${KEY_FILE}" ]] || die "--private-key-file '${KEY_FILE}' is not a readable file"
+  [[ "${APP_ID}" =~ ${APP_ID_RE} ]] || die "--app-id must be the GitHub App id or client id (letters, digits, . _ -)"
+  [[ "${INSTALLATION_ID}" =~ ${ID_RE} ]] || die "--installation-id must be numeric"
+  [[ -f "${KEY_FILE}" && -r "${KEY_FILE}" && -s "${KEY_FILE}" ]] ||
+    die "--private-key-file '${KEY_FILE}' must be a non-empty readable file"
   CREATE_SECRET="true"
 fi
 
@@ -222,7 +283,7 @@ if [[ "${CREATE_SECRET}" == "true" ]]; then
       --from-literal=github_app_id="${APP_ID}" \
       --from-literal=github_app_installation_id="${INSTALLATION_ID}" \
       --from-file=github_app_private_key="${KEY_FILE}" \
-      --dry-run=client -o yaml | k apply -f -
+      --dry-run=client -o yaml | k apply --server-side -f -
   fi
 fi
 

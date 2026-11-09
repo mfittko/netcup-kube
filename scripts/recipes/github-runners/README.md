@@ -25,8 +25,10 @@ repository permissions *Actions: read*, *Administration: read & write*, *Metadat
 scope) and the organization permission *Self-hosted runners: read & write* (org scope); check the
 current ARC docs for changes. Then either:
 
-- let the recipe create the Secret: pass `--app-id`, `--installation-id` and `--private-key-file`
-  (or `GITHUB_APP_ID`, `GITHUB_APP_INSTALLATION_ID`, `GITHUB_APP_PRIVATE_KEY_FILE`). The key is read
+- let the recipe create the Secret: pass `--app-id` (the App id or client id), `--installation-id`
+  and `--private-key-file` (or `GITHUB_APP_ID`, `GITHUB_APP_INSTALLATION_ID`,
+  `GITHUB_APP_PRIVATE_KEY_FILE`). Credentials found only in the environment never overwrite a Secret
+  you named with `--secret`. The key is read
   from the file; it is never put on a command line or printed.
 - or pre-create the Secret in namespace `arc-runners` and pass `--secret <name>`:
 
@@ -82,6 +84,13 @@ See `netcup-kube install github-runners --help`. Summary:
 | `--min-runners`, `--max-runners` | `0`, `4` | scale bounds |
 | `--uninstall` | | remove the scale set; keeps the controller |
 | `--uninstall-controller` | | remove the controller; refuses while any scale set remains |
+
+`--github-url` takes an org or repo URL such as `https://github.com/<org>/<repo>` (no `.git` suffix).
+Values that reach Helm (`--image`, `--secret`, `--image-pull-secret`) are validated first.
+
+`--uninstall` leaves the GitHub App Secret and the `arc-runners` namespace in place; remove them with
+`kubectl` if you want them gone. `--uninstall-controller` lists every release in `arc-runners`
+(including half-installed ones) and refuses when the listing fails or any scale set remains.
 
 `DRY_RUN=true` prints the helm commands instead of running them. `--uninstall` and
 `--uninstall-controller` need `CONFIRM=true` on a non-TTY.

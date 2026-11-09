@@ -17,6 +17,10 @@ cat > "${BIN}/helm" << 'EOF'
 #!/usr/bin/env bash
 printf 'helm %s\n' "$*" >> "${CALLS_LOG}"
 if [[ "${1:-}" == "list" ]]; then
+  if [[ "${HELM_LIST_FAIL:-false}" == "true" ]]; then
+    echo "Error: Kubernetes cluster unreachable" >&2
+    exit 1
+  fi
   printf '%s' "${HELM_LIST_OUTPUT:-}"
 fi
 exit 0
@@ -41,11 +45,18 @@ chmod +x "${BIN}/helm" "${BIN}/kubectl"
 PASS=0
 FAIL=0
 
+# The installer treats an openable /dev/tty as interactive and would prompt instead of honouring
+# CONFIRM, so every run is detached into its own session (no controlling terminal).
+DETACH=()
+if command -v perl > /dev/null 2>&1; then
+  DETACH=(perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV' --)
+fi
+
 # run_install <args...>: runs the installer with stubs on PATH, no stdin, capturing output + status.
 run_install() {
   : > "${CALLS}"
   set +e
-  OUT="$(PATH="${BIN}:${PATH}" CALLS_LOG="${CALLS}" KUBECONFIG="${WORK}/kubeconfig" "${INSTALL}" "$@" 2>&1 < /dev/null)"
+  OUT="$(PATH="${BIN}:${PATH}" CALLS_LOG="${CALLS}" KUBECONFIG="${WORK}/kubeconfig" ${DETACH[@]+"${DETACH[@]}"} "${INSTALL}" "$@" 2>&1 < /dev/null)"
   STATUS=$?
   set -e
 }
@@ -176,7 +187,7 @@ check "missing private key file fails" status_nonzero
 # --- DRY_RUN performs no cluster mutation ------------------------------------
 : > "${CALLS}"
 set +e
-OUT="$(DRY_RUN=true PATH="${BIN}:${PATH}" CALLS_LOG="${CALLS}" KUBECONFIG="${WORK}/kubeconfig" "${INSTALL}" --github-url "${URL}" --secret my-app-secret 2>&1 < /dev/null)"
+OUT="$(DRY_RUN=true PATH="${BIN}:${PATH}" CALLS_LOG="${CALLS}" KUBECONFIG="${WORK}/kubeconfig" ${DETACH[@]+"${DETACH[@]}"} "${INSTALL}" --github-url "${URL}" --secret my-app-secret 2>&1 < /dev/null)"
 STATUS=$?
 set -e
 check "DRY_RUN succeeds" status_is 0
@@ -184,11 +195,10 @@ check "DRY_RUN runs no helm upgrade" calls_lack "helm upgrade"
 check "DRY_RUN prints the planned helm command" out_has "[DRY_RUN]"
 
 # --- uninstall ----------------------------------------------------------------
-# The installer treats an openable /dev/tty as interactive and would prompt, so this
-# non-interactive refusal can only be asserted when no controlling terminal exists.
-if { exec 9<> /dev/tty; } 2> /dev/null; then
+# Without perl the runs cannot be detached, so with a controlling terminal the installer would prompt.
+if [[ ${#DETACH[@]} -eq 0 ]] && { exec 9<> /dev/tty; } 2> /dev/null; then
   exec 9>&- 9<&-
-  echo "  skip uninstall-without-CONFIRM refusal (controlling terminal present)"
+  echo "  skip uninstall cases (no perl to detach from the controlling terminal)"
 else
   run_install --github-url "${URL}" --uninstall
   check "uninstall without CONFIRM refuses (non-interactive)" status_nonzero
@@ -211,6 +221,80 @@ check "controller is kept" calls_lack "helm uninstall arc "
 HELM_LIST_OUTPUT='' CONFIRM=true run_install --uninstall-controller
 check "controller uninstall succeeds when no scale sets remain" status_is 0
 check "controller release is removed" calls_have "helm uninstall arc --namespace arc-systems"
+
+# --- helm --set metacharacters are rejected before anything runs -------------
+run_install --github-url "${URL}" --secret my-app-secret --image 'x:1,template.spec.containers[0].securityContext.privileged=true'
+check "--image with helm --set metacharacters is rejected" status_nonzero
+check "rejected --image installs nothing" calls_lack "helm upgrade"
+run_install --github-url "${URL}" --secret my-app-secret --image 'has space:1'
+check "--image with whitespace is rejected" status_nonzero
+run_install --github-url "${URL}" --secret 'a,githubConfigUrl=https://github.com/other'
+check "--secret with helm --set metacharacters is rejected" status_nonzero
+check "rejected --secret installs nothing" calls_lack "helm upgrade"
+run_install --github-url "${URL}" --secret my-app-secret --image-pull-secret 'bad,name'
+check "--image-pull-secret with metacharacters is rejected" status_nonzero
+run_install --github-url "${URL}" --secret my-app-secret --image 'registry.example.com:5000/team/runner@sha256:0123456789abcdef'
+check "a registry:port/path@digest image is accepted" status_is 0
+
+# --- URL edge cases ------------------------------------------------------------
+run_install --github-url "https://github.com/example-org/example-repo.git"
+check "URL with a .git suffix is rejected" status_nonzero
+run_install --github-url "https://github.com/../example-repo"
+check "URL with a .. segment is rejected" status_nonzero
+run_install --github-url "https://github.com/./example-repo"
+check "URL with a . segment is rejected" status_nonzero
+
+# --- integer handling ----------------------------------------------------------
+run_install --github-url "${URL}" --secret my-app-secret --min-runners 08 --max-runners 09
+check "leading-zero integers are accepted (no octal error)" status_is 0
+check "leading-zero integers are normalised" calls_have "minRunners=8"
+run_install --github-url "${URL}" --secret my-app-secret --max-runners 99999
+check "an oversized --max-runners is rejected" status_nonzero
+
+# --- private key file must be a non-empty regular file ------------------------
+mkdir -p "${WORK}/keydir"
+run_install --github-url "${URL}" --app-id 1 --installation-id 2 --private-key-file "${WORK}/keydir"
+check "a directory as --private-key-file is rejected" status_nonzero
+check "a rejected key directory creates no secret" calls_lack "create secret"
+: > "${WORK}/empty.pem"
+run_install --github-url "${URL}" --app-id 1 --installation-id 2 --private-key-file "${WORK}/empty.pem"
+check "an empty --private-key-file is rejected" status_nonzero
+run_install --github-url "${URL}" --app-id 1 --installation-id abc --private-key-file "${FIXTURE_PATH}"
+check "a non-numeric --installation-id is rejected" status_nonzero
+run_install --github-url "${URL}" --app-id Iv1.abc123 --installation-id 2 --private-key-file "${FIXTURE_PATH}"
+check "a GitHub App client id is accepted for --app-id" status_is 0
+run_install --github-url "${URL}" --app-id 1 --installation-id 2 --private-key-file "${FIXTURE_PATH}"
+check "secret data is applied server-side (no last-applied copy of the key)" calls_have "apply --server-side"
+
+# --- ambient credentials must not overwrite an explicitly named, pre-created secret
+GITHUB_APP_ID=1 GITHUB_APP_INSTALLATION_ID=2 GITHUB_APP_PRIVATE_KEY_FILE="${FIXTURE_PATH}" run_install --github-url "${URL}" --secret my-app-secret
+check "ambient credentials plus --secret succeeds" status_is 0
+check "ambient credentials do not overwrite the named secret" calls_lack "create secret"
+GITHUB_APP_ID=1 GITHUB_APP_INSTALLATION_ID=2 GITHUB_APP_PRIVATE_KEY_FILE="${FIXTURE_PATH}" run_install --github-url "${URL}"
+check "ambient credentials without --secret create the secret" calls_have "create secret"
+
+# --- the controller guard is fail-closed ---------------------------------------
+HELM_LIST_FAIL=true CONFIRM=true run_install --uninstall-controller
+check "controller uninstall refuses when helm list fails" status_nonzero
+check "a failed helm list keeps the controller" calls_lack "helm uninstall arc "
+HELM_LIST_OUTPUT='' CONFIRM=true run_install --uninstall-controller
+check "the guard lists releases including pending ones (--all)" calls_have "helm list --namespace arc-runners --all --short"
+HELM_LIST_OUTPUT='' CONFIRM=true run_install --uninstall --uninstall-controller
+check "combined uninstall succeeds when nothing remains" status_is 0
+check "combined uninstall removes the scale set" calls_have "helm uninstall netcup-kube --namespace arc-runners"
+check "combined uninstall removes the controller" calls_have "helm uninstall arc --namespace arc-systems"
+HELM_LIST_OUTPUT=$'netcup-kube\n' CONFIRM=true run_install --uninstall --uninstall-controller
+check "combined uninstall trusts the post-uninstall listing, not the name" status_nonzero
+check "a scale set that is still listed keeps the controller" calls_lack "helm uninstall arc "
+HELM_LIST_OUTPUT=$'other-scale-set\n' CONFIRM=true run_install --uninstall --uninstall-controller
+check "combined uninstall refuses while another scale set remains" status_nonzero
+DRY_RUN=true HELM_LIST_OUTPUT=$'netcup-kube\n' CONFIRM=true run_install --uninstall --uninstall-controller
+check "DRY_RUN combined uninstall ignores the not-yet-removed scale set" status_is 0
+check "DRY_RUN uninstall runs no helm uninstall" calls_lack "helm uninstall"
+
+# --- defaults stay in sync ------------------------------------------------------
+check "recipes.conf carries the default image" grep -q -F "IMAGE_RUNNER_DEFAULT=${DEFAULT_IMAGE}" "${REPO_ROOT}/scripts/recipes/recipes.conf"
+check "values.yaml placeholder image matches the default" grep -q -F "image: ${DEFAULT_IMAGE}" "${REPO_ROOT}/scripts/recipes/github-runners/values.yaml"
 
 echo
 echo "passed: ${PASS}  failed: ${FAIL}"
