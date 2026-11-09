@@ -137,6 +137,8 @@ NAME="${NAME:-${REPO#*/}}"
 [[ "${MIN_RUNNERS}" =~ ^[0-9]+$ && "${MAX_RUNNERS}" =~ ^[0-9]+$ ]] || die "--min-runners and --max-runners must be numbers"
 ((MIN_RUNNERS <= MAX_RUNNERS)) || die "--min-runners must not exceed --max-runners"
 
+need_cmd helm
+
 SECRET="gha-${NAME}-github"
 PREPULL="gha-${NAME}-prepull"
 
@@ -144,9 +146,13 @@ if [[ "${UNINSTALL}" == "true" ]]; then
   recipe_confirm_or_die "Uninstall runner scale set '${NAME}' (repo ${REPO}) from namespace ${RUNNER_NS}"
   log "Uninstalling runner scale set ${NAME}"
   # ARC needs the Secret to deregister the scale set from GitHub, so a failed
-  # or timed-out uninstall stops here (set -e) and keeps the Secret.
-  if helm status "${NAME}" --namespace "${RUNNER_NS}" > /dev/null 2>&1; then
+  # or timed-out uninstall stops here (set -e) and keeps the Secret. Only a
+  # release that is provably absent skips the uninstall; any other helm error
+  # (unreachable cluster, wrong kubeconfig) stops before the Secret is deleted.
+  if status_err="$(helm status "${NAME}" --namespace "${RUNNER_NS}" 2>&1 > /dev/null)"; then
     run helm uninstall "${NAME}" --namespace "${RUNNER_NS}" --wait --timeout 5m
+  elif [[ "${status_err}" != *"release: not found"* ]]; then
+    die "helm status ${NAME} failed, keeping Secret ${RUNNER_NS}/${SECRET}: ${status_err}"
   fi
   run recipe_kdelete daemonset "${PREPULL}" -n "${RUNNER_NS}"
   run recipe_kdelete secret "${SECRET}" -n "${RUNNER_NS}"
