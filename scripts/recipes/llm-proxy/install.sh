@@ -26,7 +26,7 @@ Options:
   --secret-name <name>       Kubernetes Secret name to create/use (default: <release>-secrets).
   --create-secret            Create/Update the Kubernetes Secret from provided env/flags (default: false).
   --restart                  Restart llm-proxy workloads after install/upgrade (rollout restart) (default: false).
-  --db-driver <name>         Database driver: sqlite|postgres|mysql (default: auto: platform Postgres if present, else SQLite).
+  --db-driver <name>         Database driver: sqlite|postgres|mysql (default: mysql, a dedicated release).
   --chart-version <ver>      OCI chart version to install (default: latest available).
   --use-oci                  Use OCI Helm chart from ghcr.io (default: true).
   --chart-dir <path>         Local path to the llm-proxy chart directory (disables OCI).
@@ -65,7 +65,7 @@ Environment:
   LLM_PROXY_MANAGEMENT_TOKEN Alternative to --management-token.
   LLM_PROXY_DATABASE_URL     Alternative to --database-url.
   LLM_PROXY_ENCRYPTION_KEY   Encryption key for secrets-at-rest (recommended: openssl rand -base64 32).
-  LLM_PROXY_DB_DRIVER        sqlite|postgres|mysql (default: auto: platform Postgres if present, else SQLite).
+  LLM_PROXY_DB_DRIVER        sqlite|postgres|mysql (default: mysql, a dedicated release).
   LLM_PROXY_POSTGRES_SSLMODE sslmode for auto-detected platform Postgres DATABASE_URL (default: disable).
   LLM_PROXY_MYSQL_STORAGE    PVC size for dedicated MySQL (default: ${DEFAULT_STORAGE_MYSQL}).
   LLM_PROXY_FORCE_MYSQL_UPGRADE true|false (default: false)
@@ -117,7 +117,7 @@ IMAGE_TAG=""
 MANAGEMENT_TOKEN="${LLM_PROXY_MANAGEMENT_TOKEN:-}"
 DATABASE_URL="${LLM_PROXY_DATABASE_URL:-}"
 ENCRYPTION_KEY="${LLM_PROXY_ENCRYPTION_KEY:-}"
-DB_DRIVER="${LLM_PROXY_DB_DRIVER:-}"
+DB_DRIVER="${LLM_PROXY_DB_DRIVER:-mysql}"
 POSTGRES_SSLMODE="${LLM_PROXY_POSTGRES_SSLMODE:-disable}"
 MYSQL_STORAGE="${LLM_PROXY_MYSQL_STORAGE:-${DEFAULT_STORAGE_MYSQL}}"
 
@@ -373,6 +373,9 @@ while [[ $# -gt 0 ]]; do
   shift || true
 done
 
+# The MySQL step builds DATABASE_URL itself; only a user-supplied value needs --create-secret.
+USER_DATABASE_URL="${DATABASE_URL}"
+
 [[ -n "${NAMESPACE}" ]] || die "Namespace is required"
 [[ -n "${RELEASE}" ]] || die "Release name is required"
 
@@ -386,13 +389,13 @@ need_cmd helm
 if [[ "${UNINSTALL}" == "true" ]]; then
   recipe_confirm_or_die "Uninstall llm-proxy (Helm release '${RELEASE}') and its dedicated MySQL and Redis instances from namespace ${NAMESPACE}"
   log "Uninstalling llm-proxy from namespace: ${NAMESPACE}"
-  helm uninstall "${RELEASE}" --namespace "${NAMESPACE}" || true
-  helm uninstall "${RELEASE}-mysql" --namespace "${NAMESPACE}" || true
+  run helm uninstall "${RELEASE}" --namespace "${NAMESPACE}" || true
+  run helm uninstall "${RELEASE}-mysql" --namespace "${NAMESPACE}" || true
   # Backwards compat: older recipe versions installed a single '${RELEASE}-redis'.
-  helm uninstall "${RELEASE}-redis" --namespace "${NAMESPACE}" || true
+  run helm uninstall "${RELEASE}-redis" --namespace "${NAMESPACE}" || true
   # Current recipe installs two dedicated Redis instances: one for events, one for cache.
-  helm uninstall "${RELEASE}-redis-events" --namespace "${NAMESPACE}" || true
-  helm uninstall "${RELEASE}-redis-cache" --namespace "${NAMESPACE}" || true
+  run helm uninstall "${RELEASE}-redis-events" --namespace "${NAMESPACE}" || true
+  run helm uninstall "${RELEASE}-redis-cache" --namespace "${NAMESPACE}" || true
   exit 0
 fi
 
@@ -471,7 +474,7 @@ if [[ -z "${DATABASE_URL}" && "${DB_DRIVER}" == "mysql" ]]; then
   [[ -n "${mysql_root_password}" && -n "${mysql_app_password}" && -n "${mysql_replication_password}" ]] || die "Failed to generate MySQL passwords. Install openssl or python3."
 
   log "Creating/Updating MySQL auth Secret '${mysql_auth_secret}' in namespace '${NAMESPACE}'"
-  cat << EOF | k apply -f -
+  run k apply -f - << EOF
 apiVersion: v1
 kind: Secret
 metadata:
@@ -491,7 +494,7 @@ EOF
   desired_mysql_chart="mysql-${CHART_VERSION_MYSQL}"
   installed_mysql_chart=""
   if helm status "${mysql_release}" --namespace "${NAMESPACE}" > /dev/null 2>&1; then
-    installed_mysql_chart="$(helm status "${mysql_release}" --namespace "${NAMESPACE}" 2> /dev/null | awk -F': ' '/^CHART:/{print $2}' | tr -d '\r' || true)"
+    installed_mysql_chart="$(helm get metadata "${mysql_release}" --namespace "${NAMESPACE}" 2> /dev/null | awk -F': ' '/^CHART:/{c=$2} /^VERSION:/{v=$2} END{if (c && v) print c "-" v}' || true)"
   fi
 
   if [[ -n "${installed_mysql_chart}" && "${FORCE_MYSQL_UPGRADE}" != "true" && "${installed_mysql_chart}" == "${desired_mysql_chart}" ]]; then
@@ -500,7 +503,7 @@ EOF
     if [[ -n "${installed_mysql_chart}" && "${installed_mysql_chart}" != "${desired_mysql_chart}" && "${FORCE_MYSQL_UPGRADE}" != "true" ]]; then
       log "Dedicated MySQL release '${mysql_release}' uses ${installed_mysql_chart}; upgrading to pinned ${desired_mysql_chart}."
     fi
-    helm upgrade --install "${mysql_release}" bitnami/mysql \
+    run helm upgrade --install "${mysql_release}" bitnami/mysql \
       --namespace "${NAMESPACE}" \
       --version "${CHART_VERSION_MYSQL}" \
       --set global.imageRegistry=public.ecr.aws \
@@ -570,7 +573,7 @@ else
     if helm status "${RELEASE}-redis-events" --namespace "${NAMESPACE}" > /dev/null 2>&1 && [[ "${FORCE_REDIS_UPGRADE}" != "true" ]]; then
       log "Dedicated Redis events release '${RELEASE}-redis-events' already exists; skipping upgrade (use --force-redis-upgrade to force)."
     else
-      helm upgrade --install "${RELEASE}-redis-events" bitnami/redis \
+      run helm upgrade --install "${RELEASE}-redis-events" bitnami/redis \
         --namespace "${NAMESPACE}" \
         --version "${CHART_VERSION_REDIS}" \
         --set architecture=standalone \
@@ -595,7 +598,7 @@ else
     if helm status "${RELEASE}-redis-cache" --namespace "${NAMESPACE}" > /dev/null 2>&1 && [[ "${FORCE_REDIS_UPGRADE}" != "true" ]]; then
       log "Dedicated Redis cache release '${RELEASE}-redis-cache' already exists; skipping upgrade (use --force-redis-upgrade to force)."
     else
-      helm upgrade --install "${RELEASE}-redis-cache" bitnami/redis \
+      run helm upgrade --install "${RELEASE}-redis-cache" bitnami/redis \
         --namespace "${NAMESPACE}" \
         --version "${CHART_VERSION_REDIS}" \
         --set architecture=standalone \
@@ -708,7 +711,7 @@ if [[ "${CREATE_SECRET}" == "true" ]]; then
   # SECURITY: Avoid passing secrets via process arguments (e.g., --from-literal) to reduce accidental exposure.
   # Apply a Secret manifest via stdin instead.
   if [[ -n "${DATABASE_URL}" ]]; then
-    cat << EOF | k apply -f -
+    run k apply -f - << EOF
 apiVersion: v1
 kind: Secret
 metadata:
@@ -724,7 +727,7 @@ stringData:
     ${ENCRYPTION_KEY}
 EOF
   else
-    cat << EOF | k apply -f -
+    run k apply -f - << EOF
 apiVersion: v1
 kind: Secret
 metadata:
@@ -743,7 +746,7 @@ EOF
   # We pass this via Helm so `--wait` covers the resulting rollout.
   POD_RESTART_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 else
-  if [[ -n "${MANAGEMENT_TOKEN}" || -n "${DATABASE_URL}" || -n "${ENCRYPTION_KEY}" ]]; then
+  if [[ -n "${MANAGEMENT_TOKEN}" || -n "${USER_DATABASE_URL}" || -n "${ENCRYPTION_KEY}" ]]; then
     die "Refusing to accept secret values without --create-secret. Either pre-create Secret '${SECRET_NAME}' or re-run with --create-secret."
   fi
   if ! k get secret -n "${NAMESPACE}" "${SECRET_NAME}" > /dev/null 2>&1; then
@@ -885,7 +888,7 @@ if [[ -n "${HOSTNAME_ADMIN}" ]]; then
 fi
 
 log "Installing/Upgrading llm-proxy via Helm"
-helm "${HELM_ARGS[@]}"
+run helm "${HELM_ARGS[@]}"
 
 if [[ "${RESTART_AFTER_INSTALL}" == "true" ]]; then
   log "Restarting llm-proxy workloads (rollout restart)"

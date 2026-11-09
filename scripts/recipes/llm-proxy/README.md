@@ -62,7 +62,7 @@ netcup-kube install llm-proxy --create-secret
 
 ```
 
-Use a dedicated in-cluster MySQL (separate Helm release managed by this recipe):
+Default database: a dedicated in-cluster MySQL (separate Helm release managed by this recipe). `--db-driver sqlite` or `--db-driver postgres` (with `LLM_PROXY_DATABASE_URL` or platform Postgres) select the others.
 
 This installs Bitnami MySQL (pinned to MySQL 8.4.x) as a separate Helm release in the same namespace.
 Note: The Bitnami Helm chart defaults to `docker.io/bitnami/mysql`, but those images may require a Bitnami Secure Images subscription.
@@ -70,7 +70,6 @@ This recipe pulls from `public.ecr.aws/bitnami/mysql` instead and sets `global.s
 
 ```bash
 CONFIRM=true \
-LLM_PROXY_DB_DRIVER=mysql \
 LLM_PROXY_CREATE_SECRET=true \
 netcup-kube install llm-proxy
 ```
@@ -79,17 +78,16 @@ To force upgrading the dedicated MySQL release:
 
 ```bash
 CONFIRM=true \
-LLM_PROXY_DB_DRIVER=mysql \
 LLM_PROXY_FORCE_MYSQL_UPGRADE=true \
 netcup-kube install llm-proxy
 ```
 
-Platform Postgres auto-detection (Bitnami `svc/postgres-postgresql`):
+Platform Postgres auto-detection (Bitnami `svc/postgres-postgresql`, only with `--db-driver postgres`):
 
 - By default, this recipe builds a `DATABASE_URL` using `sslmode=disable`.
 - If your in-cluster Postgres is configured for TLS, override with `LLM_PROXY_POSTGRES_SSLMODE=require`.
 
-If you set `LLM_PROXY_DB_DRIVER=mysql`, platform Postgres auto-detection is disabled.
+Reruns without `--create-secret` keep the existing Secret; the MySQL step rebuilds `DATABASE_URL` from `<release>-mysql-auth` and does not need the flag.
 
 Enable Prometheus metrics with kube-prometheus-stack:
 
@@ -158,7 +156,7 @@ This enables:
 
 This recipe can also use cluster-scoped dependencies installed via other recipes in the `platform` namespace (opt-in where applicable):
 
-- **PostgreSQL**: If `svc/postgres-postgresql` + `secret/postgres-postgresql` exist, the recipe builds a `DATABASE_URL` and stores it in the llm-proxy Secret.
+- **PostgreSQL** (only with `--db-driver postgres`): If `svc/postgres-postgresql` + `secret/postgres-postgresql` exist, the recipe builds a `DATABASE_URL` and stores it in the llm-proxy Secret.
 
 - **Redis** (only when `LLM_PROXY_USE_PLATFORM_REDIS=true`): If `svc/redis-master` exists and Redis does **not** require AUTH, the recipe configures:
 

@@ -3,7 +3,7 @@
 # This file is intentionally free of secrets.
 # Secrets are always provided via existing Kubernetes Secrets created by the recipe.
 
-replicaCount: 8
+replicaCount: 2
 
 image:
   # mfittko/g-way continues the archived sofatutor/llm-proxy (same code at 0.1.4).
@@ -37,6 +37,7 @@ env:
   # Helps avoid connection pool contention under concurrency.
   REDIS_CACHE_POOL_SIZE: "200"
   REDIS_CACHE_TIMEOUT: "1s"
+  DATABASE_POOL_SIZE: "100"
 
 # Enable Prometheus scraping by default.
 # - If you run kube-prometheus-stack, the recipe can enable ServiceMonitor automatically.

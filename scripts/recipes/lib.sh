@@ -22,7 +22,9 @@ recipe_ensure_namespace() {
   local ns="$1"
   [[ -n "${ns}" ]] || die "Namespace is required"
   log "Ensuring namespace exists"
-  k create namespace "${ns}" --dry-run=client -o yaml | k apply -f -
+  local manifest
+  manifest="$(k create namespace "${ns}" --dry-run=client -o yaml)"
+  run k apply -f - <<< "${manifest}"
 }
 
 recipe_maybe_add_edge_http_domain() {
