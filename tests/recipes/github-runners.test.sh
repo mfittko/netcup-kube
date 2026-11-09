@@ -50,6 +50,10 @@ FAIL=0
 DETACH=()
 if command -v perl > /dev/null 2>&1; then
   DETACH=(perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV' --)
+elif { exec 9<> /dev/tty; } 2> /dev/null; then
+  exec 9>&- 9<&-
+  echo "perl is required to run these tests from a terminal (it detaches the installer from /dev/tty); run them headless or install perl." >&2
+  exit 2
 fi
 
 # run_install <args...>: runs the installer with stubs on PATH, no stdin, capturing output + status.
@@ -195,15 +199,9 @@ check "DRY_RUN runs no helm upgrade" calls_lack "helm upgrade"
 check "DRY_RUN prints the planned helm command" out_has "[DRY_RUN]"
 
 # --- uninstall ----------------------------------------------------------------
-# Without perl the runs cannot be detached, so with a controlling terminal the installer would prompt.
-if [[ ${#DETACH[@]} -eq 0 ]] && { exec 9<> /dev/tty; } 2> /dev/null; then
-  exec 9>&- 9<&-
-  echo "  skip uninstall cases (no perl to detach from the controlling terminal)"
-else
-  run_install --github-url "${URL}" --uninstall
-  check "uninstall without CONFIRM refuses (non-interactive)" status_nonzero
-  check "refused uninstall removes nothing" calls_lack "helm uninstall"
-fi
+run_install --github-url "${URL}" --uninstall
+check "uninstall without CONFIRM refuses (non-interactive)" status_nonzero
+check "refused uninstall removes nothing" calls_lack "helm uninstall"
 
 CONFIRM=true run_install --uninstall
 check "CONFIRM=true uninstall succeeds without --github-url" status_is 0
@@ -233,12 +231,20 @@ check "--secret with helm --set metacharacters is rejected" status_nonzero
 check "rejected --secret installs nothing" calls_lack "helm upgrade"
 run_install --github-url "${URL}" --secret my-app-secret --image-pull-secret 'bad,name'
 check "--image-pull-secret with metacharacters is rejected" status_nonzero
+run_install --github-url "${URL}" --secret 'a..b'
+check "an object name with consecutive dots is rejected" status_nonzero
+run_install --github-url "${URL}" --secret 'a.-b'
+check "an object name with a dot before a dash is rejected" status_nonzero
+run_install --github-url "${URL}" --secret 'my.app-secret'
+check "a dotted object name is accepted" status_is 0
 run_install --github-url "${URL}" --secret my-app-secret --image 'registry.example.com:5000/team/runner@sha256:0123456789abcdef'
 check "a registry:port/path@digest image is accepted" status_is 0
 
 # --- URL edge cases ------------------------------------------------------------
 run_install --github-url "https://github.com/example-org/example-repo.git"
 check "URL with a .git suffix is rejected" status_nonzero
+run_install --github-url "https://github.com/example-org/example-repo.git/"
+check "URL with a .git suffix and a trailing slash is rejected" status_nonzero
 run_install --github-url "https://github.com/../example-repo"
 check "URL with a .. segment is rejected" status_nonzero
 run_install --github-url "https://github.com/./example-repo"
@@ -265,6 +271,7 @@ run_install --github-url "${URL}" --app-id Iv1.abc123 --installation-id 2 --priv
 check "a GitHub App client id is accepted for --app-id" status_is 0
 run_install --github-url "${URL}" --app-id 1 --installation-id 2 --private-key-file "${FIXTURE_PATH}"
 check "secret data is applied server-side (no last-applied copy of the key)" calls_have "apply --server-side"
+check "a rotated key can take over fields owned by another manager" calls_have "--force-conflicts"
 
 # --- ambient credentials must not overwrite an explicitly named, pre-created secret
 GITHUB_APP_ID=1 GITHUB_APP_INSTALLATION_ID=2 GITHUB_APP_PRIVATE_KEY_FILE="${FIXTURE_PATH}" run_install --github-url "${URL}" --secret my-app-secret

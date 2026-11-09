@@ -178,7 +178,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 NAME_RE='^[a-z0-9]([-a-z0-9]*[a-z0-9])?$'
-REF_RE='^[a-z0-9]([-.a-z0-9]*[a-z0-9])?$'
+REF_RE='^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$'
 IMAGE_RE='^[A-Za-z0-9._/:@-]+$'
 APP_ID_RE='^[A-Za-z0-9._-]+$'
 URL_RE='^https://[A-Za-z0-9.-]+(:[0-9]+)?/[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)?/?$'
@@ -231,7 +231,8 @@ fi
 [[ "${GITHUB_URL}" =~ ${URL_RE} ]] ||
   die "--github-url must be a GitHub org or repo URL like https://github.com/<org> or https://github.com/<org>/<repo> (got '${GITHUB_URL}')"
 url_path="${GITHUB_URL#https://}"
-url_path="/${url_path#*/}/"
+url_path="/${url_path#*/}"
+url_path="${url_path%/}/"
 case "${url_path}" in
   */./* | */../* | *.git/) die "--github-url must not contain '.' or '..' path segments or a .git suffix (got '${GITHUB_URL}')" ;;
 esac
@@ -283,7 +284,7 @@ if [[ "${CREATE_SECRET}" == "true" ]]; then
       --from-literal=github_app_id="${APP_ID}" \
       --from-literal=github_app_installation_id="${INSTALLATION_ID}" \
       --from-file=github_app_private_key="${KEY_FILE}" \
-      --dry-run=client -o yaml | k apply --server-side -f -
+      --dry-run=client -o yaml | k apply --server-side --force-conflicts -f -
   fi
 fi
 
