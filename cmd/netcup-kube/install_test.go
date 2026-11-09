@@ -73,6 +73,28 @@ func TestTunnelManager(t *testing.T) {
 	t.Logf("Control socket: %s", socket)
 }
 
+func TestResolveTunnelTarget(t *testing.T) {
+	tests := []struct {
+		name                     string
+		env                      map[string]string
+		wantUser, wantHost, port string
+	}{
+		{"tunnel overrides mgmt", map[string]string{"TUNNEL_HOST": "t.host", "TUNNEL_USER": "tuser", "MGMT_HOST": "m.host", "MGMT_USER": "muser", "MGMT_IP": "10.0.0.1"}, "tuser", "t.host", "6443"},
+		{"fallback to mgmt", map[string]string{"MGMT_HOST": "m.host", "MGMT_USER": "muser", "MGMT_IP": "10.0.0.1"}, "muser", "m.host", "6443"},
+		{"fallback to mgmt ip and ops", map[string]string{"MGMT_IP": "10.0.0.1"}, "ops", "10.0.0.1", "6443"},
+		{"local port honored", map[string]string{"MGMT_HOST": "m.host", "TUNNEL_LOCAL_PORT": "16443"}, "ops", "m.host", "16443"},
+		{"empty env", map[string]string{}, "ops", "", "6443"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			user, host, port := resolveTunnelTarget(tt.env)
+			if user != tt.wantUser || host != tt.wantHost || port != tt.port {
+				t.Errorf("resolveTunnelTarget() = (%q, %q, %q), want (%q, %q, %q)", user, host, port, tt.wantUser, tt.wantHost, tt.port)
+			}
+		})
+	}
+}
+
 func TestEnsureTunnelRunning_NoEnvFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	envFile := filepath.Join(tmpDir, "nonexistent.env")

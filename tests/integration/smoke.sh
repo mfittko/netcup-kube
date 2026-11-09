@@ -34,6 +34,69 @@ echo "  ✓ netcup-kube ssh --help"
 ./bin/netcup-kube install --help > /dev/null
 echo "  ✓ netcup-kube install --help"
 
+# metoro --client-service is interpolated into OTTL/YAML; unsafe values must be refused
+# before any kubectl/helm call (the guard runs right after argument parsing).
+for bad in 'a"b' $'a\nb' 'a b' '--uninstall' '-h' '--namespace'; do
+  # Match the guard's own message: a later kubectl/helm failure must not count as a pass.
+  out="$(METORO_BEARER_TOKEN=dummy bash scripts/recipes/metoro/install.sh --client-service "$bad" 2>&1 || true)"
+  if [[ "$out" != *"Invalid --client-service"* ]]; then
+    echo "Error: metoro recipe accepted unsafe --client-service value" >&2
+    exit 1
+  fi
+done
+# Safe values pass the guard; without a token the run stops at the token check, before any call.
+for good in 'my-svc' 'svc.v1:8080'; do
+  out="$(bash scripts/recipes/metoro/install.sh --client-service "$good" 2>&1 || true)"
+  if [[ "$out" == *"Invalid --client-service"* ]]; then
+    echo "Error: metoro recipe refused safe --client-service value $good" >&2
+    exit 1
+  fi
+done
+# An empty value (flag last, or --client-service=) is refused before the token check and any call.
+for empty in '--client-service' '--client-service='; do
+  out="$(bash scripts/recipes/metoro/install.sh "$empty" 2>&1 || true)"
+  if [[ "$out" != *"--client-service requires a value"* ]]; then
+    echo "Error: metoro recipe accepted empty value for $empty" >&2
+    exit 1
+  fi
+done
+echo "  ✓ metoro --client-service validation"
+
+# metoro render with stub helm/kubectl (no cluster): token on stdin only, default traces [batch].
+stub_dir="$(mktemp -d)"
+cat > "${stub_dir}/helm" << 'STUB'
+#!/usr/bin/env bash
+echo "$*" >> "${STUB_LOG}/helm.argv"
+for a in "$@"; do [[ "$a" == "-" ]] && cat >> "${STUB_LOG}/helm.stdin"; done
+exit 0
+STUB
+cat > "${stub_dir}/kubectl" << 'STUB'
+#!/usr/bin/env bash
+echo "$*" >> "${STUB_LOG}/kubectl.argv"
+[[ "$*" == *"-f -"* ]] && cat >> "${STUB_LOG}/kubectl.stdin"
+exit 0
+STUB
+chmod +x "${stub_dir}/helm" "${stub_dir}/kubectl"
+sentinel="smoke-token-sentinel-$$"
+STUB_LOG="${stub_dir}" PATH="${stub_dir}:${PATH}" METORO_BEARER_TOKEN="${sentinel}" \
+  bash scripts/recipes/metoro/install.sh > /dev/null 2>&1
+if grep -q "${sentinel}" "${stub_dir}/helm.argv"; then
+  echo "Error: metoro token appears in helm argv" >&2
+  exit 1
+fi
+if ! grep -q "${sentinel}" "${stub_dir}/helm.stdin"; then
+  echo "Error: metoro token missing from helm stdin values" >&2
+  exit 1
+fi
+if ! grep -q "processors: \[batch\]$" <(grep -A2 "traces:" "${stub_dir}/kubectl.stdin"); then
+  echo "Error: metoro default trace pipeline is not [batch]" >&2
+  exit 1
+fi
+STUB_LOG="${stub_dir}" PATH="${stub_dir}:${PATH}" METORO_BEARER_TOKEN="${sentinel}" \
+  bash scripts/recipes/metoro/install.sh --client-service /k8s/openclaw/openclaw > /dev/null 2>&1
+rm -rf "${stub_dir:?}"
+echo "  ✓ metoro render (token on stdin, default traces [batch])"
+
 echo "==== Testing command help ===="
 # netcup-kube subcommand help should not require interactivity.
 ./bin/netcup-kube dns --help > /dev/null
