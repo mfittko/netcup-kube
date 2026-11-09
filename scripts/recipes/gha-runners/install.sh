@@ -159,7 +159,7 @@ NAME="${NAME:-${REPO_NAME}}"
 # number, boolean, null or date would reach the scale set as a non-string.
 YAML_TYPED_RE='^([0-9]+|0x[0-9a-f]+|0o[0-7]+|0b[01]+|[0-9]+e-?[0-9]+|[0-9]{4}-[0-9]{1,2}-[0-9]{1,2}|y|yes|n|no|true|false|on|off|null)$'
 [[ ! "${NAME}" =~ ${YAML_TYPED_RE} ]] ||
-  die "--name '${NAME}' reads as a YAML number, boolean, null or date; pass an explicit --name that YAML reads as a string (for example --name runners-${NAME})"
+  die "--name '${NAME}' reads as a YAML number, boolean, null or date; pass an explicit --name that YAML reads as a string (for example --name runners-${NAME:0:37})"
 # The image goes unquoted into two YAML documents, so allow only reference characters.
 [[ "${IMAGE}" =~ ^[A-Za-z0-9][A-Za-z0-9._/:@-]*$ && "${IMAGE}" != *: ]] || die "--image must be an image reference (for example registry/repo:tag or repo@sha256:...): '${IMAGE}'"
 COUNT_RE='^(0|[1-9][0-9]*)$'
@@ -210,7 +210,7 @@ secret_repo() {
   { err="$(k get secret "${SECRET}" -n "${RUNNER_NS}" \
     -o "jsonpath={.metadata.annotations.${REPO_ANNOTATION//./\\.}}" 2>&1 >&3)" || rc=$?; } 3>&1
   ((rc == 0)) && return 0
-  [[ "${err}" == *"NotFound"* ]] && return 1
+  [[ "${err}" == *"(NotFound)"* ]] && return 1
   printf '%s\n' "${err}" >&2
   return 2
 }
@@ -237,6 +237,12 @@ if [[ "${UNINSTALL}" == "true" ]]; then
   if [[ "${RELEASE_EXISTS}" == "true" ]]; then
     run helm uninstall "${NAME}" --namespace "${RUNNER_NS}" --wait --timeout 5m
   fi
+  # Helm may forget a release before ARC finishes removing its scale set.
+  if set_err="$(k get autoscalingrunnerset "${NAME}" -n "${RUNNER_NS}" -o name 2>&1 > /dev/null)"; then
+    die "AutoscalingRunnerSet ${RUNNER_NS}/${NAME} still exists; keep its Secret and retry --uninstall later"
+  elif [[ "${set_err}" != *"(NotFound)"* ]]; then
+    die "Cannot read AutoscalingRunnerSet ${RUNNER_NS}/${NAME}, nothing changed: ${set_err}"
+  fi
   run recipe_kdelete daemonset "${PREPULL}" -n "${RUNNER_NS}"
   run recipe_kdelete secret "${SECRET}" -n "${RUNNER_NS}"
   exit 0
@@ -261,6 +267,8 @@ if [[ -z "${TOKEN}" ]]; then
   ((repo_rc != 2)) || die "${read_err}"
   ((repo_rc == 0)) ||
     die "No GitHub token: pass --token-file or GITHUB_PAT (Secret ${RUNNER_NS}/${SECRET} does not exist yet)"
+  [[ "${RELEASE_EXISTS}" == "true" || -n "${annotated_repo}" ]] ||
+    die "Secret ${RUNNER_NS}/${SECRET} is missing ${REPO_ANNOTATION} annotation; pass --token-file or GITHUB_PAT"
   [[ "${RELEASE_EXISTS}" == "true" || "${annotated_repo}" == "${REPO}" ]] ||
     die "Secret ${RUNNER_NS}/${SECRET} was written for '${annotated_repo}', not ${REPO}. Pass --token-file or GITHUB_PAT, or a distinct --name."
 fi

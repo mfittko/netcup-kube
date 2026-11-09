@@ -35,10 +35,19 @@ if [[ "$1 ${2:-}" == "get secret" ]]; then
     exit 1
   fi
   if [[ -n "${STUB_SECRET_ERR:-}" ]]; then
-    echo "Unable to connect to the server" >&2
+    echo "${STUB_SECRET_ERR}" >&2
     exit 1
   fi
   printf '%s' "${STUB_ANNOTATED_REPO:-}"
+fi
+if [[ "$1 ${2:-}" == "get autoscalingrunnerset" ]]; then
+  if [[ -n "${STUB_RUNNER_SET_ERR:-}" ]]; then
+    echo "${STUB_RUNNER_SET_ERR}" >&2
+    exit 1
+  fi
+  [[ -n "${STUB_RUNNER_SET_EXISTS:-}" ]] && exit 0
+  echo "Error from server (NotFound): autoscalingrunnersets \"$3\" not found" >&2
+  exit 1
 fi
 exit 0
 EOF
@@ -49,13 +58,13 @@ chmod +x "${TMP}/bin/helm" "${TMP}/bin/kubectl"
 # Most cases pass a token; it must never appear in the output.
 SENTINEL="gha-test-sentinel-$$"
 export PATH="${TMP}/bin:${PATH}" DRY_RUN=true KUBECONFIG="${TMP}/kubeconfig" GITHUB_PAT="${SENTINEL}"
-unset STUB_RELEASE_URL STUB_NO_SECRET STUB_SECRET_ERR STUB_ANNOTATED_REPO
+unset STUB_RELEASE_URL STUB_NO_SECRET STUB_SECRET_ERR STUB_ANNOTATED_REPO STUB_RUNNER_SET_EXISTS STUB_RUNNER_SET_ERR
 
 # is_tty also accepts an openable /dev/tty, so on a terminal the uninstall
 # confirmation would wait for input. Run install.sh in a new session, which has
 # no controlling terminal: setsid on Linux, POSIX::setsid via perl elsewhere.
 if command -v setsid > /dev/null; then
-  NOTTY=(setsid)
+  NOTTY=(setsid -w)
 else
   NOTTY=(perl -MPOSIX -e 'POSIX::setsid() >= 0 or die "setsid: $!\n"; exec @ARGV or die "exec: $!\n"' --)
 fi
@@ -127,6 +136,8 @@ for n in app1 1a 123-runners yes-runner nullx 0x 1e 2024-01; do
   expect 0 "runner scale set ${n} for" -- --repo o/app --name "${n}"
 done
 expect 0 "runner scale set runners-123 for" -- --repo o/123 --name runners-123
+long_digits="$(printf '1%.0s' {1..45})"
+expect 1 "for example --name runners-${long_digits:0:37})" -- --repo "o/${long_digits}"
 
 # Image reference (the default IMAGE_GHA_RUNNER is the first accepted form).
 for img in ghcr.io/mfittko/ci-runner:pw1.64.1-node26.10.0-pnpm10.28.2 ghcr.io/x/runner@sha256:0123abcd registry.local:5000/a/b:tag; do
@@ -147,10 +158,11 @@ expect 0 "helm upgrade --install app" -- --repo o/app
 
 # Token-less runs reuse the Secret only when it is bound to --repo.
 GITHUB_PAT="" STUB_NO_SECRET=1 expect 1 "No GitHub token" -- --repo o/app
-GITHUB_PAT="" STUB_SECRET_ERR=1 expect 1 "Cannot read Secret arc-runners/gha-app-github" -- --repo o/app
+GITHUB_PAT="" STUB_SECRET_ERR="Unable to connect to the server" expect 1 "Cannot read Secret arc-runners/gha-app-github" -- --repo o/app
+GITHUB_PAT="" STUB_SECRET_ERR="Proxy NotFound response" expect 1 "Cannot read Secret arc-runners/gha-app-github" -- --repo o/app
 GITHUB_PAT="" STUB_ANNOTATED_REPO=o/app expect 0 "helm upgrade --install app" -- --repo o/app
 GITHUB_PAT="" STUB_ANNOTATED_REPO=alice/app expect 1 "was written for 'alice/app', not bob/app" -- --repo bob/app
-GITHUB_PAT="" expect 1 "was written for '', not o/app" -- --repo o/app
+GITHUB_PAT="" expect 1 "missing gha-runners.netcup-kube/repo annotation" -- --repo o/app
 
 # Uninstall without a release deletes the Secret only when it is not bound to another repo.
 STUB_ANNOTATED_REPO=alice/app CONFIRM=true expect 1 "was written for 'alice/app', not bob/app" -- --repo bob/app --uninstall
@@ -158,7 +170,10 @@ STUB_ANNOTATED_REPO=bob/app CONFIRM=true expect 0 "secret gha-app-github" -- --r
 CONFIRM=true expect 0 "secret gha-app-github" -- --repo bob/app --uninstall
 STUB_NO_SECRET=1 CONFIRM=true expect 0 "secret gha-app-github" -- --repo bob/app --uninstall
 # A read error other than NotFound proves no ownership, so nothing is deleted.
-STUB_SECRET_ERR=1 CONFIRM=true expect 1 "Unable to connect to the server" -- --repo bob/app --uninstall
+STUB_SECRET_ERR="Unable to connect to the server" CONFIRM=true expect 1 "Unable to connect to the server" -- --repo bob/app --uninstall
+STUB_RUNNER_SET_EXISTS=1 CONFIRM=true expect 1 "AutoscalingRunnerSet arc-runners/app still exists" -- --repo bob/app --uninstall
+STUB_RUNNER_SET_ERR="Unable to connect to the server" CONFIRM=true expect 1 "Cannot read AutoscalingRunnerSet arc-runners/app" -- --repo bob/app --uninstall
+STUB_RUNNER_SET_ERR="Proxy NotFound response" CONFIRM=true expect 1 "Cannot read AutoscalingRunnerSet arc-runners/app" -- --repo bob/app --uninstall
 
 # Ownership guard: a release named "app" that serves alice/app.
 export STUB_RELEASE_URL=https://github.com/alice/app
