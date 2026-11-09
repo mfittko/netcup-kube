@@ -82,8 +82,8 @@ done
 # An empty value would silently install the [batch]-only pipeline and drop the span rewrite.
 [[ "${CLIENT_SERVICE_SET}" != "true" || -n "${CLIENT_SERVICE}" ]] || die "--client-service requires a value"
 # --client-service is interpolated into OTTL and YAML; allow a conservative charset only.
-if [[ -n "${CLIENT_SERVICE}" && ! "${CLIENT_SERVICE}" =~ ^[A-Za-z0-9/._:-]+$ ]]; then
-  die "Invalid --client-service '${CLIENT_SERVICE}': allowed characters are A-Z a-z 0-9 / . _ : -"
+if [[ -n "${CLIENT_SERVICE}" && ! "${CLIENT_SERVICE}" =~ ^[A-Za-z0-9/][A-Za-z0-9/._:-]*$ ]]; then
+  die "Invalid --client-service '${CLIENT_SERVICE}': must start with a letter, digit or slash; allowed characters are A-Z a-z 0-9 / . _ : -"
 fi
 
 if [[ "${UNINSTALL}" == "true" ]]; then

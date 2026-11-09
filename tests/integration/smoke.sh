@@ -36,7 +36,7 @@ echo "  ✓ netcup-kube install --help"
 
 # metoro --client-service is interpolated into OTTL/YAML; unsafe values must be refused
 # before any kubectl/helm call (the guard runs right after argument parsing).
-for bad in 'a"b' $'a\nb'; do
+for bad in 'a"b' $'a\nb' '--uninstall' '-h'; do
   # Match the guard's own message: a later kubectl/helm failure must not count as a pass.
   out="$(METORO_BEARER_TOKEN=dummy bash scripts/recipes/metoro/install.sh --client-service "$bad" 2>&1 || true)"
   if [[ "$out" != *"Invalid --client-service"* ]]; then
