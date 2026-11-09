@@ -154,7 +154,7 @@ NAME="${NAME:-${REPO_NAME}}"
 # keeps the pre-pull label value gha-<name>-prepull within the 63-character label limit.
 ((${#NAME} <= 45)) || die "--name must be at most 45 characters: ${NAME}"
 # The image goes unquoted into two YAML documents, so allow only reference characters.
-[[ "${IMAGE}" =~ ^[A-Za-z0-9][A-Za-z0-9._/:@-]*$ ]] || die "--image must be an image reference (for example registry/repo:tag or repo@sha256:...): '${IMAGE}'"
+[[ "${IMAGE}" =~ ^[A-Za-z0-9][A-Za-z0-9._/:@-]*$ && "${IMAGE}" != *: ]] || die "--image must be an image reference (for example registry/repo:tag or repo@sha256:...): '${IMAGE}'"
 COUNT_RE='^(0|[1-9][0-9]*)$'
 [[ "${MIN_RUNNERS}" =~ ${COUNT_RE} && "${MAX_RUNNERS}" =~ ${COUNT_RE} ]] || die "--min-runners and --max-runners must be whole numbers without leading zeros"
 ((MIN_RUNNERS <= MAX_RUNNERS)) || die "--min-runners must not exceed --max-runners"
@@ -192,7 +192,22 @@ elif [[ "${status_err}" != *"release: not found"* ]]; then
   die "helm status ${NAME} failed, nothing changed: ${status_err}"
 fi
 
+# The Secret keys on NAME only, so it records its repo in this annotation.
+REPO_ANNOTATION="gha-runners.netcup-kube/repo"
+# Prints the Secret's repo annotation; fails when the Secret cannot be read.
+secret_repo() {
+  k get secret "${SECRET}" -n "${RUNNER_NS}" \
+    -o "jsonpath={.metadata.annotations.${REPO_ANNOTATION//./\\.}}" 2> /dev/null
+}
+
 if [[ "${UNINSTALL}" == "true" ]]; then
+  # Without a release, only the Secret annotation binds NAME to a repo: never
+  # delete a Secret (or its pre-pull) recorded for another repo. A missing
+  # Secret or an empty annotation proceeds, so the uninstall stays idempotent.
+  if [[ "${RELEASE_EXISTS}" != "true" ]] && annotated_repo="$(secret_repo)" &&
+    [[ -n "${annotated_repo}" && "${annotated_repo}" != "${REPO}" ]]; then
+    die "Secret ${RUNNER_NS}/${SECRET} was written for '${annotated_repo}', not ${REPO}. Pass the matching --repo or a distinct --name."
+  fi
   recipe_confirm_or_die "Uninstall runner scale set '${NAME}' (repo ${REPO}) from namespace ${RUNNER_NS}"
   log "Uninstalling runner scale set ${NAME}"
   # ARC needs the Secret to deregister the scale set from GitHub, so a failed
@@ -217,12 +232,10 @@ if [[ "${TOKEN_FILE_GIVEN}" == "true" ]]; then
 elif [[ -n "${GITHUB_PAT:-}" ]]; then
   TOKEN="${GITHUB_PAT//[[:space:]]/}"
 fi
-REPO_ANNOTATION="gha-runners.netcup-kube/repo"
 if [[ -z "${TOKEN}" ]]; then
-  # The Secret keys on NAME only. Reuse it when the guard above bound the
-  # release to REPO, or when the Secret records REPO itself.
-  if ! annotated_repo="$(k get secret "${SECRET}" -n "${RUNNER_NS}" \
-    -o "jsonpath={.metadata.annotations.${REPO_ANNOTATION//./\\.}}" 2> /dev/null)"; then
+  # Reuse the Secret when the guard above bound the release to REPO, or when
+  # the Secret records REPO itself.
+  if ! annotated_repo="$(secret_repo)"; then
     die "No GitHub token: pass --token-file or GITHUB_PAT (Secret ${RUNNER_NS}/${SECRET} does not exist yet)"
   fi
   [[ "${RELEASE_EXISTS}" == "true" || "${annotated_repo}" == "${REPO}" ]] ||

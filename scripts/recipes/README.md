@@ -49,7 +49,7 @@ NAMESPACE=prod-db STORAGE=50Gi netcup-kube install postgres
 - **metoro**: Metoro eBPF monitoring (exporter + node-agent) and in-cluster OTLP collector
 - **openclaw**: OpenClaw agent with mandatory kernel-level network monitoring
 - **zeroclaw**: ZeroClaw AI agent (bundled Helm chart, TOML config, Anthropic provider, dedicated namespace)
-- **gha-runners**: Self-hosted GitHub Actions runners for one repository (Actions Runner Controller in scale set mode, image pre-pull, token from `--token-file` or `GITHUB_PAT`)
+- **gha-runners**: Self-hosted GitHub Actions runners for one repository (Actions Runner Controller in scale set mode, image pre-pull, token from `--token-file` or `GITHUB_PAT`; fixed namespaces `arc-systems` and `arc-runners`, no `--namespace` or `--host`)
 
 ## Usage
 
@@ -82,6 +82,6 @@ recipe-name/
 All recipes:
 - Source `scripts/lib/common.sh` for shared functions
 - Source `scripts/recipes/recipes.conf` for configuration management
-- Follow consistent argument parsing (`--namespace`, `--host`, etc.)
+- Follow consistent argument parsing (`--namespace`, `--host`, etc.; exception: `gha-runners` uses fixed namespaces and rejects `--namespace` and `--host`)
 - Provide clear output with connection instructions
 

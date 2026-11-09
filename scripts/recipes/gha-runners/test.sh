@@ -116,7 +116,7 @@ for img in ghcr.io/mfittko/ci-runner:pw1.64.1-node26.10.0-pnpm10.28.2 ghcr.io/x/
   expect 0 "Pre-pulling ${img} on every node" -- --repo o/app --image "${img}"
 done
 expect 0 "Pre-pulling ghcr.io/mfittko/ci-runner:" -- --repo o/app
-for img in "" --uninstall -h "ghcr.io/x/runner:v2 #old" "a b" $'a\nb' "{x}" "a: b"; do
+for img in "" --uninstall -h "ghcr.io/x/runner:v2 #old" "a b" $'a\nb' "{x}" "a: b" "ghcr.io/x/runner:"; do
   expect 1 "--image must be an image reference" -- --repo o/app --image "${img}"
 done
 
@@ -133,6 +133,12 @@ GITHUB_PAT="" STUB_NO_SECRET=1 expect 1 "No GitHub token" -- --repo o/app
 GITHUB_PAT="" STUB_ANNOTATED_REPO=o/app expect 0 "helm upgrade --install app" -- --repo o/app
 GITHUB_PAT="" STUB_ANNOTATED_REPO=alice/app expect 1 "was written for 'alice/app', not bob/app" -- --repo bob/app
 GITHUB_PAT="" expect 1 "was written for '', not o/app" -- --repo o/app
+
+# Uninstall without a release deletes the Secret only when it is not bound to another repo.
+STUB_ANNOTATED_REPO=alice/app CONFIRM=true expect 1 "was written for 'alice/app', not bob/app" -- --repo bob/app --uninstall
+STUB_ANNOTATED_REPO=bob/app CONFIRM=true expect 0 "secret gha-app-github" -- --repo bob/app --uninstall
+CONFIRM=true expect 0 "secret gha-app-github" -- --repo bob/app --uninstall
+STUB_NO_SECRET=1 CONFIRM=true expect 0 "secret gha-app-github" -- --repo bob/app --uninstall
 
 # Ownership guard: a release named "app" that serves alice/app.
 export STUB_RELEASE_URL=https://github.com/alice/app
