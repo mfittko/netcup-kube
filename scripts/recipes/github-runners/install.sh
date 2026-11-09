@@ -212,7 +212,8 @@ NAME_RE='^[a-z0-9]([-a-z0-9]*[a-z0-9])?$'
 REF_RE='^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$'
 IMAGE_RE='^[A-Za-z0-9._/:@-]+$'
 APP_ID_RE='^[A-Za-z0-9._-]+$'
-URL_RE='^https://[A-Za-z0-9.-]+(:[0-9]+)?/[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)?/?$'
+# Host: dot-separated DNS labels (no empty, leading/trailing-dash or all-dot labels), optional :port.
+URL_RE='^https://[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)*(:[0-9]+)?/[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)?/?$'
 INT_RE='^[0-9]{1,4}$'
 ID_RE='^[0-9]{1,20}$'
 

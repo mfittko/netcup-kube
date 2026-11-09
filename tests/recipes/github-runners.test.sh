@@ -345,7 +345,13 @@ run_install --github-url "https://github.com/../example-repo"
 check "URL with a .. segment is rejected" status_nonzero
 run_install --github-url "https://github.com/./example-repo"
 check "URL with a . segment is rejected" status_nonzero
-for good_url in "https://github.com/org" "https://github.com/org/repo" "https://github.com/org/repo/"; do
+for bad_host_url in "https://../org" "https://-/org" "https://github..com/org" "https://.github.com/org"; do
+  run_install --github-url "${bad_host_url}" --secret my-app-secret
+  check "URL ${bad_host_url} (non-DNS host) is rejected" status_nonzero
+  check "URL ${bad_host_url} gets the bad URL message" out_has "GitHub org or repo URL"
+  check "URL ${bad_host_url} installs nothing" calls_lack "helm upgrade"
+done
+for good_url in "https://github.com/org" "https://github.com/org/repo" "https://github.com/org/repo/" "https://ghe.example.com:8443/org"; do
   run_install --github-url "${good_url}" --secret my-app-secret
   check "URL ${good_url} is accepted" status_is 0
   check "URL ${good_url} reaches the chart" calls_have "githubConfigUrl=${good_url}"
