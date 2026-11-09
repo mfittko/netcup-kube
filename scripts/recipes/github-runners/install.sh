@@ -39,8 +39,9 @@ Options:
   --uninstall                 Uninstall the scale set (Helm release <name>) and wait until its resources are
                               gone; the shared controller, the GitHub App Secret and the runners namespace
                               are left in place. A release that does not exist is not an error.
-  --uninstall-controller      Uninstall the shared controller; refuses while any scale set or ARC runner
-                              object remains in the runners namespace (checked after confirmation).
+  --uninstall-controller      Uninstall the shared controller; refuses while any scale set remains in the
+                              runners namespace or any ARC runner object remains in any namespace (the
+                              controller serves them all; checked after confirmation).
   -h, --help                  Show this help.
 
 Environment:
@@ -259,13 +260,17 @@ without_dry_run_scale_set() {
   fi
 }
 
+# One line per ARC object, qualified by namespace: <namespace>/<Kind>/<name>.
+ARC_OBJECT_FORMAT='jsonpath={range .items[*]}{.metadata.namespace}/{.kind}/{.metadata.name}{"\n"}{end}'
+
 dry_run_own_runner_objects() {
-  # Prints the ARC objects of the scale set being uninstalled: its AutoscalingRunnerSet by exact name
-  # and its EphemeralRunners by ARC's scale-set-name label. Only used to filter a dry-run preview; if
-  # the label lookup fails nothing extra is filtered, so the preview errs toward refusing.
+  # Prints the ARC objects of the scale set being uninstalled, in ARC_OBJECT_FORMAT and only in
+  # NS_RUNNERS: its AutoscalingRunnerSet by exact name and its EphemeralRunners by ARC's
+  # scale-set-name label. Only used to filter a dry-run preview; if the label lookup fails nothing
+  # extra is filtered, so the preview errs toward refusing.
   local owned
-  printf '%s\n' "autoscalingrunnerset.actions.github.com/${NAME}"
-  if owned="$(k get ephemeralrunners.actions.github.com --namespace "${NS_RUNNERS}" -l "actions.github.com/scale-set-name=${NAME}" -o name 2> /dev/null)"; then
+  printf '%s\n' "${NS_RUNNERS}/AutoscalingRunnerSet/${NAME}"
+  if owned="$(k get ephemeralrunners.actions.github.com --namespace "${NS_RUNNERS}" -l "actions.github.com/scale-set-name=${NAME}" -o "${ARC_OBJECT_FORMAT}" 2> /dev/null)"; then
     [[ -z "${owned}" ]] || printf '%s\n' "${owned}"
   fi
 }
@@ -286,13 +291,14 @@ controller_guard() {
   remaining="$(printf '%s\n' "${remaining}" | without_dry_run_scale_set "${NAME}" | tr '\n' ' ' | sed 's/ *$//')"
   [[ -z "${remaining}" ]] ||
     die "Refusing to uninstall the controller: scale set(s) still installed in ${NS_RUNNERS}: ${remaining}. Uninstall them first (--uninstall --name <name>)."
-  # A removed release can leave runner objects whose finalizers only the controller processes.
-  if ! objects="$(k get autoscalingrunnersets.actions.github.com,ephemeralrunners.actions.github.com --namespace "${NS_RUNNERS}" -o name 2> /dev/null)"; then
+  # A removed release can leave runner objects whose finalizers only the controller processes. The
+  # controller watches every namespace, so objects anywhere in the cluster still need it.
+  if ! objects="$(k get autoscalingrunnersets.actions.github.com,ephemeralrunners.actions.github.com --all-namespaces -o "${ARC_OBJECT_FORMAT}" 2> /dev/null)"; then
     if [[ "${DRY_RUN:-false}" == "true" ]]; then
-      log "[DRY_RUN] could not list ARC runner objects in ${NS_RUNNERS}; assuming none remain"
+      log "[DRY_RUN] could not list ARC runner objects across all namespaces; assuming none remain"
       objects=""
     else
-      die "Cannot list ARC runner objects (autoscalingrunnersets, ephemeralrunners) in namespace ${NS_RUNNERS}; refusing to uninstall the controller without knowing whether they still need it."
+      die "Cannot list ARC runner objects (autoscalingrunnersets, ephemeralrunners) across all namespaces; refusing to uninstall the controller without knowing whether they still need it."
     fi
   fi
   if [[ "${DRY_RUN:-false}" == "true" && "${UNINSTALL}" == "true" ]]; then
@@ -302,7 +308,7 @@ controller_guard() {
   fi
   objects="$(printf '%s\n' "${objects}" | tr '\n' ' ' | sed 's/ *$//')"
   [[ -z "${objects}" ]] ||
-    die "Refusing to uninstall the controller: ARC runner objects still exist in ${NS_RUNNERS} and need the controller to finalize them: ${objects}. Wait until they are gone, then retry."
+    die "Refusing to uninstall the controller: ARC runner objects (<namespace>/<kind>/<name>) still exist and need the controller to finalize them: ${objects}. Wait until they are gone, then retry."
 }
 
 if [[ "${UNINSTALL}" == "true" || "${UNINSTALL_CONTROLLER}" == "true" ]]; then
@@ -354,10 +360,10 @@ fi
 CREATE_SECRET="false"
 if [[ -n "${APP_ID}" || -n "${INSTALLATION_ID}" || -n "${KEY_FILE}" ]]; then
   missing=""
-  [[ -n "${APP_ID}" ]] || missing="${missing} --app-id"
-  [[ -n "${INSTALLATION_ID}" ]] || missing="${missing} --installation-id"
-  [[ -n "${KEY_FILE}" ]] || missing="${missing} --private-key-file"
-  [[ -z "${missing}" ]] || die "Creating the GitHub App secret needs all of --app-id, --installation-id and --private-key-file; missing:${missing}"
+  [[ -n "${APP_ID}" ]] || missing="${missing} --app-id/GITHUB_APP_ID"
+  [[ -n "${INSTALLATION_ID}" ]] || missing="${missing} --installation-id/GITHUB_APP_INSTALLATION_ID"
+  [[ -n "${KEY_FILE}" ]] || missing="${missing} --private-key-file/GITHUB_APP_PRIVATE_KEY_FILE"
+  [[ -z "${missing}" ]] || die "Creating the GitHub App secret needs all of --app-id, --installation-id and --private-key-file (or the GITHUB_APP_ID, GITHUB_APP_INSTALLATION_ID and GITHUB_APP_PRIVATE_KEY_FILE environment variables); one of them is set, missing:${missing}"
   [[ "${APP_ID}" =~ ${APP_ID_RE} ]] || die "--app-id must be the GitHub App id or client id (letters, digits, . _ -)"
   [[ "${INSTALLATION_ID}" =~ ${ID_RE} ]] || die "--installation-id must be numeric"
   [[ -f "${KEY_FILE}" && -r "${KEY_FILE}" && -s "${KEY_FILE}" ]] ||

@@ -105,7 +105,7 @@ netcup-kube install <recipe> [recipe-options]
 - `--image <repo:tag>` — Runner image (default: `IMAGE_RUNNER_DEFAULT` in `recipes.conf`, the `ci-runner` image published by `mfittko/actions`).
 - `--image-pull-secret <name>` — imagePullSecret for the runner pods (needed when the image's GHCR package is private).
 - `--min-runners <n>` / `--max-runners <n>` — Scale bounds (default: `0` / `4`).
-- `--uninstall` — Uninstall the scale set (keeps the shared controller); `--uninstall-controller` — Uninstall the controller, refused while any scale set remains. Both need `CONFIRM=true` on a non-TTY.
+- `--uninstall` — Uninstall the scale set (keeps the shared controller); `--uninstall-controller` — Uninstall the controller, refused while any scale set or ARC runner object (in any namespace) remains. Both need `CONFIRM=true` on a non-TTY.
 - Does not accept the common `--namespace` or `--host` options (both fail with `Unknown argument`): it always installs into `arc-systems` and `arc-runners`, set by `NAMESPACE_ARC_SYSTEMS` and `NAMESPACE_ARC_RUNNERS` in `recipes.conf`.
 
 **Common Options:**

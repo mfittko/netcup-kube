@@ -247,6 +247,15 @@ check "key material never reaches a command line" calls_lack "${MARKER}"
 run_install --github-url "${URL}" --app-id 12345
 check "partial GitHub App flags fail" status_nonzero
 check "partial flags message lists what is missing" out_has "--installation-id"
+check "partial flags message names the missing env var too" out_has "--installation-id/GITHUB_APP_INSTALLATION_ID"
+
+# A stray GITHUB_APP_* variable alone triggers secret creation; the error must name the environment.
+GITHUB_APP_ID=1 run_install --github-url "${URL}"
+check "env-only partial GitHub App credentials fail" status_nonzero
+check "env-only partial message names the environment variables" out_has "environment variables"
+check "env-only partial message names the missing env vars" out_has "GITHUB_APP_PRIVATE_KEY_FILE"
+check "env-only partial credentials create no secret" calls_lack "create secret"
+check "env-only partial credentials install nothing" calls_lack "helm upgrade"
 
 run_install --github-url "${URL}" --app-id 1 --installation-id 2 --private-key-file "${WORK}/does-not-exist.pem"
 check "missing private key file fails" status_nonzero
@@ -259,7 +268,18 @@ STATUS=$?
 set -e
 check "DRY_RUN succeeds" status_is 0
 check "DRY_RUN runs no helm upgrade" calls_lack "helm upgrade"
+check "DRY_RUN runs no kubectl apply" calls_lack "kubectl apply"
 check "DRY_RUN prints the planned helm command" out_has "[DRY_RUN]"
+
+# The GitHub App flags are the one install path that writes to the cluster through kubectl.
+DRY_RUN=true run_install --github-url "${URL}" --app-id 1 --installation-id 2 --private-key-file "${FIXTURE_PATH}"
+check "DRY_RUN with GitHub App flags succeeds" status_is 0
+check "DRY_RUN with GitHub App flags creates no secret" calls_lack "create secret"
+check "DRY_RUN with GitHub App flags applies nothing" calls_lack "apply"
+check "DRY_RUN with GitHub App flags runs no kubectl at all" calls_lack "kubectl "
+check "DRY_RUN with GitHub App flags runs no helm upgrade" calls_lack "helm upgrade"
+check "DRY_RUN with GitHub App flags reports the planned secret" out_has "would create/update secret netcup-kube-github-app"
+check "DRY_RUN with GitHub App flags never prints key material" out_lacks "${MARKER}"
 
 # --- uninstall ----------------------------------------------------------------
 run_install --github-url "${URL}" --uninstall
@@ -306,7 +326,7 @@ check "unconfirmed controller uninstall refuses" status_nonzero
 check "the guard listing runs only after the confirmation" calls_lack "helm list"
 HELM_LIST_OUTPUT=$'other-scale-set\n' CONFIRM=true run_install --uninstall-controller
 check "a release listed after the confirmation blocks the controller uninstall" calls_lack "helm uninstall arc "
-KUBECTL_ARC_OBJECTS=$'ephemeralrunner.actions.github.com/netcup-kube-runner-one\n' HELM_LIST_OUTPUT='' CONFIRM=true run_install --uninstall-controller
+KUBECTL_ARC_OBJECTS=$'arc-runners/EphemeralRunner/netcup-kube-runner-one\n' HELM_LIST_OUTPUT='' CONFIRM=true run_install --uninstall-controller
 check "remaining ARC runner objects block the controller uninstall" status_nonzero
 check "the refusal names the remaining object" out_has "netcup-kube-runner-one"
 check "remaining ARC runner objects keep the controller" calls_lack "helm uninstall arc "
@@ -314,7 +334,13 @@ KUBECTL_ARC_FAIL=true HELM_LIST_OUTPUT='' CONFIRM=true run_install --uninstall-c
 check "a failed ARC object listing blocks the controller uninstall" status_nonzero
 check "a failed ARC object listing keeps the controller" calls_lack "helm uninstall arc "
 HELM_LIST_OUTPUT='' CONFIRM=true run_install --uninstall-controller
-check "the guard lists autoscalingrunnersets and ephemeralrunners" calls_have "get autoscalingrunnersets.actions.github.com,ephemeralrunners.actions.github.com --namespace arc-runners"
+check "the guard lists autoscalingrunnersets and ephemeralrunners in every namespace" calls_have "get autoscalingrunnersets.actions.github.com,ephemeralrunners.actions.github.com --all-namespaces"
+check "the guard listing is namespace-qualified" calls_have "{.metadata.namespace}/{.kind}/{.metadata.name}"
+# The controller serves every namespace, so a scale set outside arc-runners still needs it.
+KUBECTL_ARC_OBJECTS=$'team-a/AutoscalingRunnerSet/team-runners\n' HELM_LIST_OUTPUT='' CONFIRM=true run_install --uninstall-controller
+check "an ARC object only in another namespace blocks the controller uninstall" status_nonzero
+check "the refusal names the other namespace's object" out_has "team-a/AutoscalingRunnerSet/team-runners"
+check "an ARC object in another namespace keeps the controller" calls_lack "helm uninstall arc "
 
 # --- helm --set metacharacters are rejected before anything runs -------------
 run_install --github-url "${URL}" --secret my-app-secret --image 'x:1,template.spec.containers[0].securityContext.privileged=true'
@@ -410,17 +436,23 @@ check "combined uninstall refuses while another scale set remains" status_nonzer
 DRY_RUN=true HELM_LIST_OUTPUT=$'netcup-kube\n' CONFIRM=true run_install --uninstall --uninstall-controller
 check "DRY_RUN combined uninstall ignores the not-yet-removed scale set" status_is 0
 check "DRY_RUN uninstall runs no helm uninstall" calls_lack "helm uninstall"
-DRY_RUN=true KUBECTL_ARC_OBJECTS=$'autoscalingrunnerset.actions.github.com/netcup-kube\nephemeralrunner.actions.github.com/netcup-kube-runner-one\n' KUBECTL_OWN_RUNNERS=$'ephemeralrunner.actions.github.com/netcup-kube-runner-one\n' CONFIRM=true run_install --uninstall --uninstall-controller
+DRY_RUN=true KUBECTL_ARC_OBJECTS=$'arc-runners/AutoscalingRunnerSet/netcup-kube\narc-runners/EphemeralRunner/netcup-kube-runner-one\n' KUBECTL_OWN_RUNNERS=$'arc-runners/EphemeralRunner/netcup-kube-runner-one\n' CONFIRM=true run_install --uninstall --uninstall-controller
 check "DRY_RUN combined uninstall ignores the not-yet-removed scale set's runner objects" status_is 0
-check "DRY_RUN finds the scale set's runners by its scale-set-name label" calls_have "get ephemeralrunners.actions.github.com --namespace arc-runners -l actions.github.com/scale-set-name=netcup-kube -o name"
-DRY_RUN=true KUBECTL_ARC_OBJECTS=$'autoscalingrunnerset.actions.github.com/other\n' CONFIRM=true run_install --uninstall --uninstall-controller
+check "DRY_RUN finds the scale set's runners by its scale-set-name label" calls_have "get ephemeralrunners.actions.github.com --namespace arc-runners -l actions.github.com/scale-set-name=netcup-kube -o jsonpath="
+DRY_RUN=true KUBECTL_ARC_OBJECTS=$'arc-runners/AutoscalingRunnerSet/other\n' CONFIRM=true run_install --uninstall --uninstall-controller
 check "DRY_RUN combined uninstall still refuses for another scale set's runner objects" status_nonzero
+# The dry-run filter drops only the uninstalled scale set's objects in arc-runners, never a
+# same-named scale set in another namespace.
+DRY_RUN=true KUBECTL_ARC_OBJECTS=$'arc-runners/AutoscalingRunnerSet/netcup-kube\nteam-a/AutoscalingRunnerSet/netcup-kube\n' CONFIRM=true run_install --uninstall --uninstall-controller
+check "DRY_RUN refuses for a same-named scale set in another namespace" status_nonzero
+check "DRY_RUN refusal names the other namespace's same-named scale set" out_has "team-a/AutoscalingRunnerSet/netcup-kube"
+check "DRY_RUN refusal drops the scale set being uninstalled from arc-runners" out_lacks "arc-runners/AutoscalingRunnerSet/netcup-kube"
 # A sibling scale set whose name starts with '<name>-' is not the one being uninstalled.
-DRY_RUN=true KUBECTL_ARC_OBJECTS=$'autoscalingrunnerset.actions.github.com/ci\nautoscalingrunnerset.actions.github.com/ci-large\n' CONFIRM=true run_install --uninstall --uninstall-controller --name ci
+DRY_RUN=true KUBECTL_ARC_OBJECTS=$'arc-runners/AutoscalingRunnerSet/ci\narc-runners/AutoscalingRunnerSet/ci-large\n' CONFIRM=true run_install --uninstall --uninstall-controller --name ci
 check "DRY_RUN refuses for a hyphen-prefixed sibling scale set" status_nonzero
-check "DRY_RUN refusal names the sibling scale set" out_has "autoscalingrunnerset.actions.github.com/ci-large"
-check "DRY_RUN refusal drops the scale set being uninstalled" out_lacks "autoscalingrunnerset.actions.github.com/ci "
-DRY_RUN=true KUBECTL_ARC_OBJECTS=$'ephemeralrunner.actions.github.com/ci-run-one\nephemeralrunner.actions.github.com/ci-large-run-two\n' KUBECTL_OWN_RUNNERS=$'ephemeralrunner.actions.github.com/ci-run-one\n' CONFIRM=true run_install --uninstall --uninstall-controller --name ci
+check "DRY_RUN refusal names the sibling scale set" out_has "arc-runners/AutoscalingRunnerSet/ci-large"
+check "DRY_RUN refusal drops the scale set being uninstalled" out_lacks "arc-runners/AutoscalingRunnerSet/ci "
+DRY_RUN=true KUBECTL_ARC_OBJECTS=$'arc-runners/EphemeralRunner/ci-run-one\narc-runners/EphemeralRunner/ci-large-run-two\n' KUBECTL_OWN_RUNNERS=$'arc-runners/EphemeralRunner/ci-run-one\n' CONFIRM=true run_install --uninstall --uninstall-controller --name ci
 check "DRY_RUN refuses for a sibling scale set's runners" status_nonzero
 check "DRY_RUN refusal names the sibling's runner" out_has "ci-large-run-two"
 check "DRY_RUN refusal drops the uninstalled scale set's runner" out_lacks "ci-run-one"

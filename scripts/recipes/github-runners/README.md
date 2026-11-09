@@ -85,7 +85,7 @@ See `netcup-kube install github-runners --help`. Summary:
 | `--image-pull-secret` | | imagePullSecret for runner pods |
 | `--min-runners`, `--max-runners` | `0`, `4` | scale bounds |
 | `--uninstall` | | remove the scale set; keeps the controller |
-| `--uninstall-controller` | | remove the controller; refuses while any scale set remains |
+| `--uninstall-controller` | | remove the controller; refuses while any scale set or ARC runner object remains |
 
 `--github-url` takes an org or repo URL such as `https://github.com/<org>/<repo>` (no `.git` suffix).
 Values that reach Helm (`--image`, `--secret`, `--image-pull-secret`) are validated first.
@@ -99,7 +99,8 @@ The recipe takes no `--namespace` or `--host` option (unlike most recipes): it a
 does not exist is not an error, but any other `helm uninstall` failure (for example an unreachable
 cluster) exits non-zero. `--uninstall-controller`, after the confirmation, lists every release in
 `arc-runners` (including half-installed ones) and every ARC runner object (`autoscalingrunnersets`,
-`ephemeralrunners`), and refuses when a listing fails or anything remains.
+`ephemeralrunners`) in any namespace, because the controller serves every namespace, and refuses
+when a listing fails or anything remains.
 
 `DRY_RUN=true` prints the helm commands instead of running them. `--uninstall` and
 `--uninstall-controller` need `CONFIRM=true` on a non-TTY.
