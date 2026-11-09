@@ -195,6 +195,14 @@ if status_err="$(helm status "${NAME}" --namespace "${RUNNER_NS}" 2>&1 > /dev/nu
   fi
   [[ "${owner_url}" == "https://github.com/${REPO}" ]] ||
     die "Release ${RUNNER_NS}/${NAME} serves '${owner_url}', not https://github.com/${REPO}. Pass a distinct --name."
+  set_name=""
+  secret_name=""
+  [[ "${values_json}" =~ \"runnerScaleSetName\":\"([^\"]*)\" ]] && set_name="${BASH_REMATCH[1]}"
+  [[ "${values_json}" =~ \"githubConfigSecret\":\"([^\"]*)\" ]] && secret_name="${BASH_REMATCH[1]}"
+  [[ "${set_name}" == "${NAME}" ]] ||
+    die "Release ${RUNNER_NS}/${NAME} uses AutoscalingRunnerSet '${set_name}', not '${NAME}'. Pass a distinct --name."
+  [[ "${secret_name}" == "${SECRET}" ]] ||
+    die "Release ${RUNNER_NS}/${NAME} uses Secret '${secret_name}', not '${SECRET}'. Pass a distinct --name."
 elif [[ "${status_err}" != *"release: not found"* ]]; then
   die "helm status ${NAME} failed, nothing changed: ${status_err}"
 fi
@@ -241,7 +249,7 @@ if [[ "${UNINSTALL}" == "true" ]]; then
   if set_err="$(k get autoscalingrunnerset "${NAME}" -n "${RUNNER_NS}" -o name 2>&1 > /dev/null)"; then
     die "AutoscalingRunnerSet ${RUNNER_NS}/${NAME} still exists; keep its Secret and retry --uninstall later"
   elif [[ "${set_err}" != *"(NotFound)"* ]]; then
-    die "Cannot read AutoscalingRunnerSet ${RUNNER_NS}/${NAME}, nothing changed: ${set_err}"
+    die "Cannot read AutoscalingRunnerSet ${RUNNER_NS}/${NAME}; Secret retained; Helm release may already be removed: ${set_err}"
   fi
   run recipe_kdelete daemonset "${PREPULL}" -n "${RUNNER_NS}"
   run recipe_kdelete secret "${SECRET}" -n "${RUNNER_NS}"

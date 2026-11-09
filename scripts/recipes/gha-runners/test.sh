@@ -20,7 +20,11 @@ case "$1 ${2:-}" in
     echo "Error: release: not found" >&2
     exit 1
     ;;
-  "get values") printf '{"githubConfigUrl":"%s","maxRunners":2}\n' "${STUB_RELEASE_URL}" ;;
+  "get values")
+    cat << STUB_JSON
+{"githubConfigUrl":"${STUB_RELEASE_URL}","runnerScaleSetName":"${STUB_RELEASE_NAME:-app}","githubConfigSecret":"${STUB_RELEASE_CONFIG_REF:-gha-app-github}","maxRunners":2}
+STUB_JSON
+    ;;
   *) exit 0 ;;
 esac
 EOF
@@ -58,7 +62,7 @@ chmod +x "${TMP}/bin/helm" "${TMP}/bin/kubectl"
 # Most cases pass a token; it must never appear in the output.
 SENTINEL="gha-test-sentinel-$$"
 export PATH="${TMP}/bin:${PATH}" DRY_RUN=true KUBECONFIG="${TMP}/kubeconfig" GITHUB_PAT="${SENTINEL}"
-unset STUB_RELEASE_URL STUB_NO_SECRET STUB_SECRET_ERR STUB_ANNOTATED_REPO STUB_RUNNER_SET_EXISTS STUB_RUNNER_SET_ERR
+unset STUB_RELEASE_URL STUB_RELEASE_NAME STUB_RELEASE_CONFIG_REF STUB_NO_SECRET STUB_SECRET_ERR STUB_ANNOTATED_REPO STUB_RUNNER_SET_EXISTS STUB_RUNNER_SET_ERR
 
 # is_tty also accepts an openable /dev/tty, so on a terminal the uninstall
 # confirmation would wait for input. Run install.sh in a new session, which has
@@ -179,10 +183,16 @@ STUB_RUNNER_SET_ERR="Proxy NotFound response" CONFIRM=true expect 1 "Cannot read
 export STUB_RELEASE_URL=https://github.com/alice/app
 expect 1 "Pass a distinct --name" -- --repo bob/app
 CONFIRM=true expect 1 "Pass a distinct --name" -- --repo bob/app --uninstall
+STUB_RELEASE_NAME=other CONFIRM=true expect 1 "uses AutoscalingRunnerSet 'other', not 'app'" -- --repo alice/app --uninstall
+STUB_RELEASE_CONFIG_REF=other CONFIRM=true expect 1 "uses Secret 'other', not 'gha-app-github'" -- --repo alice/app --uninstall
 expect 0 "helm upgrade --install app" -- --repo alice/app
 # The existing release binds the Secret, so a token-less rerun reuses it.
 GITHUB_PAT="" expect 0 "helm upgrade --install app" -- --repo alice/app
 CONFIRM=true expect 0 "helm uninstall app" -- --repo alice/app --uninstall
+rc=0
+OUT="$(STUB_RUNNER_SET_ERR="Unable to connect to the server" CONFIRM=true "${NOTTY[@]}" "${INSTALL}" --repo alice/app --uninstall < /dev/null 2>&1)" || rc=$?
+[[ "${rc}" == 1 && "${OUT}" == *"Secret retained; Helm release may already be removed"* && "${OUT}" != *"recipe_kdelete secret"* ]] ||
+  fail "uninstall read failure did not preserve the Secret or describe partial progress"
 
 if ((fails > 0)); then
   echo "${fails} check(s) failed"
