@@ -245,11 +245,13 @@ if [[ "${UNINSTALL}" == "true" ]]; then
   if [[ "${RELEASE_EXISTS}" == "true" ]]; then
     run helm uninstall "${NAME}" --namespace "${RUNNER_NS}" --wait --timeout 5m
   fi
-  # Helm may forget a release before ARC finishes removing its scale set.
-  if set_err="$(k get autoscalingrunnerset "${NAME}" -n "${RUNNER_NS}" -o name 2>&1 > /dev/null)"; then
-    die "AutoscalingRunnerSet ${RUNNER_NS}/${NAME} still exists; keep its Secret and retry --uninstall later"
-  elif [[ "${set_err}" != *"(NotFound)"* ]]; then
-    die "Cannot read AutoscalingRunnerSet ${RUNNER_NS}/${NAME}; Secret retained; Helm release may already be removed: ${set_err}"
+  # A dry-run Helm uninstall cannot remove the set; still guard absent releases.
+  if [[ "${DRY_RUN:-false}" != "true" || "${RELEASE_EXISTS}" != "true" ]]; then
+    if set_err="$(k get autoscalingrunnerset "${NAME}" -n "${RUNNER_NS}" -o name 2>&1 > /dev/null)"; then
+      die "AutoscalingRunnerSet ${RUNNER_NS}/${NAME} still exists; keep its Secret and retry --uninstall later"
+    elif [[ "${set_err}" != *"(NotFound)"* ]]; then
+      die "Cannot read AutoscalingRunnerSet ${RUNNER_NS}/${NAME}; Secret retained; Helm release may already be removed: ${set_err}"
+    fi
   fi
   run recipe_kdelete daemonset "${PREPULL}" -n "${RUNNER_NS}"
   run recipe_kdelete secret "${SECRET}" -n "${RUNNER_NS}"

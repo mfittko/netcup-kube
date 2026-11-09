@@ -201,8 +201,10 @@ expect 0 "helm upgrade --install app" -- --repo alice/app
 # The existing release binds the Secret, so a token-less rerun reuses it.
 GITHUB_PAT="" expect 0 "helm upgrade --install app" -- --repo alice/app
 CONFIRM=true expect 0 "helm uninstall app" -- --repo alice/app --uninstall
+STUB_RUNNER_SET_EXISTS=1 CONFIRM=true expect 0 "recipe_kdelete secret gha-app-github" -- --repo alice/app --uninstall
+STUB_RUNNER_SET_EXISTS=1 DRY_RUN=false CONFIRM=true expect 1 "AutoscalingRunnerSet arc-runners/app still exists" -- --repo alice/app --uninstall
 rc=0
-OUT="$(STUB_RUNNER_SET_ERR="Unable to connect to the server" CONFIRM=true "${NOTTY[@]}" "${INSTALL}" --repo alice/app --uninstall < /dev/null 2>&1)" || rc=$?
+OUT="$(STUB_RUNNER_SET_ERR="Unable to connect to the server" DRY_RUN=false CONFIRM=true "${NOTTY[@]}" "${INSTALL}" --repo alice/app --uninstall < /dev/null 2>&1)" || rc=$?
 [[ "${rc}" == 1 && "${OUT}" == *"Secret retained; Helm release may already be removed"* && "${OUT}" != *"recipe_kdelete secret"* ]] ||
   fail "uninstall read failure did not preserve the Secret or describe partial progress"
 
