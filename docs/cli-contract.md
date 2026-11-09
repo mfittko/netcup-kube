@@ -82,6 +82,7 @@ netcup-kube install <recipe> [recipe-options]
 - `dashboard` — Install Kubernetes Dashboard (official web UI)
 - `openclaw` — Install OpenClaw with mandatory kernel-level network monitoring
 - `zeroclaw` — Install ZeroClaw AI agent (bundled Helm chart; TOML config; Anthropic provider)
+- `gha-runners` — Install self-hosted GitHub Actions runners for one repo (Actions Runner Controller, runner scale set; see `--help`)
 
 `openclaw` recipe config management:
 - `--config-file <path>` — Supply an OpenClaw JSON/JSON5 template from repo or local path.
