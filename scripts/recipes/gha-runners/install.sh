@@ -152,7 +152,7 @@ COUNT_RE='^(0|[1-9][0-9]*)$'
 [[ "${MIN_RUNNERS}" =~ ${COUNT_RE} && "${MAX_RUNNERS}" =~ ${COUNT_RE} ]] || die "--min-runners and --max-runners must be whole numbers without leading zeros"
 ((MIN_RUNNERS <= MAX_RUNNERS)) || die "--min-runners must not exceed --max-runners"
 # Kubernetes quantity: the values go into quoted YAML, so reject anything else.
-QUANTITY_RE='^[0-9]+(\.[0-9]+)?(m|[KMGTPE]i?)?$'
+QUANTITY_RE='^[0-9]+(\.[0-9]+)?(m|k|[KMGTPE]i|[MGTPE])?$'
 check_quantity() {
   [[ "$2" =~ ${QUANTITY_RE} ]] || die "$1 must be a Kubernetes quantity (for example 500m, 2, 2Gi): '$2'"
 }

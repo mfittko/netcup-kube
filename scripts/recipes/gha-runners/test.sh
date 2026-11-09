@@ -32,13 +32,22 @@ chmod +x "${TMP}/bin/helm" "${TMP}/bin/kubectl"
 export PATH="${TMP}/bin:${PATH}" DRY_RUN=true KUBECONFIG="${TMP}/kubeconfig"
 unset GITHUB_PAT STUB_RELEASE_URL
 
+# is_tty also accepts an openable /dev/tty, so on a terminal the uninstall
+# confirmation would wait for input. Run install.sh in a new session, which has
+# no controlling terminal: setsid on Linux, POSIX::setsid via perl elsewhere.
+if command -v setsid > /dev/null; then
+  NOTTY=(setsid)
+else
+  NOTTY=(perl -MPOSIX -e 'POSIX::setsid() >= 0 or die "setsid: $!\n"; exec @ARGV or die "exec: $!\n"' --)
+fi
+
 fails=0
 OUT=""
 # expect <0|1> <expected output substring or ""> -- <install.sh args...>
 expect() {
   local want_rc="$1" want_text="$2" rc=0
   shift 3
-  OUT="$("${INSTALL}" "$@" 2>&1)" || rc=$?
+  OUT="$("${NOTTY[@]}" "${INSTALL}" "$@" < /dev/null 2>&1)" || rc=$?
   if [[ "${rc}" != "${want_rc}" || "${OUT}" != *"${want_text}"* ]]; then
     echo "FAIL (rc=${rc}, want ${want_rc} '${want_text}'): $*"
     echo "${OUT}" | tail -n 3
@@ -47,10 +56,10 @@ expect() {
 }
 
 # Resource quantities (each flag is checked; the forms run through --cpu-request).
-for q in 1 500m 2 2Gi 2560Mi 1.5 512M; do
+for q in 1 500m 2 2Gi 2560Mi 1.5 512M 1k; do
   expect 0 "" -- --repo o/app --cpu-request "${q}"
 done
-for q in "" 2GB '4Gi"' abc -1; do
+for q in "" 2GB '4Gi"' abc -1 512K; do
   expect 1 "--cpu-request must be a Kubernetes quantity" -- --repo o/app "--cpu-request=${q}"
 done
 for flag in --cpu-limit --memory-request --memory-limit; do
