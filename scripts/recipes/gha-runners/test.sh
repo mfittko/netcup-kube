@@ -102,11 +102,13 @@ for r in ../x ./x o/.. o/. noslash a/b/c; do
   expect 1 "invalid --repo (expected owner/name): ${r}" -- --repo "${r}" --name x
 done
 
-# Scale set name: the default is the repo name; at most 51 characters.
-name51="$(printf 'a%.0s' {1..51})"
+# Scale set name: the default is the repo name; at most 45 characters (chart limit).
+name45="$(printf 'a%.0s' {1..45})"
 expect 0 "runner scale set verkaufswerkstatt for" -- --repo mfittko/verkaufswerkstatt
-expect 0 "runner scale set ${name51} for" -- --repo o/app --name "${name51}"
-expect 1 "--name must be at most 51 characters" -- --repo o/app --name "${name51}a"
+expect 0 "runner scale set ${name45} for" -- --repo o/app --name "${name45}"
+expect 1 "--name must be at most 45 characters" -- --repo o/app --name "${name45}a"
+expect 1 "--name must be at most 45 characters" -- --repo o/app --name "${name45}aaaaaa"
+expect 1 "--name must be at most 45 characters" -- --repo o/app --name "${name45}aaaaaaa"
 expect 1 "--name must be a DNS label" -- --repo o/MyRepo
 
 # Image reference (the default IMAGE_GHA_RUNNER is the first accepted form).

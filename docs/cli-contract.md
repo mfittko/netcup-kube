@@ -101,7 +101,7 @@ netcup-kube install <recipe> [recipe-options]
 `gha-runners` recipe options:
 - Namespaces are fixed: the controller runs in `arc-systems`, the runners in `arc-runners`. The common `--namespace` and `--host` options are not accepted.
 - `--repo <owner/name>` — GitHub repository the runners serve (required).
-- `--name <name>` — Scale set name and `runs-on` label (default: the repo name). It must be a lowercase DNS label (letters, digits, `-`) of at most 51 characters, so a repo whose name does not fit needs an explicit `--name`. Two repos with the same name under different owners need distinct names.
+- `--name <name>` — Scale set name and `runs-on` label (default: the repo name). It must be a lowercase DNS label (letters, digits, `-`) of at most 45 characters, so a repo whose name does not fit needs an explicit `--name`. Two repos with the same name under different owners need distinct names.
 - `--token-file <path>` — File with the GitHub token for ARC. `GITHUB_PAT` is the env alternative. Without either, the existing Secret is reused when the scale set release exists or the Secret was written for the same `--repo`.
 - `--uninstall` — Remove the repo's scale set, Secret and image pre-pull (the shared controller stays).
 - See `--help` for image, runner count and resource options.

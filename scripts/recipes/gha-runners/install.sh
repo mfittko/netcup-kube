@@ -21,7 +21,7 @@ Options:
   --repo <owner/name>       GitHub repository the runners serve (required).
   --name <name>             Scale set name, which is also the runs-on label (default: the repo name).
                             Must be a lowercase DNS label (letters, digits, '-') of at most
-                            51 characters. A repo whose name does not fit needs an explicit --name.
+                            45 characters. A repo whose name does not fit needs an explicit --name.
   --image <repo:tag>        Runner image (default: IMAGE_GHA_RUNNER from recipes.conf).
   --min-runners <n>         Idle runners kept ready (default: 1).
   --max-runners <n>         Concurrent runners (default: 2).
@@ -150,8 +150,9 @@ if ! [[ "${REPO}" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] ||
 fi
 NAME="${NAME:-${REPO_NAME}}"
 [[ "${NAME}" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$ ]] || die "--name must be a DNS label (lowercase letters, digits, '-'): ${NAME}"
-# The pre-pull label value gha-<name>-prepull must fit the 63-character label limit.
-((${#NAME} <= 51)) || die "--name must be at most 51 characters: ${NAME}"
+# The gha-runner-scale-set chart caps runnerScaleSetName at 45 characters; this also
+# keeps the pre-pull label value gha-<name>-prepull within the 63-character label limit.
+((${#NAME} <= 45)) || die "--name must be at most 45 characters: ${NAME}"
 # The image goes unquoted into two YAML documents, so allow only reference characters.
 [[ "${IMAGE}" =~ ^[A-Za-z0-9][A-Za-z0-9._/:@-]*$ ]] || die "--image must be an image reference (for example registry/repo:tag or repo@sha256:...): '${IMAGE}'"
 COUNT_RE='^(0|[1-9][0-9]*)$'
