@@ -39,7 +39,6 @@ Available recipes:
   llm-proxy                Install llm-proxy (Helm chart; Secret-backed config)
   metoro                   Install Metoro eBPF monitoring + OTLP collector
   openclaw                 Install OpenClaw with kernel-level network monitoring
-  zeroclaw                 Install ZeroClaw AI agent (TOML config, Anthropic provider)
 
 Examples:
   netcup-kube install argo-cd --help
