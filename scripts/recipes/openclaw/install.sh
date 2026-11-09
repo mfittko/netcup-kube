@@ -298,7 +298,7 @@ if [[ "${UNINSTALL}" == "true" ]]; then
   recipe_kdelete ingress openclaw-ingress -n "${NAMESPACE}"
 
   echo
-  log "OpenClaw uninstalled. Metoro is kept (remove with: netcup-kube install metoro --uninstall)."
+  log "OpenClaw uninstalled. Metoro is kept (remove with: netcup-kube install metoro --uninstall --namespace ${METORO_NAMESPACE})."
   log "Note: helm uninstall deletes the chart-owned 'openclaw' PVC and its data."
   log "To remove namespace: kubectl delete namespace ${NAMESPACE}"
   exit 0

@@ -82,7 +82,6 @@ netcup-kube install <recipe> [recipe-options]
 - `dashboard` — Install Kubernetes Dashboard (official web UI)
 - `metoro` — Install Metoro eBPF monitoring + in-cluster OTLP collector (`METORO_BEARER_TOKEN`; `--client-service` for trace attribution)
 - `openclaw` — Install OpenClaw with mandatory kernel-level network monitoring
-- `zeroclaw` — Install ZeroClaw AI agent (bundled Helm chart; TOML config; Anthropic provider)
 - `gha-runners` — Install self-hosted GitHub Actions runners for one repo (Actions Runner Controller, runner scale set; fixed namespaces, options below)
 
 `openclaw` recipe config management:
@@ -92,11 +91,6 @@ netcup-kube install <recipe> [recipe-options]
 - `--workspace-bootstrap-mode <overwrite|off>` — Control backup + override apply behavior for detected agent workspaces (default: `off`).
 - `--upgrade` — Force rollout restart of deployment `openclaw` after Helm succeeds.
 - `OPENCLAW_HOST` — Env default alternative to `--host`.
-
-`zeroclaw` recipe options:
-- `--secret <name>` — Name of the pre-created Kubernetes Secret with `ANTHROPIC_API_KEY` (required).
-- `--image <repo:tag>` — Override the default ZeroClaw image (must be `repo:tag` format; digest refs like `repo@sha256:...` are not supported by the Helm chart values and will be rejected).
-- `--storage <size>` — PVC size for `~/.zeroclaw/` state (default: `5Gi`).
 
 `gha-runners` recipe options:
 - Namespaces are fixed: the controller runs in `arc-systems`, the runners in `arc-runners`. The common `--namespace` and `--host` options are not accepted.

@@ -64,6 +64,7 @@ echo "  ✓ metoro --client-service validation"
 
 # metoro render with stub helm/kubectl (no cluster): token on stdin only, default traces [batch].
 stub_dir="$(mktemp -d)"
+trap 'rm -rf "${stub_dir:?}"' EXIT
 cat > "${stub_dir}/helm" << 'STUB'
 #!/usr/bin/env bash
 echo "$*" >> "${STUB_LOG}/helm.argv"
