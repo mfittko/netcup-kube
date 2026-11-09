@@ -45,6 +45,7 @@ NAMESPACE=prod-db STORAGE=50Gi netcup-kube install postgres
 - **dashboard**: Kubernetes Dashboard
 - **redisinsight**: Redis GUI for development
 - **llm-proxy**: Install llm-proxy from its Helm chart (Secret-backed config)
+- **metoro**: Metoro eBPF monitoring (exporter + node-agent) and in-cluster OTLP collector
 - **openclaw**: OpenClaw agent with mandatory kernel-level network monitoring
 - **zeroclaw**: ZeroClaw AI agent (bundled Helm chart, TOML config, Anthropic provider, dedicated namespace)
 

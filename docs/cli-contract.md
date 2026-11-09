@@ -80,6 +80,7 @@ netcup-kube install <recipe> [recipe-options]
 - `redisinsight` — Install RedisInsight (Redis GUI)
 - `kube-prometheus-stack` — Install Grafana + Prometheus + Alertmanager
 - `dashboard` — Install Kubernetes Dashboard (official web UI)
+- `metoro` — Install Metoro eBPF monitoring + in-cluster OTLP collector (`METORO_BEARER_TOKEN`; `--client-service` for trace attribution)
 - `openclaw` — Install OpenClaw with mandatory kernel-level network monitoring
 - `zeroclaw` — Install ZeroClaw AI agent (bundled Helm chart; TOML config; Anthropic provider)
 

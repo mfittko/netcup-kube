@@ -38,7 +38,7 @@ Options:
   --host <fqdn>        Create a Traefik Ingress for this host on OpenClaw gateway port 18789 (entrypoint: web).
   --storage <size>     PVC size for OpenClaw state (default: 10Gi).
   --upgrade            Force a rollout restart of OpenClaw deployment after Helm succeeds.
-  --uninstall          Uninstall OpenClaw and monitoring components.
+  --uninstall          Uninstall OpenClaw (keeps Metoro; deletes the openclaw PVC).
   -h, --help           Show this help.
 
 Environment:
@@ -289,7 +289,7 @@ done
 [[ -n "${STORAGE}" ]] || die "Storage size is required"
 
 if [[ "${UNINSTALL}" == "true" ]]; then
-  recipe_confirm_or_die "Uninstall OpenClaw and monitoring components from namespace ${NAMESPACE}"
+  recipe_confirm_or_die "Uninstall OpenClaw from namespace ${NAMESPACE} (deletes its PVC and data)"
 
   log "Uninstalling OpenClaw from namespace: ${NAMESPACE}"
   helm uninstall openclaw --namespace "${NAMESPACE}" || true
@@ -297,16 +297,9 @@ if [[ "${UNINSTALL}" == "true" ]]; then
   log "Removing OpenClaw ingress (if present)"
   recipe_kdelete ingress openclaw-ingress -n "${NAMESPACE}"
 
-  log "Uninstalling Metoro exporter stack from namespace: ${METORO_NAMESPACE}"
-  helm uninstall metoro-exporter --namespace "${METORO_NAMESPACE}" || true
-
-  log "Removing Metoro OTLP collector resources (if present)"
-  recipe_kdelete service metoro-otel-collector -n "${METORO_NAMESPACE}"
-  recipe_kdelete deployment metoro-otel-collector -n "${METORO_NAMESPACE}"
-  recipe_kdelete configmap metoro-otel-collector-config -n "${METORO_NAMESPACE}"
-
   echo
-  log "OpenClaw and monitoring components uninstalled. Note: PVCs may remain depending on storage class/reclaim policy."
+  log "OpenClaw uninstalled. Metoro is kept (remove with: netcup-kube install metoro --uninstall)."
+  log "Note: helm uninstall deletes the chart-owned 'openclaw' PVC and its data."
   log "To remove namespace: kubectl delete namespace ${NAMESPACE}"
   exit 0
 fi
@@ -454,154 +447,12 @@ EOF
 fi
 log "Secret '${SECRET_NAME}' verified"
 
-# Install mandatory kernel-level network monitoring (Metoro)
+# Install mandatory kernel-level network monitoring (Metoro) via the metoro recipe
 log "=== Installing mandatory kernel-level network monitoring (Metoro) ==="
-
-recipe_ensure_namespace "${METORO_NAMESPACE}"
-recipe_helm_repo_add "metoro-exporter" "https://metoro-io.github.io/metoro-helm-charts/"
-
-helm upgrade --install metoro-exporter metoro-exporter/metoro-exporter \
+METORO_BEARER_TOKEN="${METORO_TOKEN}" "${SCRIPTS_DIR}/recipes/metoro/install.sh" \
   --namespace "${METORO_NAMESPACE}" \
-  --version "${CHART_VERSION_METORO_EXPORTER}" \
-  --set-string exporter.secret.bearerToken="${METORO_TOKEN}" \
-  --set exporter.replicas=1 \
-  --set exporter.autoscaling.horizontalPodAutoscaler.enabled=false \
-  --set exporter.resources.requests.cpu=100m \
-  --set exporter.resources.requests.memory=256Mi \
-  --set exporter.resources.limits.cpu=500m \
-  --set exporter.resources.limits.memory=1Gi \
-  --set redis.master.resourcesPreset=micro \
-  --wait \
-  --timeout 10m || {
-  cat << EOF
-
-ERROR: Failed to install Metoro monitoring stack.
-
-This is a required component for OpenClaw kernel-level observability.
-
-Remediation steps:
-1. Check pod status: kubectl -n ${METORO_NAMESPACE} get pods
-2. Check exporter logs: kubectl -n ${METORO_NAMESPACE} logs deployment/metoro-exporter
-3. Check cluster resources: kubectl describe nodes
-
-Cannot proceed without network monitoring.
-EOF
-  exit 1
-}
-
-log "Verifying Metoro components are healthy"
-if ! k -n "${METORO_NAMESPACE}" wait --for=condition=available --timeout=3m deployment/metoro-exporter > /dev/null 2>&1; then
-  die "Metoro exporter is not ready in namespace '${METORO_NAMESPACE}'."
-fi
-
-if ! k -n "${METORO_NAMESPACE}" wait --for=condition=ready --timeout=3m pod -l app.kubernetes.io/name=redis,app.kubernetes.io/component=master > /dev/null 2>&1; then
-  die "Metoro Redis is not ready in namespace '${METORO_NAMESPACE}'."
-fi
-
-if ! k -n "${METORO_NAMESPACE}" rollout status daemonset/metoro-node-agent --timeout=3m > /dev/null 2>&1; then
-  die "Metoro node-agent daemonset is not ready in namespace '${METORO_NAMESPACE}'."
-fi
-
-log "Deploying in-cluster OTLP collector for OpenClaw telemetry"
-cat << EOF | k -n "${METORO_NAMESPACE}" apply -f -
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: metoro-otel-collector-config
-data:
-  collector.yaml: |
-    receivers:
-      otlp:
-        protocols:
-          http:
-            endpoint: 0.0.0.0:4318
-    processors:
-      batch:
-        timeout: 5s
-        send_batch_size: 1024
-      transform/openclaw_service_attrs:
-        error_mode: ignore
-        trace_statements:
-          - context: span
-            statements:
-              - set(attributes["client.service.name"], "/k8s/${NAMESPACE}/openclaw")
-              - set(attributes["server.service.name"], attributes["service.address"]) where attributes["service.address"] != nil
-              - set(attributes["server.service.name"], resource.attributes["service.address"]) where attributes["server.service.name"] == nil and resource.attributes["service.address"] != nil
-              - set(attributes["server.service.name"], attributes["server.address"]) where attributes["server.service.name"] == nil and attributes["server.address"] != nil
-              - set(attributes["net.peer.name"], attributes["server.address"]) where attributes["net.peer.name"] == nil and attributes["server.address"] != nil
-              - set(attributes["network.protocol.name"], attributes["url.scheme"]) where attributes["network.protocol.name"] == nil and attributes["url.scheme"] != nil
-              - set(attributes["http.scheme"], attributes["url.scheme"]) where attributes["http.scheme"] == nil and attributes["url.scheme"] != nil
-              - set(attributes["rpc.system"], "http") where attributes["rpc.system"] == nil and attributes["url.scheme"] != nil and (attributes["url.scheme"] == "http" or attributes["url.scheme"] == "https")
-              - set(attributes["rpc.service"], attributes["server.service.name"]) where attributes["rpc.service"] == nil and attributes["server.service.name"] != nil
-    exporters:
-      otlphttp/metoro:
-        endpoint: http://metoro-exporter.${METORO_NAMESPACE}.svc.cluster.local/api/v1/custom/otel
-        tls:
-          insecure: true
-    service:
-      pipelines:
-        logs:
-          receivers: [otlp]
-          processors: [batch]
-          exporters: [otlphttp/metoro]
-        traces:
-          receivers: [otlp]
-          processors: [transform/openclaw_service_attrs, batch]
-          exporters: [otlphttp/metoro]
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: metoro-otel-collector
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: metoro-otel-collector
-  template:
-    metadata:
-      labels:
-        app: metoro-otel-collector
-    spec:
-      containers:
-      - name: otel-collector
-        image: otel/opentelemetry-collector-contrib:0.102.1
-        args:
-          - --config=/conf/collector.yaml
-        ports:
-          - name: otlp-http
-            containerPort: 4318
-        resources:
-          requests:
-            cpu: 50m
-            memory: 128Mi
-          limits:
-            cpu: 300m
-            memory: 512Mi
-        volumeMounts:
-          - name: config
-            mountPath: /conf
-      volumes:
-        - name: config
-          configMap:
-            name: metoro-otel-collector-config
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: metoro-otel-collector
-spec:
-  selector:
-    app: metoro-otel-collector
-  ports:
-    - name: otlp-http
-      port: 4318
-      targetPort: 4318
-EOF
-
-if ! k -n "${METORO_NAMESPACE}" rollout status deployment/metoro-otel-collector --timeout=3m > /dev/null 2>&1; then
-  die "Metoro OTLP collector deployment is not ready in namespace '${METORO_NAMESPACE}'."
-fi
+  --client-service "/k8s/${NAMESPACE}/openclaw" ||
+  die "Metoro is required for OpenClaw kernel-level observability. Cannot proceed without network monitoring."
 
 if [[ -z "${OTLP_ENDPOINT}" ]]; then
   OTLP_ENDPOINT="http://metoro-otel-collector.${METORO_NAMESPACE}.svc.cluster.local:4318"
@@ -609,9 +460,6 @@ if [[ -z "${OTLP_ENDPOINT}" ]]; then
 fi
 
 OTLP_TRACES_ENDPOINT="${OTLP_ENDPOINT%/}/v1/traces"
-
-log "Metoro monitoring stack is healthy"
-log "=== Kernel-level network monitoring installation complete ==="
 
 # Add OpenClaw Helm repo
 recipe_helm_repo_add "openclaw" "https://serhanekicii.github.io/openclaw-helm"

@@ -1,6 +1,6 @@
 # OpenClaw Recipe
 
-This recipe installs [OpenClaw](https://openclaw.ai/) with mandatory kernel-level network monitoring via Metoro.
+This recipe installs [OpenClaw](https://openclaw.ai/) with mandatory kernel-level network monitoring via Metoro. Metoro is installed through the standalone [`metoro`](../metoro/install.sh) recipe and is kept on uninstall.
 
 ## Overview
 
@@ -277,15 +277,15 @@ https://us-east.metoro.io
 | `--host` | Create Traefik Ingress for this FQDN on OpenClaw gateway/webhook port `18789` | None |
 | `--storage` | PVC size for OpenClaw state | `10Gi` |
 | `--upgrade` | Force rollout restart of deployment `openclaw` after Helm succeeds | `false` |
-| `--uninstall` | Uninstall OpenClaw, Metoro exporter, and OTLP collector resources | N/A |
+| `--uninstall` | Uninstall OpenClaw (keeps Metoro; deletes the chart-owned `openclaw` PVC and its data) | N/A |
 
 ## Uninstallation
 
 ```bash
-netcup-kube install openclaw --uninstall --namespace openclaw --metoro-namespace metoro
+netcup-kube install openclaw --uninstall --namespace openclaw
 ```
 
-Note: PVCs may remain depending on storage class reclaim policy.
+This deletes the chart-owned `openclaw` PVC and its data. Metoro stays installed; remove it separately with `netcup-kube install metoro --uninstall`.
 
 ## Troubleshooting
 
