@@ -6,10 +6,10 @@
 replicaCount: 8
 
 image:
-  # mfittko/g-way continues the archived sofatutor/llm-proxy (same code at v0.1.4).
+  # mfittko/g-way continues the archived sofatutor/llm-proxy (same code at 0.1.4).
   repository: ghcr.io/mfittko/g-way
   # Pinned to a released version; bump together with LLM_PROXY_CHART_VERSION.
-  tag: v0.1.4
+  tag: "0.1.4"
 
 service:
   type: ClusterIP
