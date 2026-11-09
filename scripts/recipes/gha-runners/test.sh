@@ -45,6 +45,10 @@ if [[ "$1 ${2:-}" == "get secret" ]]; then
   printf '%s' "${STUB_ANNOTATED_REPO:-}"
 fi
 if [[ "$1 ${2:-}" == "get autoscalingrunnerset" ]]; then
+  if [[ $# -ne 7 || "$3" != "app" || "$4" != "-n" || "$5" != "arc-runners" || "$6" != "-o" || "$7" != "name" ]]; then
+    echo "Unexpected AutoscalingRunnerSet get target" >&2
+    exit 1
+  fi
   if [[ -n "${STUB_RUNNER_SET_ERR:-}" ]]; then
     echo "${STUB_RUNNER_SET_ERR}" >&2
     exit 1
@@ -178,6 +182,14 @@ STUB_SECRET_ERR="Unable to connect to the server" CONFIRM=true expect 1 "Unable 
 STUB_RUNNER_SET_EXISTS=1 CONFIRM=true expect 1 "AutoscalingRunnerSet arc-runners/app still exists" -- --repo bob/app --uninstall
 STUB_RUNNER_SET_ERR="Unable to connect to the server" CONFIRM=true expect 1 "Cannot read AutoscalingRunnerSet arc-runners/app" -- --repo bob/app --uninstall
 STUB_RUNNER_SET_ERR="Proxy NotFound response" CONFIRM=true expect 1 "Cannot read AutoscalingRunnerSet arc-runners/app" -- --repo bob/app --uninstall
+# The stub itself must reject a query for another scale set or namespace.
+for target in "other arc-runners" "app other"; do
+  read -r name namespace <<< "${target}"
+  rc=0
+  OUT="$(kubectl get autoscalingrunnerset "${name}" -n "${namespace}" -o name 2>&1)" || rc=$?
+  [[ "${rc}" == 1 && "${OUT}" == *"Unexpected AutoscalingRunnerSet get target"* ]] ||
+    fail "stub accepted the wrong AutoscalingRunnerSet target: ${target}"
+done
 
 # Ownership guard: a release named "app" that serves alice/app.
 export STUB_RELEASE_URL=https://github.com/alice/app
