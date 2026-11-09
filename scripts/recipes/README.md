@@ -17,6 +17,7 @@ All Helm chart versions, container images, and default settings are centrally ma
 
 - **Chart Versions**: `CHART_VERSION_*` - Helm chart versions (check artifacthub.io)
 - **Image Versions**: `IMAGE_VERSION_*` - Container image tags
+- **Images**: `IMAGE_*` (without `VERSION_`) - Full image references, for example `IMAGE_GHA_RUNNER`
 - **Namespaces**: `NAMESPACE_*` - Default namespaces for each recipe
 - **Storage**: `DEFAULT_STORAGE_*` - Default PV sizes per service (override with `STORAGE=`)
 
@@ -47,6 +48,7 @@ NAMESPACE=prod-db STORAGE=50Gi netcup-kube install postgres
 - **llm-proxy**: Install llm-proxy from its Helm chart (Secret-backed config)
 - **metoro**: Metoro eBPF monitoring (exporter + node-agent) and in-cluster OTLP collector
 - **openclaw**: OpenClaw agent with mandatory kernel-level network monitoring
+- **gha-runners**: Self-hosted GitHub Actions runners for one repository (Actions Runner Controller in scale set mode, image pre-pull, token from `--token-file` or `GITHUB_PAT`; fixed namespaces `arc-systems` and `arc-runners`, no `--namespace` or `--host`)
 
 ## Usage
 
@@ -79,6 +81,6 @@ recipe-name/
 All recipes:
 - Source `scripts/lib/common.sh` for shared functions
 - Source `scripts/recipes/recipes.conf` for configuration management
-- Follow consistent argument parsing (`--namespace`, `--host`, etc.)
+- Follow consistent argument parsing (`--namespace`, `--host`, etc.; exception: `gha-runners` uses fixed namespaces and rejects `--namespace` and `--host`)
 - Provide clear output with connection instructions
 

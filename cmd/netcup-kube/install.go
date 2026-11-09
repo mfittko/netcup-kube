@@ -39,6 +39,7 @@ Available recipes:
   llm-proxy                Install llm-proxy (Helm chart; Secret-backed config)
   metoro                   Install Metoro eBPF monitoring + OTLP collector
   openclaw                 Install OpenClaw with kernel-level network monitoring
+  gha-runners              Install self-hosted GitHub Actions runners (ARC scale set)
 
 Examples:
   netcup-kube install argo-cd --help

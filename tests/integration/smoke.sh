@@ -98,6 +98,10 @@ STUB_LOG="${stub_dir}" PATH="${stub_dir}:${PATH}" METORO_BEARER_TOKEN="${sentine
 rm -rf "${stub_dir:?}"
 echo "  ✓ metoro render (token on stdin, default traces [batch])"
 
+# gha-runners input validation, ownership guard and token handling (stub helm/kubectl, DRY_RUN).
+# Its FAIL lines go to stdout, so the output stays visible.
+bash scripts/recipes/gha-runners/test.sh
+
 echo "==== Testing command help ===="
 # netcup-kube subcommand help should not require interactivity.
 ./bin/netcup-kube dns --help > /dev/null
