@@ -194,19 +194,33 @@ fi
 
 # The Secret keys on NAME only, so it records its repo in this annotation.
 REPO_ANNOTATION="gha-runners.netcup-kube/repo"
-# Prints the Secret's repo annotation; fails when the Secret cannot be read.
+# Prints the Secret's repo annotation and returns 0. Returns 1 when the Secret
+# does not exist (NotFound), and 2 after printing the kubectl error to stderr on
+# any other read error. Callers run it in a command substitution, where a die
+# would not stop the script, so each caller checks the return code itself.
 secret_repo() {
-  k get secret "${SECRET}" -n "${RUNNER_NS}" \
-    -o "jsonpath={.metadata.annotations.${REPO_ANNOTATION//./\\.}}" 2> /dev/null
+  local err rc=0
+  { err="$(k get secret "${SECRET}" -n "${RUNNER_NS}" \
+    -o "jsonpath={.metadata.annotations.${REPO_ANNOTATION//./\\.}}" 2>&1 >&3)" || rc=$?; } 3>&1
+  ((rc == 0)) && return 0
+  [[ "${err}" == *"NotFound"* ]] && return 1
+  printf '%s\n' "${err}" >&2
+  return 2
 }
+read_err="Cannot read Secret ${RUNNER_NS}/${SECRET}, nothing changed"
 
 if [[ "${UNINSTALL}" == "true" ]]; then
   # Without a release, only the Secret annotation binds NAME to a repo: never
   # delete a Secret (or its pre-pull) recorded for another repo. A missing
   # Secret or an empty annotation proceeds, so the uninstall stays idempotent.
-  if [[ "${RELEASE_EXISTS}" != "true" ]] && annotated_repo="$(secret_repo)" &&
-    [[ -n "${annotated_repo}" && "${annotated_repo}" != "${REPO}" ]]; then
-    die "Secret ${RUNNER_NS}/${SECRET} was written for '${annotated_repo}', not ${REPO}. Pass the matching --repo or a distinct --name."
+  # Any other read error stops here, because ownership is then unproven.
+  if [[ "${RELEASE_EXISTS}" != "true" ]]; then
+    repo_rc=0
+    annotated_repo="$(secret_repo)" || repo_rc=$?
+    ((repo_rc != 2)) || die "${read_err}"
+    if ((repo_rc == 0)) && [[ -n "${annotated_repo}" && "${annotated_repo}" != "${REPO}" ]]; then
+      die "Secret ${RUNNER_NS}/${SECRET} was written for '${annotated_repo}', not ${REPO}. Pass the matching --repo or a distinct --name."
+    fi
   fi
   recipe_confirm_or_die "Uninstall runner scale set '${NAME}' (repo ${REPO}) from namespace ${RUNNER_NS}"
   log "Uninstalling runner scale set ${NAME}"
@@ -235,9 +249,11 @@ fi
 if [[ -z "${TOKEN}" ]]; then
   # Reuse the Secret when the guard above bound the release to REPO, or when
   # the Secret records REPO itself.
-  if ! annotated_repo="$(secret_repo)"; then
+  repo_rc=0
+  annotated_repo="$(secret_repo)" || repo_rc=$?
+  ((repo_rc != 2)) || die "${read_err}"
+  ((repo_rc == 0)) ||
     die "No GitHub token: pass --token-file or GITHUB_PAT (Secret ${RUNNER_NS}/${SECRET} does not exist yet)"
-  fi
   [[ "${RELEASE_EXISTS}" == "true" || "${annotated_repo}" == "${REPO}" ]] ||
     die "Secret ${RUNNER_NS}/${SECRET} was written for '${annotated_repo}', not ${REPO}. Pass --token-file or GITHUB_PAT, or a distinct --name."
 fi

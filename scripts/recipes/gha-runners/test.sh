@@ -24,12 +24,20 @@ case "$1 ${2:-}" in
   *) exit 0 ;;
 esac
 EOF
-# kubectl stub: "get secret" fails when STUB_NO_SECRET is set, otherwise it
-# prints the Secret's repo annotation STUB_ANNOTATED_REPO. Every other call succeeds.
+# kubectl stub: "get secret" fails with NotFound when STUB_NO_SECRET is set, fails
+# with a connection error when STUB_SECRET_ERR is set, and otherwise prints the
+# Secret's repo annotation STUB_ANNOTATED_REPO. Every other call succeeds.
 cat > "${TMP}/bin/kubectl" << 'EOF'
 #!/usr/bin/env bash
 if [[ "$1 ${2:-}" == "get secret" ]]; then
-  [[ -z "${STUB_NO_SECRET:-}" ]] || exit 1
+  if [[ -n "${STUB_NO_SECRET:-}" ]]; then
+    echo "Error from server (NotFound): secrets \"$3\" not found" >&2
+    exit 1
+  fi
+  if [[ -n "${STUB_SECRET_ERR:-}" ]]; then
+    echo "Unable to connect to the server" >&2
+    exit 1
+  fi
   printf '%s' "${STUB_ANNOTATED_REPO:-}"
 fi
 exit 0
@@ -41,7 +49,7 @@ chmod +x "${TMP}/bin/helm" "${TMP}/bin/kubectl"
 # Most cases pass a token; it must never appear in the output.
 SENTINEL="gha-test-sentinel-$$"
 export PATH="${TMP}/bin:${PATH}" DRY_RUN=true KUBECONFIG="${TMP}/kubeconfig" GITHUB_PAT="${SENTINEL}"
-unset STUB_RELEASE_URL STUB_NO_SECRET STUB_ANNOTATED_REPO
+unset STUB_RELEASE_URL STUB_NO_SECRET STUB_SECRET_ERR STUB_ANNOTATED_REPO
 
 # is_tty also accepts an openable /dev/tty, so on a terminal the uninstall
 # confirmation would wait for input. Run install.sh in a new session, which has
@@ -130,6 +138,7 @@ expect 0 "helm upgrade --install app" -- --repo o/app
 
 # Token-less runs reuse the Secret only when it is bound to --repo.
 GITHUB_PAT="" STUB_NO_SECRET=1 expect 1 "No GitHub token" -- --repo o/app
+GITHUB_PAT="" STUB_SECRET_ERR=1 expect 1 "Cannot read Secret arc-runners/gha-app-github" -- --repo o/app
 GITHUB_PAT="" STUB_ANNOTATED_REPO=o/app expect 0 "helm upgrade --install app" -- --repo o/app
 GITHUB_PAT="" STUB_ANNOTATED_REPO=alice/app expect 1 "was written for 'alice/app', not bob/app" -- --repo bob/app
 GITHUB_PAT="" expect 1 "was written for '', not o/app" -- --repo o/app
@@ -139,6 +148,8 @@ STUB_ANNOTATED_REPO=alice/app CONFIRM=true expect 1 "was written for 'alice/app'
 STUB_ANNOTATED_REPO=bob/app CONFIRM=true expect 0 "secret gha-app-github" -- --repo bob/app --uninstall
 CONFIRM=true expect 0 "secret gha-app-github" -- --repo bob/app --uninstall
 STUB_NO_SECRET=1 CONFIRM=true expect 0 "secret gha-app-github" -- --repo bob/app --uninstall
+# A read error other than NotFound proves no ownership, so nothing is deleted.
+STUB_SECRET_ERR=1 CONFIRM=true expect 1 "Unable to connect to the server" -- --repo bob/app --uninstall
 
 # Ownership guard: a release named "app" that serves alice/app.
 export STUB_RELEASE_URL=https://github.com/alice/app
