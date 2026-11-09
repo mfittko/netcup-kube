@@ -25,8 +25,8 @@ Options:
   --max-runners <n>         Concurrent runners (default: 2).
   --cpu-request <q>         CPU request per runner (default: 1).
   --cpu-limit <q>           CPU limit per runner (default: 2).
-  --memory-request <q>      Memory request per runner (default: 3Gi).
-  --memory-limit <q>        Memory limit per runner (default: 3Gi).
+  --memory-request <q>      Memory request per runner (default: 2Gi).
+  --memory-limit <q>        Memory limit per runner (default: 2560Mi).
   --token-file <path>       File with a GitHub token for ARC (see Credentials).
   --uninstall               Remove this repo's scale set, its secret and its image pre-pull.
                             The shared controller stays installed.
@@ -58,8 +58,8 @@ MIN_RUNNERS="0"
 MAX_RUNNERS="2"
 CPU_REQUEST="1"
 CPU_LIMIT="2"
-MEMORY_REQUEST="3Gi"
-MEMORY_LIMIT="3Gi"
+MEMORY_REQUEST="2Gi"
+MEMORY_LIMIT="2560Mi"
 TOKEN_FILE=""
 UNINSTALL="false"
 CONTROLLER_NS="${NAMESPACE_ARC_SYSTEMS}"
