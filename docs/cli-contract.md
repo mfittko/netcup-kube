@@ -82,7 +82,7 @@ netcup-kube install <recipe> [recipe-options]
 - `dashboard` — Install Kubernetes Dashboard (official web UI)
 - `openclaw` — Install OpenClaw with mandatory kernel-level network monitoring
 - `zeroclaw` — Install ZeroClaw AI agent (bundled Helm chart; TOML config; Anthropic provider)
-- `gha-runners` — Install self-hosted GitHub Actions runners for one repo (Actions Runner Controller, runner scale set; see `--help`)
+- `gha-runners` — Install self-hosted GitHub Actions runners for one repo (Actions Runner Controller, runner scale set; fixed namespaces, options below)
 
 `openclaw` recipe config management:
 - `--config-file <path>` — Supply an OpenClaw JSON/JSON5 template from repo or local path.
@@ -97,10 +97,18 @@ netcup-kube install <recipe> [recipe-options]
 - `--image <repo:tag>` — Override the default ZeroClaw image (must be `repo:tag` format; digest refs like `repo@sha256:...` are not supported by the Helm chart values and will be rejected).
 - `--storage <size>` — PVC size for `~/.zeroclaw/` state (default: `5Gi`).
 
+`gha-runners` recipe options:
+- Namespaces are fixed: the controller runs in `arc-systems`, the runners in `arc-runners`. The common `--namespace` and `--host` options are not accepted.
+- `--repo <owner/name>` — GitHub repository the runners serve (required).
+- `--name <name>` — Scale set name and `runs-on` label (default: the repo name). Two repos with the same name under different owners need distinct names.
+- `--token-file <path>` — File with the GitHub token for ARC. `GITHUB_PAT` is the env alternative. Without either, the existing Secret is reused.
+- `--uninstall` — Remove the repo's scale set, Secret and image pre-pull (the shared controller stays).
+- See `--help` for image, runner count and resource options.
+
 **Common Options:**
 - `--help`, `-h` — Show recipe-specific help
-- `--host <fqdn>` — Create Traefik Ingress for this host (auto-adds to Caddy domains)
-- `--namespace <name>` — Namespace to install into (recipe-specific default)
+- `--host <fqdn>` — Create Traefik Ingress for this host (auto-adds to Caddy domains; not accepted by `gha-runners`)
+- `--namespace <name>` — Namespace to install into (recipe-specific default; not accepted by `gha-runners`)
 
 **Environment:**
 - `KUBECONFIG` — Kubeconfig to use (auto-fetched from remote if not set and not on server)

@@ -45,6 +45,8 @@ Environment:
 
 Notes:
   - The controller runs in namespace arc-systems, the runners in arc-runners.
+    The namespaces are fixed: the common --namespace and --host options are not accepted.
+  - Two repos with the same name under different owners need distinct --name values.
   - Runners are ephemeral: each job gets a fresh pod from the runner image.
   - A DaemonSet pre-pulls the runner image on every node, so jobs never wait for the download.
   - In a workflow, use: runs-on: <name>
@@ -61,6 +63,7 @@ CPU_LIMIT="2"
 MEMORY_REQUEST="2Gi"
 MEMORY_LIMIT="2560Mi"
 TOKEN_FILE=""
+TOKEN_FILE_GIVEN="false"
 UNINSTALL="false"
 CONTROLLER_NS="${NAMESPACE_ARC_SYSTEMS}"
 RUNNER_NS="${NAMESPACE_ARC_RUNNERS}"
@@ -115,8 +118,12 @@ while [[ $# -gt 0 ]]; do
     --token-file)
       shift
       TOKEN_FILE="${1:-}"
+      TOKEN_FILE_GIVEN="true"
       ;;
-    --token-file=*) TOKEN_FILE="${1#*=}" ;;
+    --token-file=*)
+      TOKEN_FILE="${1#*=}"
+      TOKEN_FILE_GIVEN="true"
+      ;;
     --uninstall) UNINSTALL="true" ;;
     -h | --help | help)
       usage
@@ -131,28 +138,61 @@ while [[ $# -gt 0 ]]; do
   shift || true
 done
 
-[[ "${REPO}" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || die "--repo <owner/name> is required"
-NAME="${NAME:-${REPO#*/}}"
+[[ -n "${REPO}" ]] || die "--repo <owner/name> is required"
+REPO_OWNER="${REPO%%/*}"
+REPO_NAME="${REPO#*/}"
+if ! [[ "${REPO}" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] ||
+  [[ "${REPO_OWNER}" == "." || "${REPO_OWNER}" == ".." || "${REPO_NAME}" == "." || "${REPO_NAME}" == ".." ]]; then
+  die "invalid --repo (expected owner/name): ${REPO}"
+fi
+NAME="${NAME:-${REPO_NAME}}"
 [[ "${NAME}" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$ ]] || die "--name must be a DNS label (lowercase letters, digits, '-'): ${NAME}"
-[[ "${MIN_RUNNERS}" =~ ^[0-9]+$ && "${MAX_RUNNERS}" =~ ^[0-9]+$ ]] || die "--min-runners and --max-runners must be numbers"
+[[ -n "${IMAGE}" ]] || die "--image must not be empty"
+COUNT_RE='^(0|[1-9][0-9]*)$'
+[[ "${MIN_RUNNERS}" =~ ${COUNT_RE} && "${MAX_RUNNERS}" =~ ${COUNT_RE} ]] || die "--min-runners and --max-runners must be whole numbers without leading zeros"
 ((MIN_RUNNERS <= MAX_RUNNERS)) || die "--min-runners must not exceed --max-runners"
+# Kubernetes quantity: the values go into quoted YAML, so reject anything else.
+QUANTITY_RE='^[0-9]+(\.[0-9]+)?(m|[KMGTPE]i?)?$'
+check_quantity() {
+  [[ "$2" =~ ${QUANTITY_RE} ]] || die "$1 must be a Kubernetes quantity (for example 500m, 2, 2Gi): '$2'"
+}
+check_quantity --cpu-request "${CPU_REQUEST}"
+check_quantity --cpu-limit "${CPU_LIMIT}"
+check_quantity --memory-request "${MEMORY_REQUEST}"
+check_quantity --memory-limit "${MEMORY_LIMIT}"
 
+recipe_check_kubeconfig
 need_cmd helm
 
 SECRET="gha-${NAME}-github"
 PREPULL="gha-${NAME}-prepull"
+
+# Ownership guard: the release, its Secret and its pre-pull key on NAME only,
+# so a release named NAME that serves another repo must never be overwritten
+# or uninstalled. A provably absent release passes; any other helm error stops
+# before a mutation. These are reads, so they run outside the run wrapper.
+RELEASE_EXISTS="false"
+if status_err="$(helm status "${NAME}" --namespace "${RUNNER_NS}" 2>&1 > /dev/null)"; then
+  RELEASE_EXISTS="true"
+  values_json="$(helm get values "${NAME}" --namespace "${RUNNER_NS}" -o json)"
+  owner_url=""
+  if [[ "${values_json}" =~ \"githubConfigUrl\":\"([^\"]*)\" ]]; then
+    owner_url="${BASH_REMATCH[1]}"
+  fi
+  [[ "${owner_url}" == "https://github.com/${REPO}" ]] ||
+    die "Release ${RUNNER_NS}/${NAME} serves '${owner_url}', not https://github.com/${REPO}. Pass a distinct --name."
+elif [[ "${status_err}" != *"release: not found"* ]]; then
+  die "helm status ${NAME} failed, nothing changed: ${status_err}"
+fi
 
 if [[ "${UNINSTALL}" == "true" ]]; then
   recipe_confirm_or_die "Uninstall runner scale set '${NAME}' (repo ${REPO}) from namespace ${RUNNER_NS}"
   log "Uninstalling runner scale set ${NAME}"
   # ARC needs the Secret to deregister the scale set from GitHub, so a failed
   # or timed-out uninstall stops here (set -e) and keeps the Secret. Only a
-  # release that is provably absent skips the uninstall; any other helm error
-  # (unreachable cluster, wrong kubeconfig) stops before the Secret is deleted.
-  if status_err="$(helm status "${NAME}" --namespace "${RUNNER_NS}" 2>&1 > /dev/null)"; then
+  # release that is provably absent (guard above) skips the uninstall.
+  if [[ "${RELEASE_EXISTS}" == "true" ]]; then
     run helm uninstall "${NAME}" --namespace "${RUNNER_NS}" --wait --timeout 5m
-  elif [[ "${status_err}" != *"release: not found"* ]]; then
-    die "helm status ${NAME} failed, keeping Secret ${RUNNER_NS}/${SECRET}: ${status_err}"
   fi
   run recipe_kdelete daemonset "${PREPULL}" -n "${RUNNER_NS}"
   run recipe_kdelete secret "${SECRET}" -n "${RUNNER_NS}"
@@ -164,11 +204,13 @@ run recipe_ensure_namespace "${RUNNER_NS}"
 
 # Credential: from --token-file or GITHUB_PAT; otherwise reuse the existing Secret.
 TOKEN=""
-if [[ -n "${TOKEN_FILE}" ]]; then
+if [[ "${TOKEN_FILE_GIVEN}" == "true" ]]; then
+  [[ -n "${TOKEN_FILE}" ]] || die "--token-file requires a path"
   [[ -r "${TOKEN_FILE}" ]] || die "Token file not readable: ${TOKEN_FILE}"
   TOKEN="$(tr -d '[:space:]' < "${TOKEN_FILE}")"
+  [[ -n "${TOKEN}" ]] || die "Token file is empty: ${TOKEN_FILE}"
 elif [[ -n "${GITHUB_PAT:-}" ]]; then
-  TOKEN="${GITHUB_PAT}"
+  TOKEN="${GITHUB_PAT//[[:space:]]/}"
 fi
 apply_token_secret() {
   # The token goes through stdin, never through a command-line argument.

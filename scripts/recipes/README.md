@@ -17,6 +17,7 @@ All Helm chart versions, container images, and default settings are centrally ma
 
 - **Chart Versions**: `CHART_VERSION_*` - Helm chart versions (check artifacthub.io)
 - **Image Versions**: `IMAGE_VERSION_*` - Container image tags
+- **Images**: `IMAGE_*` (without `VERSION_`) - Full image references, for example `IMAGE_GHA_RUNNER`
 - **Namespaces**: `NAMESPACE_*` - Default namespaces for each recipe
 - **Storage**: `DEFAULT_STORAGE_*` - Default PV sizes per service (override with `STORAGE=`)
 
