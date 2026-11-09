@@ -246,11 +246,26 @@ helm_uninstall() {
 }
 
 without_dry_run_scale_set() {
-  # In a dry run nothing was removed, so drop the scale set being uninstalled from a listing on stdin.
+  # Usage: without_dry_run_scale_set <exact line>... In a dry run nothing was removed, so drop the
+  # listing lines on stdin that belong to the scale set being uninstalled. Lines match exactly, so a
+  # sibling scale set such as '<name>-large' is never dropped.
   if [[ "${DRY_RUN:-false}" == "true" && "${UNINSTALL}" == "true" ]]; then
-    grep -v -E -- "${1}" || true
+    local own patterns=()
+    for own in "$@"; do patterns+=(-e "${own}"); done
+    grep -v -x -F "${patterns[@]}" || true
   else
     cat
+  fi
+}
+
+dry_run_own_runner_objects() {
+  # Prints the ARC objects of the scale set being uninstalled: its AutoscalingRunnerSet by exact name
+  # and its EphemeralRunners by ARC's scale-set-name label. Only used to filter a dry-run preview; if
+  # the label lookup fails nothing extra is filtered, so the preview errs toward refusing.
+  local owned
+  printf '%s\n' "autoscalingrunnerset.actions.github.com/${NAME}"
+  if owned="$(k get ephemeralrunners.actions.github.com --namespace "${NS_RUNNERS}" -l "actions.github.com/scale-set-name=${NAME}" -o name 2> /dev/null)"; then
+    [[ -z "${owned}" ]] || printf '%s\n' "${owned}"
   fi
 }
 
@@ -267,7 +282,7 @@ controller_guard() {
       die "Cannot list Helm releases in namespace ${NS_RUNNERS}; refusing to uninstall the controller without knowing whether scale sets remain."
     fi
   fi
-  remaining="$(printf '%s\n' "${remaining}" | without_dry_run_scale_set "^${NAME}\$" | tr '\n' ' ' | sed 's/ *$//')"
+  remaining="$(printf '%s\n' "${remaining}" | without_dry_run_scale_set "${NAME}" | tr '\n' ' ' | sed 's/ *$//')"
   [[ -z "${remaining}" ]] ||
     die "Refusing to uninstall the controller: scale set(s) still installed in ${NS_RUNNERS}: ${remaining}. Uninstall them first (--uninstall --name <name>)."
   # A removed release can leave runner objects whose finalizers only the controller processes.
@@ -279,7 +294,12 @@ controller_guard() {
       die "Cannot list ARC runner objects (autoscalingrunnersets, ephemeralrunners) in namespace ${NS_RUNNERS}; refusing to uninstall the controller without knowing whether they still need it."
     fi
   fi
-  objects="$(printf '%s\n' "${objects}" | without_dry_run_scale_set "/${NAME}(-|\$)" | tr '\n' ' ' | sed 's/ *$//')"
+  if [[ "${DRY_RUN:-false}" == "true" && "${UNINSTALL}" == "true" ]]; then
+    local own_objects=() own
+    while IFS= read -r own; do own_objects+=("${own}"); done < <(dry_run_own_runner_objects)
+    objects="$(printf '%s\n' "${objects}" | without_dry_run_scale_set "${own_objects[@]}")"
+  fi
+  objects="$(printf '%s\n' "${objects}" | tr '\n' ' ' | sed 's/ *$//')"
   [[ -z "${objects}" ]] ||
     die "Refusing to uninstall the controller: ARC runner objects still exist in ${NS_RUNNERS} and need the controller to finalize them: ${objects}. Wait until they are gone, then retry."
 }

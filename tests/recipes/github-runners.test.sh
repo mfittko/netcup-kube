@@ -7,7 +7,8 @@ set -euo pipefail
 # result never depends on the environment the suite runs in.
 unset DRY_RUN CONFIRM GITHUB_APP_ID GITHUB_APP_INSTALLATION_ID GITHUB_APP_PRIVATE_KEY_FILE \
   HELM_LIST_OUTPUT HELM_LIST_FAIL HELM_UNINSTALL_FAIL HELM_UNINSTALL_NOTFOUND \
-  KUBECTL_MISSING_SECRET KUBECTL_MISSING_SECRET_NAME KUBECTL_ARC_OBJECTS KUBECTL_ARC_FAIL
+  KUBECTL_MISSING_SECRET KUBECTL_MISSING_SECRET_NAME KUBECTL_ARC_OBJECTS KUBECTL_ARC_FAIL \
+  KUBECTL_OWN_RUNNERS
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 INSTALL="${REPO_ROOT}/scripts/recipes/github-runners/install.sh"
@@ -47,7 +48,8 @@ EOF
 
 # kubectl stub: `get secret` fails for every Secret when KUBECTL_MISSING_SECRET=true, or only for the
 # Secret named KUBECTL_MISSING_SECRET_NAME. `get autoscalingrunnersets...` prints KUBECTL_ARC_OBJECTS,
-# or fails when KUBECTL_ARC_FAIL=true. Everything else records and succeeds.
+# or fails when KUBECTL_ARC_FAIL=true. `get ephemeralrunners...` (the label lookup of a dry run) prints
+# KUBECTL_OWN_RUNNERS. Everything else records and succeeds.
 cat > "${BIN}/kubectl" << 'EOF'
 #!/usr/bin/env bash
 printf 'kubectl %s\n' "$*" >> "${CALLS_LOG}"
@@ -63,6 +65,10 @@ if [[ "${1:-}" == "get" && "${2:-}" == autoscalingrunnersets* ]]; then
     exit 1
   fi
   printf '%s' "${KUBECTL_ARC_OBJECTS:-}"
+  exit 0
+fi
+if [[ "${1:-}" == "get" && "${2:-}" == ephemeralrunners* ]]; then
+  printf '%s' "${KUBECTL_OWN_RUNNERS:-}"
   exit 0
 fi
 if [[ "${1:-}" == "create" ]]; then
@@ -398,10 +404,20 @@ check "combined uninstall refuses while another scale set remains" status_nonzer
 DRY_RUN=true HELM_LIST_OUTPUT=$'netcup-kube\n' CONFIRM=true run_install --uninstall --uninstall-controller
 check "DRY_RUN combined uninstall ignores the not-yet-removed scale set" status_is 0
 check "DRY_RUN uninstall runs no helm uninstall" calls_lack "helm uninstall"
-DRY_RUN=true KUBECTL_ARC_OBJECTS=$'autoscalingrunnerset.actions.github.com/netcup-kube\nephemeralrunner.actions.github.com/netcup-kube-runner-one\n' CONFIRM=true run_install --uninstall --uninstall-controller
+DRY_RUN=true KUBECTL_ARC_OBJECTS=$'autoscalingrunnerset.actions.github.com/netcup-kube\nephemeralrunner.actions.github.com/netcup-kube-runner-one\n' KUBECTL_OWN_RUNNERS=$'ephemeralrunner.actions.github.com/netcup-kube-runner-one\n' CONFIRM=true run_install --uninstall --uninstall-controller
 check "DRY_RUN combined uninstall ignores the not-yet-removed scale set's runner objects" status_is 0
+check "DRY_RUN finds the scale set's runners by its scale-set-name label" calls_have "get ephemeralrunners.actions.github.com --namespace arc-runners -l actions.github.com/scale-set-name=netcup-kube -o name"
 DRY_RUN=true KUBECTL_ARC_OBJECTS=$'autoscalingrunnerset.actions.github.com/other\n' CONFIRM=true run_install --uninstall --uninstall-controller
 check "DRY_RUN combined uninstall still refuses for another scale set's runner objects" status_nonzero
+# A sibling scale set whose name starts with '<name>-' is not the one being uninstalled.
+DRY_RUN=true KUBECTL_ARC_OBJECTS=$'autoscalingrunnerset.actions.github.com/ci\nautoscalingrunnerset.actions.github.com/ci-large\n' CONFIRM=true run_install --uninstall --uninstall-controller --name ci
+check "DRY_RUN refuses for a hyphen-prefixed sibling scale set" status_nonzero
+check "DRY_RUN refusal names the sibling scale set" out_has "autoscalingrunnerset.actions.github.com/ci-large"
+check "DRY_RUN refusal drops the scale set being uninstalled" out_lacks "autoscalingrunnerset.actions.github.com/ci "
+DRY_RUN=true KUBECTL_ARC_OBJECTS=$'ephemeralrunner.actions.github.com/ci-run-one\nephemeralrunner.actions.github.com/ci-large-run-two\n' KUBECTL_OWN_RUNNERS=$'ephemeralrunner.actions.github.com/ci-run-one\n' CONFIRM=true run_install --uninstall --uninstall-controller --name ci
+check "DRY_RUN refuses for a sibling scale set's runners" status_nonzero
+check "DRY_RUN refusal names the sibling's runner" out_has "ci-large-run-two"
+check "DRY_RUN refusal drops the uninstalled scale set's runner" out_lacks "ci-run-one"
 
 # --- defaults stay in sync ------------------------------------------------------
 check "recipes.conf carries the default image" grep -q -F "IMAGE_RUNNER_DEFAULT=${DEFAULT_IMAGE}" "${REPO_ROOT}/scripts/recipes/recipes.conf"
