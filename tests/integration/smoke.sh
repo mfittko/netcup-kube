@@ -34,6 +34,18 @@ echo "  ✓ netcup-kube ssh --help"
 ./bin/netcup-kube install --help > /dev/null
 echo "  ✓ netcup-kube install --help"
 
+# metoro --client-service is interpolated into OTTL/YAML; unsafe values must be refused
+# before any kubectl/helm call (the guard runs right after argument parsing).
+for bad in 'a"b' $'a\nb'; do
+  # Match the guard's own message: a later kubectl/helm failure must not count as a pass.
+  out="$(METORO_BEARER_TOKEN=dummy bash scripts/recipes/metoro/install.sh --client-service "$bad" 2>&1 || true)"
+  if [[ "$out" != *"Invalid --client-service"* ]]; then
+    echo "Error: metoro recipe accepted unsafe --client-service value" >&2
+    exit 1
+  fi
+done
+echo "  ✓ metoro --client-service validation"
+
 echo "==== Testing command help ===="
 # netcup-kube subcommand help should not require interactivity.
 ./bin/netcup-kube dns --help > /dev/null
