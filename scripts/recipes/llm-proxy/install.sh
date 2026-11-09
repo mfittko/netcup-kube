@@ -30,7 +30,7 @@ Options:
   --chart-version <ver>      OCI chart version to install (default: latest available).
   --use-oci                  Use OCI Helm chart from ghcr.io (default: true).
   --chart-dir <path>         Local path to the llm-proxy chart directory (disables OCI).
-  --git-url <url>            Git URL to clone llm-proxy from (default: https://github.com/sofatutor/llm-proxy.git).
+  --git-url <url>            Git URL to clone llm-proxy from (default: https://github.com/mfittko/g-way.git).
   --git-ref <ref>            Git ref/branch to use when cloning (default: main).
   --image-repo <repo>        Override image.repository.
   --image-tag <tag>          Override image.tag.
@@ -108,7 +108,7 @@ RESTART_AFTER_INSTALL="false"
 USE_OCI="${LLM_PROXY_USE_OCI:-true}"
 CHART_VERSION="${LLM_PROXY_CHART_VERSION:-}"
 CHART_DIR="${LLM_PROXY_CHART_DIR:-}"
-GIT_URL="${LLM_PROXY_GIT_URL:-https://github.com/sofatutor/llm-proxy.git}"
+GIT_URL="${LLM_PROXY_GIT_URL:-https://github.com/mfittko/g-way.git}"
 GIT_REF="${LLM_PROXY_GIT_REF:-main}"
 
 IMAGE_REPO=""
@@ -640,7 +640,7 @@ if [[ "${USE_OCI}" == "true" ]]; then
 fi
 
 if [[ "${USE_OCI}" == "true" ]]; then
-  CHART_SOURCE="oci://ghcr.io/sofatutor/charts/llm-proxy"
+  CHART_SOURCE="oci://ghcr.io/mfittko/charts/llm-proxy"
   log "Using OCI Helm chart from: ${CHART_SOURCE}"
   if [[ -n "${CHART_VERSION}" ]]; then
     log "Chart version: ${CHART_VERSION}"
