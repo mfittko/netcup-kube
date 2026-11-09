@@ -41,6 +41,7 @@ EOF
 NAMESPACE="${NAMESPACE_METORO:-metoro}"
 METORO_TOKEN="${METORO_BEARER_TOKEN:-}"
 CLIENT_SERVICE=""
+CLIENT_SERVICE_SET="false"
 UNINSTALL="false"
 
 while [[ $# -gt 0 ]]; do
@@ -55,9 +56,11 @@ while [[ $# -gt 0 ]]; do
     --client-service)
       shift
       CLIENT_SERVICE="${1:-}"
+      CLIENT_SERVICE_SET="true"
       ;;
     --client-service=*)
       CLIENT_SERVICE="${1#*=}"
+      CLIENT_SERVICE_SET="true"
       ;;
     --uninstall)
       UNINSTALL="true"
@@ -76,6 +79,8 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -n "${NAMESPACE}" ]] || die "Namespace is required"
+# An empty value would silently install the [batch]-only pipeline and drop the span rewrite.
+[[ "${CLIENT_SERVICE_SET}" != "true" || -n "${CLIENT_SERVICE}" ]] || die "--client-service requires a value"
 # --client-service is interpolated into OTTL and YAML; allow a conservative charset only.
 if [[ -n "${CLIENT_SERVICE}" && ! "${CLIENT_SERVICE}" =~ ^[A-Za-z0-9/._:-]+$ ]]; then
   die "Invalid --client-service '${CLIENT_SERVICE}': allowed characters are A-Z a-z 0-9 / . _ : -"

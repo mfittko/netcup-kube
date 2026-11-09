@@ -44,6 +44,14 @@ for bad in 'a"b' $'a\nb'; do
     exit 1
   fi
 done
+# An empty value (flag last, or --client-service=) is refused before the token check and any call.
+for empty in '--client-service' '--client-service='; do
+  out="$(bash scripts/recipes/metoro/install.sh "$empty" 2>&1 || true)"
+  if [[ "$out" != *"--client-service requires a value"* ]]; then
+    echo "Error: metoro recipe accepted empty value for $empty" >&2
+    exit 1
+  fi
+done
 echo "  ✓ metoro --client-service validation"
 
 # metoro render with stub helm/kubectl (no cluster): token on stdin only, default traces [batch].
