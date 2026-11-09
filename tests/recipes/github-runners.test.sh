@@ -136,6 +136,9 @@ check "--help exits 0" status_is 0
 for flag in --github-url --name --secret --image --image-pull-secret --min-runners --max-runners --app-id --installation-id --private-key-file --uninstall --uninstall-controller; do
   check "--help documents ${flag}" out_has "${flag}"
 done
+for env_var in KUBECONFIG GITHUB_APP_ID GITHUB_APP_INSTALLATION_ID GITHUB_APP_PRIVATE_KEY_FILE CONFIRM DRY_RUN; do
+  check "--help documents ${env_var}" out_has "${env_var}"
+done
 
 # --- validation (fail fast, nothing installed) --------------------------------
 run_install

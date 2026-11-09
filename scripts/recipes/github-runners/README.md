@@ -53,9 +53,16 @@ and preinstalls Node, pnpm and Playwright WebKit. It is `linux/amd64` only, so t
 pinned to amd64 nodes, and it has no Chrome, Chromium or Firefox: jobs that need them install them.
 
 The current default is `ghcr.io/mfittko/ci-runner:pw1.64.1-node26.10.0-pnpm10.28.2`. The tag names the
-tool versions and there is no `latest`. To move to a new image, change `IMAGE_RUNNER_DEFAULT` in
-`recipes.conf` (the test suite keeps this README and `values.yaml` in sync with it) or pass `--image`,
-then re-run the recipe.
+tool versions and there is no `latest`. To use another image for one install, pass `--image` and
+re-run the recipe. To move the default to a new image, change the tag in all four places:
+
+- `IMAGE_RUNNER_DEFAULT` in `scripts/recipes/recipes.conf`
+- the `image:` placeholder in `scripts/recipes/github-runners/values.yaml`
+- the current-default line in this README
+- `DEFAULT_IMAGE` in `tests/recipes/github-runners.test.sh`
+
+The test suite does not update these copies. It checks that they agree: `make test-recipes` fails
+when any of them names a different tag.
 
 ### Pull secret
 
