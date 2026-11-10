@@ -49,14 +49,18 @@ for entry in cli direct; do
   fi
 done
 
-: > "${STUB_LOG}"
-NETCUP_KUBE_BIN="${fixture}/missing" bash scripts/recipes/llm-proxy/install.sh --help > /dev/null
-if NETCUP_KUBE_BIN="${fixture}/missing" bash scripts/recipes/llm-proxy/install.sh > "${fixture}/output" 2>&1; then
-  echo 'Missing helper was accepted' >&2
-  exit 1
-fi
-grep -q 'Build bin/netcup-kube' "${fixture}/output"
-[[ ! -s "${STUB_LOG}" ]]
+mkdir "${fixture}/helper-directory"
+ln -s "${fixture}/helper-directory" "${fixture}/helper-link"
+for helper in missing helper-directory helper-link; do
+  : > "${STUB_LOG}"
+  NETCUP_KUBE_BIN="${fixture}/${helper}" bash scripts/recipes/llm-proxy/install.sh --help > /dev/null
+  if DRY_RUN=false NETCUP_KUBE_BIN="${fixture}/${helper}" bash scripts/recipes/llm-proxy/install.sh > "${fixture}/output" 2>&1; then
+    echo "Unavailable helper was accepted: ${helper}" >&2
+    exit 1
+  fi
+  grep -q 'Build bin/netcup-kube' "${fixture}/output"
+  [[ ! -s "${STUB_LOG}" ]]
+done
 if CONFIRM=false bash scripts/recipes/llm-proxy/install.sh --uninstall > "${fixture}/output" 2>&1; then
   echo 'Uninstall bypassed confirmation' >&2
   exit 1

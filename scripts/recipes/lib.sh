@@ -9,7 +9,7 @@ set -euo pipefail
 
 recipe_require_binary() {
   NETCUP_KUBE_BIN="${NETCUP_KUBE_BIN:-${SCRIPTS_DIR}/../bin/netcup-kube}"
-  [[ -x "${NETCUP_KUBE_BIN}" ]] || die "Build bin/netcup-kube before running this recipe directly."
+  [[ -f "${NETCUP_KUBE_BIN}" && -x "${NETCUP_KUBE_BIN}" ]] || die "Build bin/netcup-kube before running this recipe directly."
 }
 
 recipe_confirm_or_die() {
