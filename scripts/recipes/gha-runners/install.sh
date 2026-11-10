@@ -178,127 +178,25 @@ check_quantity --cpu-limit "${CPU_LIMIT}"
 check_quantity --memory-request "${MEMORY_REQUEST}"
 check_quantity --memory-limit "${MEMORY_LIMIT}"
 
+recipe_require_binary
 recipe_check_kubeconfig
 need_cmd helm
 
 SECRET="gha-${NAME}-github"
 PREPULL="gha-${NAME}-prepull"
 
-# Ownership guard: the release, its Secret and its pre-pull key on NAME only,
-# so a release named NAME that serves another repo must never be overwritten
-# or uninstalled. A provably absent release passes; any other helm error stops
-# before a mutation. These are reads, so they run outside the run wrapper.
-RELEASE_EXISTS="false"
-if status_err="$(helm status "${NAME}" --namespace "${RUNNER_NS}" 2>&1 > /dev/null)"; then
-  RELEASE_EXISTS="true"
-  values_json="$(helm get values "${NAME}" --namespace "${RUNNER_NS}" -o json)"
-  owner_url=""
-  if [[ "${values_json}" =~ \"githubConfigUrl\":\"([^\"]*)\" ]]; then
-    owner_url="${BASH_REMATCH[1]}"
-  fi
-  [[ "${owner_url}" == "https://github.com/${REPO}" ]] ||
-    die "Release ${RUNNER_NS}/${NAME} serves '${owner_url}', not https://github.com/${REPO}. Pass a distinct --name."
-  set_name=""
-  secret_name=""
-  [[ "${values_json}" =~ \"runnerScaleSetName\":\"([^\"]*)\" ]] && set_name="${BASH_REMATCH[1]}"
-  [[ "${values_json}" =~ \"githubConfigSecret\":\"([^\"]*)\" ]] && secret_name="${BASH_REMATCH[1]}"
-  [[ "${set_name}" == "${NAME}" ]] ||
-    die "Release ${RUNNER_NS}/${NAME} uses AutoscalingRunnerSet '${set_name}', not '${NAME}'. Pass a distinct --name."
-  [[ "${secret_name}" == "${SECRET}" ]] ||
-    die "Release ${RUNNER_NS}/${NAME} uses Secret '${secret_name}', not '${SECRET}'. Pass a distinct --name."
-elif [[ "${status_err}" != *"release: not found"* ]]; then
-  die "helm status ${NAME} failed, nothing changed: ${status_err}"
-fi
-
-# The Secret keys on NAME only, so it records its repo in this annotation.
-REPO_ANNOTATION="gha-runners.netcup-kube/repo"
-# Prints the Secret's repo annotation and returns 0. Returns 1 when the Secret
-# does not exist (NotFound), and 2 after printing the kubectl error to stderr on
-# any other read error. Callers run it in a command substitution, where a die
-# would not stop the script, so each caller checks the return code itself.
-secret_repo() {
-  local err rc=0
-  { err="$(k get secret "${SECRET}" -n "${RUNNER_NS}" \
-    -o "jsonpath={.metadata.annotations.${REPO_ANNOTATION//./\\.}}" 2>&1 >&3)" || rc=$?; } 3>&1
-  ((rc == 0)) && return 0
-  [[ "${err}" == *"(NotFound)"* ]] && return 1
-  printf '%s\n' "${err}" >&2
-  return 2
-}
-read_err="Cannot read Secret ${RUNNER_NS}/${SECRET}, nothing changed"
-
+# Go owns the complete live-state guard and credential lifecycle, including dry-run reads.
+operation_args=(--repo "${REPO}" --name "${NAME}" --namespace "${RUNNER_NS}" --controller-namespace "${CONTROLLER_NS}")
+[[ "${DRY_RUN:-false}" != "true" ]] || operation_args+=(--dry-run)
 if [[ "${UNINSTALL}" == "true" ]]; then
-  # Without a release, only the Secret annotation binds NAME to a repo: never
-  # delete a Secret (or its pre-pull) recorded for another repo. A missing
-  # Secret or an empty annotation proceeds, so the uninstall stays idempotent.
-  # Any other read error stops here, because ownership is then unproven.
-  if [[ "${RELEASE_EXISTS}" != "true" ]]; then
-    repo_rc=0
-    annotated_repo="$(secret_repo)" || repo_rc=$?
-    ((repo_rc != 2)) || die "${read_err}"
-    if ((repo_rc == 0)) && [[ -n "${annotated_repo}" && "${annotated_repo}" != "${REPO}" ]]; then
-      die "Secret ${RUNNER_NS}/${SECRET} was written for '${annotated_repo}', not ${REPO}. Pass the matching --repo or a distinct --name."
-    fi
-  fi
   recipe_confirm_or_die "Uninstall runner scale set '${NAME}' (repo ${REPO}) from namespace ${RUNNER_NS}"
-  log "Uninstalling runner scale set ${NAME}"
-  # ARC needs the Secret to deregister the scale set from GitHub, so a failed
-  # or timed-out uninstall stops here (set -e) and keeps the Secret. Only a
-  # release that is provably absent (guard above) skips the uninstall.
-  if [[ "${RELEASE_EXISTS}" == "true" ]]; then
-    run helm uninstall "${NAME}" --namespace "${RUNNER_NS}" --wait --timeout 5m
-  fi
-  # A dry-run Helm uninstall cannot remove the set; still guard absent releases.
-  if [[ "${DRY_RUN:-false}" != "true" || "${RELEASE_EXISTS}" != "true" ]]; then
-    if set_err="$(k get autoscalingrunnerset "${NAME}" -n "${RUNNER_NS}" -o name 2>&1 > /dev/null)"; then
-      die "AutoscalingRunnerSet ${RUNNER_NS}/${NAME} still exists; keep its Secret and retry --uninstall later"
-    elif [[ "${set_err}" != *"(NotFound)"* ]]; then
-      die "Cannot read AutoscalingRunnerSet ${RUNNER_NS}/${NAME}; Secret retained; Helm release may already be removed: ${set_err}"
-    fi
-  fi
-  run recipe_kdelete daemonset "${PREPULL}" -n "${RUNNER_NS}"
-  run recipe_kdelete secret "${SECRET}" -n "${RUNNER_NS}"
+  "${NETCUP_KUBE_BIN}" recipe-internal gha-runners-uninstall "${operation_args[@]}" --confirmed
   exit 0
 fi
-
-# Credential: from --token-file or GITHUB_PAT; otherwise reuse the existing
-# Secret. All checks run before the first mutation.
-TOKEN=""
 if [[ "${TOKEN_FILE_GIVEN}" == "true" ]]; then
-  [[ -n "${TOKEN_FILE}" ]] || die "--token-file requires a path"
-  [[ -r "${TOKEN_FILE}" ]] || die "Token file not readable: ${TOKEN_FILE}"
-  TOKEN="$(tr -d '[:space:]' < "${TOKEN_FILE}")"
-  [[ -n "${TOKEN}" ]] || die "Token file is empty: ${TOKEN_FILE}"
-elif [[ -n "${GITHUB_PAT:-}" ]]; then
-  TOKEN="${GITHUB_PAT//[[:space:]]/}"
+  operation_args+=(--token-file "${TOKEN_FILE}")
 fi
-if [[ -z "${TOKEN}" ]]; then
-  # Reuse the Secret when the guard above bound the release to REPO, or when
-  # the Secret records REPO itself.
-  repo_rc=0
-  annotated_repo="$(secret_repo)" || repo_rc=$?
-  ((repo_rc != 2)) || die "${read_err}"
-  ((repo_rc == 0)) ||
-    die "No GitHub token: pass --token-file or GITHUB_PAT (Secret ${RUNNER_NS}/${SECRET} does not exist yet)"
-  [[ "${RELEASE_EXISTS}" == "true" || -n "${annotated_repo}" ]] ||
-    die "Secret ${RUNNER_NS}/${SECRET} is missing ${REPO_ANNOTATION} annotation; pass --token-file or GITHUB_PAT"
-  [[ "${RELEASE_EXISTS}" == "true" || "${annotated_repo}" == "${REPO}" ]] ||
-    die "Secret ${RUNNER_NS}/${SECRET} was written for '${annotated_repo}', not ${REPO}. Pass --token-file or GITHUB_PAT, or a distinct --name."
-fi
-
-run recipe_ensure_namespace "${CONTROLLER_NS}"
-run recipe_ensure_namespace "${RUNNER_NS}"
-
-apply_token_secret() {
-  # The token goes through stdin, never through a command-line argument.
-  printf '%s' "${TOKEN}" | k create secret generic "${SECRET}" -n "${RUNNER_NS}" \
-    --from-file=github_token=/dev/stdin --dry-run=client -o yaml |
-    k annotate --local -f - "${REPO_ANNOTATION}=${REPO}" -o yaml | k apply -f -
-}
-if [[ -n "${TOKEN}" ]]; then
-  log "Storing the GitHub token in Secret ${RUNNER_NS}/${SECRET}"
-  run apply_token_secret
-fi
+"${NETCUP_KUBE_BIN}" recipe-internal gha-runners-credentials "${operation_args[@]}"
 
 log "Installing/Upgrading the ARC controller in namespace ${CONTROLLER_NS}"
 run helm upgrade --install arc \

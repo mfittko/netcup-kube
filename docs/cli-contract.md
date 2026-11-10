@@ -105,6 +105,10 @@ netcup-kube install <recipe> [recipe-options]
 - `--name <name>` — Scale set name and `runs-on` label (default: the repo name). It must be a lowercase DNS label (letters, digits, `-`) of at most 45 characters. Names YAML reads as numbers (including all digits, `0x` and exponent forms), dates, booleans (`yes/no`, `true/false`, `on/off`) or null are refused. A repo whose name does not fit needs an explicit `--name`. Two repos with the same name under different owners need distinct names.
 - `--token-file <path>` — File with the GitHub token for ARC. `GITHUB_PAT` is the env alternative. Without either, the existing Secret is reused when the scale set release exists or the Secret was written for the same `--repo`.
 - `--uninstall` — Remove the repo's scale set, Secret and image pre-pull (the shared controller stays).
+- Runner lifecycle operations require the existing `netcup-kube` binary. The CLI supplies its own executable; direct scripts use `bin/netcup-kube` or `NETCUP_KUBE_BIN`. Help remains available without a binary.
+- Ownership checks read structured Helm/Kubernetes JSON and refuse unreadable or mismatched identities before writes. An owned release permits tokenless Secret reuse even without a matching annotation; without a release, tokenless install requires matching `gha-runners.netcup-kube/repo` provenance. Explicit credentials may replace the intended Secret and record that provenance.
+- Uninstall requires confirmation (`CONFIRM=true` without a TTY). Without a release, missing or unannotated Secrets are accepted, but conflicting provenance is refused. The Secret is retained if Helm fails/times out or the exact AutoscalingRunnerSet remains or cannot be read. Cleanup deletes the image pre-pull before the Secret.
+- Dry-run performs live ownership reads and no mutations. Installed-release uninstall previews Helm and cleanup without requiring the still-live RunnerSet to disappear; absent-release uninstall still requires live RunnerSet absence. Tokens travel through environment/file input and Secret stdin, never command arguments or preview output.
 - See `--help` for image, runner count and resource options.
 
 **Common Options:**

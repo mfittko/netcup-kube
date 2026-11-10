@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Offline checks for gha-runners/install.sh input validation, the ownership
-# guard and the token handling. DRY_RUN with stub helm/kubectl on PATH:
+# Offline input/chart checks and real-binary lifecycle wiring smoke.
+# State-policy cases live in internal/recipes/gharunners/lifecycle_test.go.
+# DRY_RUN with stub helm/kubectl on PATH:
 # nothing reaches a cluster. tests/integration/smoke.sh runs it in CI.
 # Usage: scripts/recipes/gha-runners/test.sh
 set -euo pipefail
@@ -8,58 +9,44 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALL="${SCRIPT_DIR}/install.sh"
 TMP="$(mktemp -d)"
-trap 'rm -rf "${TMP}"' EXIT
+trap 'command rm -f -r "${TMP}"' EXIT
+export NETCUP_KUBE_BIN="${NETCUP_KUBE_BIN:-${SCRIPT_DIR}/../../../bin/netcup-kube}"
+[[ -x "${NETCUP_KUBE_BIN}" ]] || {
+  echo "Build bin/netcup-kube before running these checks" >&2
+  exit 1
+}
 
 mkdir -p "${TMP}/bin"
-# helm stub: STUB_RELEASE_URL set means the release exists and serves that URL.
+# These external-command fakes exercise the actual hidden command, never a helper stub.
 cat > "${TMP}/bin/helm" << 'EOF'
 #!/usr/bin/env bash
+[[ "${KUBECONFIG}" == "${CALLS%/calls}/kubeconfig" ]] || exit 1
+printf 'helm fixture-kubeconfig %s\n' "$*" >> "${CALLS}"
 case "$1 ${2:-}" in
-  "status "*)
-    [[ -n "${STUB_RELEASE_URL:-}" ]] && exit 0
-    echo "Error: release: not found" >&2
-    exit 1
+  "list "*)
+    if [[ "${STUB_INSTALLED:-false}" == true ]]; then
+      printf '[{"name":"app","namespace":"arc-runners"}]'
+    else
+      printf '[]'
+    fi
     ;;
   "get values")
     cat << STUB_JSON
-{"githubConfigUrl":"${STUB_RELEASE_URL}","runnerScaleSetName":"${STUB_RELEASE_NAME:-app}","githubConfigSecret":"${STUB_RELEASE_CONFIG_REF:-gha-app-github}","maxRunners":2}
+{"githubConfigUrl":"https://github.com/o/app","runnerScaleSetName":"app","githubConfigSecret":"gha-app-github"}
 STUB_JSON
     ;;
   *) exit 0 ;;
 esac
 EOF
-# kubectl stub: "get secret" fails with NotFound when STUB_NO_SECRET is set, fails
-# with a connection error when STUB_SECRET_ERR is set, and otherwise prints the
-# Secret's repo annotation STUB_ANNOTATED_REPO. Every other call succeeds.
 cat > "${TMP}/bin/kubectl" << 'EOF'
 #!/usr/bin/env bash
-if [[ "$1" == "delete" && -n "${STUB_DELETE_LOG:-}" ]]; then
-  printf '%s\n' "$*" >> "${STUB_DELETE_LOG}"
-fi
-if [[ "$1 ${2:-}" == "get secret" ]]; then
-  if [[ -n "${STUB_NO_SECRET:-}" ]]; then
-    echo "Error from server (NotFound): secrets \"$3\" not found" >&2
-    exit 1
-  fi
-  if [[ -n "${STUB_SECRET_ERR:-}" ]]; then
-    echo "${STUB_SECRET_ERR}" >&2
-    exit 1
-  fi
-  printf '%s' "${STUB_ANNOTATED_REPO:-}"
-fi
-if [[ "$1 ${2:-}" == "get autoscalingrunnerset" ]]; then
-  if [[ $# -ne 7 || "$3" != "app" || "$4" != "-n" || "$5" != "arc-runners" || "$6" != "-o" || "$7" != "name" ]]; then
-    echo "Unexpected AutoscalingRunnerSet get target" >&2
-    exit 1
-  fi
-  if [[ -n "${STUB_RUNNER_SET_ERR:-}" ]]; then
-    echo "${STUB_RUNNER_SET_ERR}" >&2
-    exit 1
-  fi
-  [[ -n "${STUB_RUNNER_SET_EXISTS:-}" ]] && exit 0
-  echo "Error from server (NotFound): autoscalingrunnersets \"$3\" not found" >&2
+[[ "${KUBECONFIG}" == "${CALLS%/calls}/kubeconfig" ]] || exit 1
+printf 'kubectl fixture-kubeconfig %s\n' "$*" >> "${CALLS}"
+if [[ "${STUB_READ_FAILURE:-false}" == true && "$1" == get ]]; then
+  echo "fixture-canary" >&2
   exit 1
 fi
+if [[ "$1" == apply ]]; then cat > /dev/null; fi
 exit 0
 EOF
 chmod +x "${TMP}/bin/helm" "${TMP}/bin/kubectl"
@@ -67,9 +54,9 @@ chmod +x "${TMP}/bin/helm" "${TMP}/bin/kubectl"
 : > "${TMP}/empty-token"
 
 # Most cases pass a token; it must never appear in the output.
-SENTINEL="gha-test-sentinel-$$"
-export PATH="${TMP}/bin:${PATH}" DRY_RUN=true KUBECONFIG="${TMP}/kubeconfig" GITHUB_PAT="${SENTINEL}"
-unset STUB_RELEASE_URL STUB_RELEASE_NAME STUB_RELEASE_CONFIG_REF STUB_NO_SECRET STUB_SECRET_ERR STUB_ANNOTATED_REPO STUB_RUNNER_SET_EXISTS STUB_RUNNER_SET_ERR
+SENTINEL="fixture-canary"
+export PATH="${TMP}/bin:${PATH}" DRY_RUN=true KUBECONFIG="${TMP}/kubeconfig" GITHUB_PAT="${SENTINEL}" CALLS="${TMP}/calls"
+unset STUB_INSTALLED STUB_READ_FAILURE
 
 # is_tty also accepts an openable /dev/tty, so on a terminal the uninstall
 # confirmation would wait for input. Run install.sh in a new session, which has
@@ -170,53 +157,19 @@ expect 1 "--token-file requires a path" -- --repo o/app --token-file
 expect 0 "helm upgrade --install app" -- --repo o/app
 [[ "${OUT}" == *"rollout status"*"helm upgrade --install app"* ]] || fail "rollout status does not precede the scale set install"
 
-# Token-less runs reuse the Secret only when it is bound to --repo.
-GITHUB_PAT="" STUB_NO_SECRET=1 expect 1 "No GitHub token" -- --repo o/app
-GITHUB_PAT="" STUB_SECRET_ERR="Unable to connect to the server" expect 1 "Cannot read Secret arc-runners/gha-app-github" -- --repo o/app
-GITHUB_PAT="" STUB_SECRET_ERR="Proxy NotFound response" expect 1 "Cannot read Secret arc-runners/gha-app-github" -- --repo o/app
-GITHUB_PAT="" STUB_ANNOTATED_REPO=o/app expect 0 "helm upgrade --install app" -- --repo o/app
-GITHUB_PAT="" STUB_ANNOTATED_REPO=alice/app expect 1 "was written for 'alice/app', not bob/app" -- --repo bob/app
-GITHUB_PAT="" expect 1 "missing gha-runners.netcup-kube/repo annotation" -- --repo o/app
-
-# Uninstall without a release deletes the Secret only when it is not bound to another repo.
-STUB_ANNOTATED_REPO=alice/app CONFIRM=true expect 1 "was written for 'alice/app', not bob/app" -- --repo bob/app --uninstall
-STUB_ANNOTATED_REPO=bob/app CONFIRM=true expect 0 "secret gha-app-github" -- --repo bob/app --uninstall
-CONFIRM=true expect 0 "secret gha-app-github" -- --repo bob/app --uninstall
-STUB_NO_SECRET=1 CONFIRM=true expect 0 "secret gha-app-github" -- --repo bob/app --uninstall
-# A read error other than NotFound proves no ownership, so nothing is deleted.
-STUB_SECRET_ERR="Unable to connect to the server" CONFIRM=true expect 1 "Unable to connect to the server" -- --repo bob/app --uninstall
-STUB_RUNNER_SET_EXISTS=1 CONFIRM=true expect 1 "AutoscalingRunnerSet arc-runners/app still exists" -- --repo bob/app --uninstall
-STUB_RUNNER_SET_ERR="Unable to connect to the server" CONFIRM=true expect 1 "Cannot read AutoscalingRunnerSet arc-runners/app" -- --repo bob/app --uninstall
-STUB_RUNNER_SET_ERR="Proxy NotFound response" CONFIRM=true expect 1 "Cannot read AutoscalingRunnerSet arc-runners/app" -- --repo bob/app --uninstall
-# The stub itself must reject a query for another scale set or namespace.
-for target in "other arc-runners" "app other"; do
-  read -r name namespace <<< "${target}"
-  rc=0
-  OUT="$(kubectl get autoscalingrunnerset "${name}" -n "${namespace}" -o name 2>&1)" || rc=$?
-  [[ "${rc}" == 1 && "${OUT}" == *"Unexpected AutoscalingRunnerSet get target"* ]] ||
-    fail "stub accepted the wrong AutoscalingRunnerSet target: ${target}"
-done
-
-# Ownership guard: a release named "app" that serves alice/app.
-export STUB_RELEASE_URL=https://github.com/alice/app
-expect 1 "Pass a distinct --name" -- --repo bob/app
-CONFIRM=true expect 1 "Pass a distinct --name" -- --repo bob/app --uninstall
-STUB_RELEASE_NAME=other CONFIRM=true expect 1 "uses AutoscalingRunnerSet 'other', not 'app'" -- --repo alice/app --uninstall
-STUB_RELEASE_CONFIG_REF=other CONFIRM=true expect 1 "uses Secret 'other', not 'gha-app-github'" -- --repo alice/app --uninstall
-expect 0 "helm upgrade --install app" -- --repo alice/app
-# The existing release binds the Secret, so a token-less rerun reuses it.
-GITHUB_PAT="" expect 0 "helm upgrade --install app" -- --repo alice/app
-CONFIRM=true expect 0 "helm uninstall app" -- --repo alice/app --uninstall
-STUB_RUNNER_SET_EXISTS=1 CONFIRM=true expect 0 "recipe_kdelete secret gha-app-github" -- --repo alice/app --uninstall
-STUB_RUNNER_SET_EXISTS=1 DRY_RUN=false CONFIRM=true expect 1 "AutoscalingRunnerSet arc-runners/app still exists" -- --repo alice/app --uninstall
-export STUB_DELETE_LOG="${TMP}/deletes"
-kubectl delete secret stub-probe
-[[ -s "${STUB_DELETE_LOG}" ]] || fail "kubectl stub did not record deletes"
-: > "${STUB_DELETE_LOG}"
-rc=0
-OUT="$(STUB_RUNNER_SET_ERR="Unable to connect to the server" DRY_RUN=false CONFIRM=true "${NOTTY[@]}" "${INSTALL}" --repo alice/app --uninstall < /dev/null 2>&1)" || rc=$?
-[[ "${rc}" == 1 && "${OUT}" == *"Secret retained; Helm release may already be removed"* && ! -s "${STUB_DELETE_LOG}" ]] ||
-  fail "uninstall read failure did not preserve the Secret or describe partial progress"
+# Real binary bridge: confirmation, propagated failure, live dry-run guards and targets.
+expect 1 "Unknown argument" -- --repo o/app --namespace other
+expect 1 "Unknown argument" -- --repo o/app --host example.test
+CONFIRM=false expect 1 "requires CONFIRM=true" -- --repo o/app --uninstall
+CONFIRM=true expect 0 "secret gha-app-github" -- --repo=o/app --uninstall
+STUB_INSTALLED=true CONFIRM=true expect 0 "helm uninstall app" -- --repo o/app --uninstall
+STUB_READ_FAILURE=true CONFIRM=true expect 1 "Cannot read Secret" -- --repo o/app --uninstall
+NETCUP_KUBE_BIN="${TMP}/missing" expect 0 "Usage:" -- --help
+NETCUP_KUBE_BIN="${TMP}/missing" expect 1 "Build bin/netcup-kube" -- --repo o/app
+grep -Fq "helm fixture-kubeconfig list --namespace arc-runners --filter ^app$" "${CALLS}" || fail "missing live Helm guard in dry-run"
+grep -Fq "kubectl fixture-kubeconfig get autoscalingrunnerset app --namespace arc-runners --ignore-not-found=true -o json" "${CALLS}" || fail "missing exact live RunnerSet target"
+if grep -Eq ' (apply|delete|uninstall|upgrade) ' "${CALLS}"; then fail "dry-run mutated"; fi
+if grep -Fq "${SENTINEL}" "${CALLS}"; then fail "token in argv"; fi
 
 if ((fails > 0)); then
   echo "${fails} check(s) failed"

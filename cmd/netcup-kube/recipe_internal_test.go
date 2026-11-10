@@ -2,11 +2,102 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestRecipeInternalRunnerCommand(t *testing.T) {
+	for _, useK3s := range []bool{false, true} {
+		t.Run(map[bool]string{false: "kubectl", true: "k3s"}[useK3s], func(t *testing.T) {
+			dir := t.TempDir()
+			logPath := filepath.Join(dir, "calls")
+			t.Setenv("PATH", dir)
+			t.Setenv("CALLS", logPath)
+			t.Setenv("KUBECONFIG", "fixture-kubeconfig")
+			t.Setenv("GITHUB_PAT", "fixture-canary")
+			helm := `#!/bin/sh
+[ "$KUBECONFIG" = fixture-kubeconfig ] || exit 1
+printf 'helm fixture-kubeconfig %s\n' "$*" >> "$CALLS"
+if [ "$1" = list ]; then
+ if [ "$INSTALLED" = true ]; then printf '[{"name":"app","namespace":"arc-runners"}]'; else printf '[]'; fi
+fi
+if [ "$1" = get ]; then
+ /bin/cat << 'STUB_JSON'
+{"githubConfigUrl":"https://github.com/o/app","runnerScaleSetName":"app","githubConfigSecret":"gha-app-github"}
+STUB_JSON
+fi
+`
+			kube := `#!/bin/sh
+[ "$KUBECONFIG" = fixture-kubeconfig ] || exit 1
+printf 'kube fixture-kubeconfig %s\n' "$*" >> "$CALLS"
+if [ "$1" = kubectl ]; then shift; fi
+if [ "$1" = apply ]; then
+ /bin/cat >> "$CALLS.payload"
+ if [ "$FAIL_APPLY" = true ]; then echo fixture-canary >&2; exit 1; fi
+fi
+`
+			name := "kubectl"
+			if useK3s {
+				name = "k3s"
+			}
+			for file, script := range map[string]string{"helm": helm, name: kube} {
+				if err := os.WriteFile(filepath.Join(dir, file), []byte(script), 0700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for _, tc := range []struct {
+				name         string
+				args         []string
+				fail, cancel bool
+			}{
+				{"credentials", []string{"gha-runners-credentials"}, false, false},
+				{"redacted-failure", []string{"gha-runners-credentials"}, true, false},
+				{"dry", []string{"gha-runners-credentials", "--dry-run"}, false, false},
+				{"confirmed", []string{"gha-runners-uninstall", "--confirmed"}, false, false},
+				{"uninstall-live", []string{"gha-runners-uninstall", "--confirmed"}, false, false},
+				{"unconfirmed", []string{"gha-runners-uninstall"}, true, false},
+				{"cancelled", []string{"gha-runners-credentials"}, true, true},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					t.Setenv("INSTALLED", map[bool]string{false: "false", true: "true"}[tc.name == "uninstall-live"])
+					t.Setenv("FAIL_APPLY", map[bool]string{false: "false", true: "true"}[tc.name == "redacted-failure"])
+					cmd := newRecipeInternalCommand()
+					var out bytes.Buffer
+					cmd.SetOut(&out)
+					cmd.SetErr(&out)
+					if tc.cancel {
+						ctx, cancel := context.WithCancel(context.Background())
+						cancel()
+						cmd.SetContext(ctx)
+					}
+					cmd.SetArgs(append(tc.args, "--repo", "o/app", "--name", "app", "--namespace", "arc-runners", "--controller-namespace", "arc-systems"))
+					err := cmd.Execute()
+					if (err != nil) != tc.fail {
+						t.Fatalf("unexpected error %v", err)
+					}
+					calls, _ := os.ReadFile(logPath)
+					if strings.Contains(string(calls)+out.String(), "fixture-canary") || err != nil && strings.Contains(err.Error(), "fixture-canary") {
+						t.Fatal("credential leaked")
+					}
+					if !strings.Contains(string(calls), "helm fixture-kubeconfig list") || !strings.Contains(string(calls), "kube fixture-kubeconfig "+map[bool]string{false: "apply", true: "kubectl apply"}[useK3s]) {
+						t.Fatalf("routing lost: %s", calls)
+					}
+				})
+			}
+			payload, err := os.ReadFile(logPath + ".payload")
+			if err != nil || !bytes.Contains(payload, []byte("fixture-canary")) {
+				t.Fatal("missing stdin credential")
+			}
+			calls, _ := os.ReadFile(logPath)
+			if !strings.Contains(string(calls), "helm fixture-kubeconfig uninstall app --namespace arc-runners --wait --timeout 5m") {
+				t.Fatal("Helm uninstall routing lost")
+			}
+		})
+	}
+}
 
 func TestRecipeInternalSecretCommand(t *testing.T) {
 	dir := t.TempDir()
