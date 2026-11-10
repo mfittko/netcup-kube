@@ -22,13 +22,19 @@ case "$*" in
     printf '%s\n' '{"apiVersion":"v1","kind":"Secret","metadata":{"name":"smoke-app","namespace":"smoke-ns"},"data":{"MANAGEMENT_TOKEN":"dA==","ENCRYPTION_KEY":"aw=="}}'
     ;;
   'create namespace '*) echo 'kind: Namespace' ;;
+  'apply -f -' | 'create -f -')
+    payload="$(cat)"
+    if [[ "${payload}" == *'"kind":"Secret"'* ]]; then
+      printf 'application-secret-write\n' >> "${STUB_LOG}"
+    fi
+    ;;
   *) exit 1 ;;
 esac
 STUB
 cat > "${fixture}/helm" << 'STUB'
 #!/usr/bin/env bash
 printf 'helm %s\n' "$*" >> "${STUB_LOG}"
-exit 1
+exit 0
 STUB
 chmod +x "${fixture}/kubectl" "${fixture}/helm"
 
@@ -46,6 +52,26 @@ for entry in cli direct; do
   if grep -Eq 'smoke-(secret|key)-sentinel|apply|helm' "${STUB_LOG}" || grep -Eq 'smoke-(secret|key)-sentinel' "${fixture}/output"; then
     echo 'Secret dry-run leaked credentials or performed a write' >&2
     exit 1
+  fi
+done
+
+for form in true 1 t T TRUE True false; do
+  : > "${STUB_LOG}"
+  DRY_RUN=false LLM_PROXY_MANAGEMENT_TOKEN="" LLM_PROXY_ENCRYPTION_KEY="" LLM_PROXY_CREATE_SECRET="${form}" \
+    bash scripts/recipes/llm-proxy/install.sh \
+    --namespace smoke-ns --secret-name smoke-app --db-driver sqlite > "${fixture}/output" 2>&1
+  if [[ "${form}" == true ]]; then
+    [[ "$(grep -c '^application-secret-write$' "${STUB_LOG}")" == 1 ]]
+    grep -q 'restartedAt=' "${STUB_LOG}"
+  else
+    if ! grep -q 'Application Secret validated' "${fixture}/output"; then
+      echo "Nonliteral create mode was not validation-only: ${form}" >&2
+      exit 1
+    fi
+    if grep -Eq 'application-secret-write|restartedAt=' "${STUB_LOG}"; then
+      echo "Unauthorized create mode or rollout: ${form}" >&2
+      exit 1
+    fi
   fi
 done
 

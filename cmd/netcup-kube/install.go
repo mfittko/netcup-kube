@@ -156,7 +156,7 @@ Examples:
 
 		// If recipe succeeded and --host/--admin-host were specified, auto-add domain(s) to Caddy
 		domainsToAdd := uniqueNonEmptyStrings([]string{hostArg, adminHostArg})
-		if len(domainsToAdd) > 0 {
+		if len(domainsToAdd) > 0 && cfg.Env["DRY_RUN"] != "true" {
 			// Only do this when running locally (not on the server)
 			if _, err := os.Stat("/etc/caddy/Caddyfile"); err != nil {
 				remoteBin := filepath.Join(projectRoot, "bin", "netcup-kube")

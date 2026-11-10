@@ -334,6 +334,10 @@ while [[ $# -gt 0 ]]; do
   shift || true
 done
 
+if [[ "${CREATE_SECRET}" != "true" ]]; then
+  CREATE_SECRET="false"
+fi
+
 # The MySQL step builds DATABASE_URL itself; only a user-supplied value needs --create-secret.
 USER_DATABASE_URL="${DATABASE_URL}"
 

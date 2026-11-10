@@ -50,7 +50,11 @@ func TestReconcileSecret(t *testing.T) {
 					}
 					return read, nil, nil
 				}
-				if strings.Join(args, " ") != "apply -f -" {
+				write := "apply"
+				if tc.data == nil {
+					write = "create"
+				}
+				if strings.Join(args, " ") != write+" -f -" {
 					t.Fatalf("write argv: %v", args)
 				}
 				payload = stdin
@@ -103,6 +107,42 @@ func TestReconcileSecret(t *testing.T) {
 			}
 			if tc.data != nil && applied.Metadata["labels"].(map[string]any)["keep"] != "yes" {
 				t.Fatal("metadata changed")
+			}
+		})
+	}
+}
+
+func TestSecretCompetingCreate(t *testing.T) {
+	for _, dry := range []bool{false, true} {
+		t.Run(map[bool]string{false: "live", true: "dry-run"}[dry], func(t *testing.T) {
+			competing := []byte(`{"data":{"MANAGEMENT_TOKEN":"Y29tcGV0aW5n","ENCRYPTION_KEY":"cHJlc2VydmU="}}`)
+			var stored []byte
+			calls := 0
+			random := bytes.NewReader(bytes.Repeat([]byte{7}, 64))
+			err := ReconcileSecret(context.Background(), SecretOptions{Namespace: "test", Name: "app", Create: true, DryRun: dry}, func(_ context.Context, name string, args []string, stdin []byte) ([]byte, []byte, error) {
+				calls++
+				if calls == 1 {
+					stored = append([]byte(nil), competing...)
+					return nil, nil, nil // Another writer creates the Secret after this absent read.
+				}
+				if calls != 2 || name != "kubectl" || strings.Join(args, " ") != "create -f -" {
+					stored = stdin
+					t.Errorf("unsafe write or fallback: %v", args)
+				}
+				if !json.Valid(stdin) {
+					t.Error("missing JSON on stdin")
+				}
+				return []byte("SENSITIVE-SENTINEL"), []byte("AlreadyExists SENSITIVE-SENTINEL"), errors.New("AlreadyExists SENSITIVE-SENTINEL")
+			}, random)
+			if !bytes.Equal(stored, competing) {
+				t.Fatal("competing credentials changed")
+			}
+			if dry {
+				if err != nil || calls != 1 || random.Len() != 64 {
+					t.Fatal("dry-run generated credentials or attempted a write")
+				}
+			} else if err == nil || calls != 2 || strings.Contains(err.Error(), "SENSITIVE-SENTINEL") {
+				t.Fatalf("unsafe conflict handling: %v", err)
 			}
 		})
 	}

@@ -41,7 +41,9 @@ func ReconcileSecret(ctx context.Context, o SecretOptions, run recipes.Command, 
 	}
 	doc := map[string]any{"apiVersion": "v1", "kind": "Secret", "metadata": map[string]string{"name": o.Name, "namespace": o.Namespace}, "type": "Opaque"}
 	data := make(map[string][]byte)
+	write := "create"
 	if len(bytes.TrimSpace(raw)) != 0 {
+		write = "apply"
 		var existing struct {
 			APIVersion, Kind string
 			Metadata         struct{ Name, Namespace string }
@@ -93,8 +95,8 @@ func ReconcileSecret(ctx context.Context, o SecretOptions, run recipes.Command, 
 	if err != nil {
 		return errors.New("could not encode application Secret")
 	}
-	if _, _, err := run(ctx, "kubectl", []string{"apply", "-f", "-"}, payload); err != nil {
-		return errors.New("could not apply application Secret")
+	if _, _, err := run(ctx, "kubectl", []string{write, "-f", "-"}, payload); err != nil {
+		return errors.New("could not " + write + " application Secret")
 	}
 	return nil
 }
