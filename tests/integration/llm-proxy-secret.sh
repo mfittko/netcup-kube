@@ -19,10 +19,12 @@ cat > "${fixture}/kubectl" << 'STUB'
 printf '%s %s\n' "${KUBECONFIG}" "$*" >> "${STUB_LOG}"
 case "$*" in
   'get secret smoke-app --namespace smoke-ns --ignore-not-found=true -o json')
-    printf '%s\n' '{"apiVersion":"v1","kind":"Secret","metadata":{"name":"smoke-app","namespace":"smoke-ns"},"data":{"MANAGEMENT_TOKEN":"dA==","ENCRYPTION_KEY":"aw=="}}'
+    # Return the static fake kubectl protocol response for this fixture.
+    kubectl_response='{"apiVersion":"v1","kind":"Secret","metadata":{"name":"smoke-app","namespace":"smoke-ns","resourceVersion":"1"},"data":{"MANAGEMENT_TOKEN":"dA==","ENCRYPTION_KEY":"aw=="}}'
+    printf '%s\n' "${kubectl_response}"
     ;;
   'create namespace '*) echo 'kind: Namespace' ;;
-  'apply -f -' | 'create -f -')
+  'apply -f -' | 'create -f -' | 'replace -f -')
     payload="$(cat)"
     if [[ "${payload}" == *'"kind":"Secret"'* ]]; then
       printf 'application-secret-write\n' >> "${STUB_LOG}"
@@ -49,7 +51,7 @@ for entry in cli direct; do
   fi
   grep -q 'would reconcile application Secret' "${fixture}/output"
   grep -q '^/etc/rancher/k3s/k3s.yaml get secret smoke-app --namespace smoke-ns --ignore-not-found=true -o json$' "${STUB_LOG}"
-  if grep -Eq 'smoke-(secret|key)-sentinel|apply|helm' "${STUB_LOG}" || grep -Eq 'smoke-(secret|key)-sentinel' "${fixture}/output"; then
+  if grep -Eq 'smoke-(secret|key)-sentinel|apply|replace|helm' "${STUB_LOG}" || grep -Eq 'smoke-(secret|key)-sentinel' "${fixture}/output"; then
     echo 'Secret dry-run leaked credentials or performed a write' >&2
     exit 1
   fi

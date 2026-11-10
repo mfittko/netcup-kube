@@ -35,7 +35,7 @@ func TestReconcileSecret(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			var read []byte
 			if tc.data != nil {
-				read, _ = json.Marshal(map[string]any{"apiVersion": "v1", "kind": "Secret", "metadata": map[string]any{"name": "app", "namespace": "test", "labels": map[string]string{"keep": "yes"}}, "data": tc.data})
+				read, _ = json.Marshal(map[string]any{"apiVersion": "v1", "kind": "Secret", "metadata": map[string]any{"name": "app", "namespace": "test", "resourceVersion": "1", "labels": map[string]string{"keep": "yes"}}, "data": tc.data})
 			}
 			calls := 0
 			var payload []byte
@@ -50,7 +50,7 @@ func TestReconcileSecret(t *testing.T) {
 					}
 					return read, nil, nil
 				}
-				write := "apply"
+				write := "replace"
 				if tc.data == nil {
 					write = "create"
 				}
@@ -108,6 +108,9 @@ func TestReconcileSecret(t *testing.T) {
 			if tc.data != nil && applied.Metadata["labels"].(map[string]any)["keep"] != "yes" {
 				t.Fatal("metadata changed")
 			}
+			if tc.data != nil && applied.Metadata["resourceVersion"] != "1" {
+				t.Fatal("resourceVersion changed")
+			}
 		})
 	}
 }
@@ -148,6 +151,42 @@ func TestSecretCompetingCreate(t *testing.T) {
 	}
 }
 
+func TestSecretCompetingUpdate(t *testing.T) {
+	initial := []byte(`{"apiVersion":"v1","kind":"Secret","metadata":{"name":"app","namespace":"test","resourceVersion":"1","labels":{"keep":"yes"}},"data":{"MANAGEMENT_TOKEN":"c3RvcmVk","extra":"dW5yZWxhdGVk"}}`)
+	competing := []byte(`{"apiVersion":"v1","kind":"Secret","metadata":{"name":"app","namespace":"test","resourceVersion":"2","labels":{"keep":"yes"}},"data":{"MANAGEMENT_TOKEN":"c3RvcmVk","ENCRYPTION_KEY":"Y29tcGV0aW5n","extra":"dW5yZWxhdGVk"}}`)
+	stored := initial
+	calls := 0
+	random := bytes.NewReader(bytes.Repeat([]byte{7}, 64))
+	err := ReconcileSecret(context.Background(), SecretOptions{Namespace: "test", Name: "app", Create: true}, func(_ context.Context, name string, args []string, stdin []byte) ([]byte, []byte, error) {
+		calls++
+		if calls == 1 {
+			stored = competing // A competing reconciliation installs a key after our read.
+			return initial, nil, nil
+		}
+		if calls != 2 || name != "kubectl" {
+			t.Fatalf("unexpected retry or command: %v", args)
+		}
+		var candidate struct {
+			Metadata struct{ ResourceVersion string }
+			Data     map[string][]byte
+		}
+		if json.Unmarshal(stdin, &candidate) != nil || candidate.Metadata.ResourceVersion != "1" || string(candidate.Data["extra"]) != "unrelated" {
+			t.Fatal("original version or unrelated data lost")
+		}
+		if strings.Join(args, " ") == "replace -f -" {
+			return []byte("SENSITIVE-SENTINEL"), []byte("Conflict SENSITIVE-SENTINEL"), errors.New("Conflict SENSITIVE-SENTINEL")
+		}
+		stored = stdin // Apply can overwrite the newly installed key without a version precondition.
+		return nil, nil, nil
+	}, random)
+	if err == nil || strings.Contains(err.Error(), "SENSITIVE-SENTINEL") {
+		t.Fatalf("stale update was accepted or leaked output: %v", err)
+	}
+	if !bytes.Equal(stored, competing) || calls != 2 || random.Len() != 32 {
+		t.Fatal("competing Secret changed, or stale update retried/regenerated credentials")
+	}
+}
+
 func TestSecretRefusalsAndSanitization(t *testing.T) {
 	const sentinel = "SENSITIVE-SENTINEL"
 	for _, tc := range []struct {
@@ -161,21 +200,24 @@ func TestSecretRefusalsAndSanitization(t *testing.T) {
 		{"malformed", []byte(sentinel), nil},
 		{"bad base64", []byte(`{"apiVersion":"v1","kind":"Secret","metadata":{"name":"app","namespace":"test"},"data":{"ENCRYPTION_KEY":"!!!"}}`), nil},
 		{"null", []byte("null"), nil},
+		{"missing version", []byte(`{"apiVersion":"v1","kind":"Secret","metadata":{"name":"app","namespace":"test"}}`), nil},
+		{"empty version", []byte(`{"apiVersion":"v1","kind":"Secret","metadata":{"name":"app","namespace":"test","resourceVersion":""}}`), nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			calls := 0
+			random := bytes.NewReader(bytes.Repeat([]byte{7}, 64))
 			err := ReconcileSecret(context.Background(), SecretOptions{Namespace: "test", Name: "app", Create: true, ManagementToken: sentinel}, func(_ context.Context, _ string, args []string, _ []byte) ([]byte, []byte, error) {
 				calls++
 				if strings.Contains(strings.Join(args, " "), sentinel) {
 					t.Fatal("secret in argv")
 				}
 				return tc.output, []byte(sentinel), tc.failure
-			}, bytes.NewReader(nil))
+			}, random)
 			if err == nil || strings.Contains(err.Error(), sentinel) {
 				t.Fatalf("unsafe error: %v", err)
 			}
-			if calls != 1 {
-				t.Fatalf("read failure caused write: %d", calls)
+			if calls != 1 || random.Len() != 64 {
+				t.Fatalf("invalid response caused generation or write: %d", calls)
 			}
 		})
 	}
@@ -191,7 +233,7 @@ func TestSecretDatabaseAndWriteFailures(t *testing.T) {
 				t.Fatal("secret in argv")
 			}
 			if calls == 1 {
-				return []byte(`{"apiVersion":"v1","kind":"Secret","metadata":{"name":"app","namespace":"test"},"data":{"MANAGEMENT_TOKEN":"dA==","ENCRYPTION_KEY":"aw==","DATABASE_URL":"c3RvcmVk"}}`), nil, nil
+				return []byte(`{"apiVersion":"v1","kind":"Secret","metadata":{"name":"app","namespace":"test","resourceVersion":"1"},"data":{"MANAGEMENT_TOKEN":"dA==","ENCRYPTION_KEY":"aw==","DATABASE_URL":"c3RvcmVk"}}`), nil, nil
 			}
 			var applied struct{ Data map[string][]byte }
 			if err := json.Unmarshal(stdin, &applied); err != nil {

@@ -18,7 +18,7 @@ func TestRecipeInternalSecretCommand(t *testing.T) {
 	t.Setenv("LLM_PROXY_ENCRYPTION_KEY", "KEY-SENTINEL")
 	script := `#!/bin/sh
 printf '%s %s\n' "$KUBECONFIG" "$*" >> "$CALLS"
-if [ "$1" = create ] || [ "$1" = apply ]; then
+if [ "$1" = create ] || [ "$1" = replace ]; then
  cat > "$CALLS.payload"
  echo SECRET-SENTINEL >&2
  exit 1

@@ -43,14 +43,17 @@ func ReconcileSecret(ctx context.Context, o SecretOptions, run recipes.Command, 
 	data := make(map[string][]byte)
 	write := "create"
 	if len(bytes.TrimSpace(raw)) != 0 {
-		write = "apply"
+		write = "replace"
 		var existing struct {
 			APIVersion, Kind string
-			Metadata         struct{ Name, Namespace string }
+			Metadata         struct{ Name, Namespace, ResourceVersion string }
 			Data             map[string][]byte
 		}
 		if json.Unmarshal(raw, &existing) != nil || existing.APIVersion != "v1" || existing.Kind != "Secret" || existing.Metadata.Name != o.Name || existing.Metadata.Namespace != o.Namespace {
 			return errors.New("invalid application Secret response; refusing to replace credentials")
+		}
+		if o.Create && !o.DryRun && existing.Metadata.ResourceVersion == "" {
+			return errors.New("application Secret has no resourceVersion; refusing to replace credentials")
 		}
 		if err := json.Unmarshal(raw, &doc); err != nil {
 			return errors.New("invalid application Secret response")
