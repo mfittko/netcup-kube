@@ -334,6 +334,10 @@ while [[ $# -gt 0 ]]; do
   shift || true
 done
 
+if [[ "${DRY_RUN:-false}" != "true" ]]; then
+  DRY_RUN="false"
+fi
+
 if [[ "${CREATE_SECRET}" != "true" ]]; then
   CREATE_SECRET="false"
 fi
@@ -650,7 +654,7 @@ LLM_PROXY_MANAGEMENT_TOKEN="${MANAGEMENT_TOKEN}" \
   LLM_PROXY_DATABASE_URL="${app_database_url}" \
   "${NETCUP_KUBE_BIN}" recipe-internal llm-proxy-secret \
   --namespace "${NAMESPACE}" --secret-name "${SECRET_NAME}" \
-  --create-secret="${CREATE_SECRET}" --dry-run="${DRY_RUN:-false}"
+  --create-secret="${CREATE_SECRET}" --dry-run="${DRY_RUN}"
 
 if [[ "${CREATE_SECRET}" == "true" ]]; then
   # Secret environment variables are read at pod start; Helm waits for this rollout.

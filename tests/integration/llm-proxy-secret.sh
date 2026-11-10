@@ -41,20 +41,32 @@ STUB
 chmod +x "${fixture}/kubectl" "${fixture}/helm"
 
 for entry in cli direct; do
-  : > "${STUB_LOG}"
-  if [[ "${entry}" == cli ]]; then
-    bin/netcup-kube install llm-proxy --env-file "${fixture}/empty.env" --dry-run \
-      --namespace smoke-ns --secret-name smoke-app --db-driver sqlite --create-secret > "${fixture}/output" 2>&1
-  else
-    bash scripts/recipes/llm-proxy/install.sh \
-      --namespace=smoke-ns --secret-name=smoke-app --db-driver=sqlite --create-secret=true > "${fixture}/output" 2>&1
-  fi
-  grep -q 'would reconcile application Secret' "${fixture}/output"
-  grep -q '^/etc/rancher/k3s/k3s.yaml get secret smoke-app --namespace smoke-ns --ignore-not-found=true -o json$' "${STUB_LOG}"
-  if grep -Eq 'smoke-(secret|key)-sentinel|apply|replace|helm' "${STUB_LOG}" || grep -Eq 'smoke-(secret|key)-sentinel' "${fixture}/output"; then
-    echo 'Secret dry-run leaked credentials or performed a write' >&2
-    exit 1
-  fi
+  for form in true false 1 t T TRUE True ""; do
+    : > "${STUB_LOG}"
+    if [[ "${entry}" == cli ]]; then
+      DRY_RUN="${form}" bin/netcup-kube install llm-proxy --env-file "${fixture}/empty.env" \
+        --namespace smoke-ns --secret-name smoke-app --db-driver sqlite --create-secret > "${fixture}/output" 2>&1
+    else
+      DRY_RUN="${form}" bash scripts/recipes/llm-proxy/install.sh \
+        --namespace=smoke-ns --secret-name=smoke-app --db-driver=sqlite --create-secret=true > "${fixture}/output" 2>&1
+    fi
+    grep -q '^/etc/rancher/k3s/k3s.yaml get secret smoke-app --namespace smoke-ns --ignore-not-found=true -o json$' "${STUB_LOG}"
+    if [[ "${form}" == true ]]; then
+      grep -q 'would reconcile application Secret' "${fixture}/output"
+      if grep -Eq 'application-secret-write|apply|replace|helm' "${STUB_LOG}"; then
+        echo 'Dry-run performed a write' >&2
+        exit 1
+      fi
+    else
+      grep -q 'Application Secret reconciled' "${fixture}/output"
+      [[ "$(grep -c '^application-secret-write$' "${STUB_LOG}")" == 1 ]]
+      grep -q '^helm upgrade --install llm-proxy ' "${STUB_LOG}"
+    fi
+    if grep -Eq 'smoke-(secret|key)-sentinel' "${STUB_LOG}" "${fixture}/output"; then
+      echo 'Entry point leaked credentials' >&2
+      exit 1
+    fi
+  done
 done
 
 for form in true 1 t T TRUE True false; do
