@@ -355,7 +355,7 @@ fi
 if [[ "${UNINSTALL}" != "true" ]]; then
   recipe_require_binary
 fi
-recipe_check_kubeconfig
+recipe_check_kubeconfig "${DRY_RUN}"
 need_cmd helm
 
 if [[ "${UNINSTALL}" == "true" ]]; then

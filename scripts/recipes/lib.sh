@@ -110,6 +110,7 @@ recipe_check_kubeconfig() {
   # - Locally: default to ./config/k3s.yaml (repo-relative), and if missing fetch it
   #   via scp from the management host using ./config/netcup-kube.env.
   local kubeconfig="${KUBECONFIG:-}"
+  local resolved_dry_run="${1:-}"
 
   # SCRIPTS_DIR points at <repo>/scripts; infer repo root.
   local project_root
@@ -132,6 +133,10 @@ recipe_check_kubeconfig() {
 
     # shellcheck disable=SC1090
     source "${env_file}"
+    # Preserve an opting-in caller's resolved mode before any kubeconfig mutations.
+    if [[ -n "${resolved_dry_run}" ]]; then
+      export DRY_RUN="${resolved_dry_run}"
+    fi
 
     local remote_host="${MGMT_HOST:-${MGMT_IP:-}}"
     [[ -n "${remote_host}" ]] || die "MGMT_HOST not set in ${env_file}"
