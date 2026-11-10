@@ -33,6 +33,9 @@ EOF
 # Secret's repo annotation STUB_ANNOTATED_REPO. Every other call succeeds.
 cat > "${TMP}/bin/kubectl" << 'EOF'
 #!/usr/bin/env bash
+if [[ "$1" == "delete" && -n "${STUB_DELETE_LOG:-}" ]]; then
+  printf '%s\n' "$*" >> "${STUB_DELETE_LOG}"
+fi
 if [[ "$1 ${2:-}" == "get secret" ]]; then
   if [[ -n "${STUB_NO_SECRET:-}" ]]; then
     echo "Error from server (NotFound): secrets \"$3\" not found" >&2
@@ -146,6 +149,9 @@ done
 expect 0 "runner scale set runners-123 for" -- --repo o/123 --name runners-123
 long_digits="$(printf '1%.0s' {1..45})"
 expect 1 "for example --name runners-${long_digits:0:37})" -- --repo "o/${long_digits}"
+exponent_name="$(printf '1%.0s' {1..35})e-12345678"
+expect 1 "for example --name runners-${exponent_name:0:36})" -- --repo "o/${exponent_name}"
+expect 0 "runner scale set runners-${exponent_name:0:36} for" -- --repo o/app --name "runners-${exponent_name:0:36}"
 
 # Image reference (the default IMAGE_GHA_RUNNER is the first accepted form).
 for img in ghcr.io/mfittko/ci-runner:pw1.64.1-node26.10.0-pnpm10.28.2 ghcr.io/x/runner@sha256:0123abcd registry.local:5000/a/b:tag; do
@@ -203,9 +209,13 @@ GITHUB_PAT="" expect 0 "helm upgrade --install app" -- --repo alice/app
 CONFIRM=true expect 0 "helm uninstall app" -- --repo alice/app --uninstall
 STUB_RUNNER_SET_EXISTS=1 CONFIRM=true expect 0 "recipe_kdelete secret gha-app-github" -- --repo alice/app --uninstall
 STUB_RUNNER_SET_EXISTS=1 DRY_RUN=false CONFIRM=true expect 1 "AutoscalingRunnerSet arc-runners/app still exists" -- --repo alice/app --uninstall
+export STUB_DELETE_LOG="${TMP}/deletes"
+kubectl delete secret stub-probe
+[[ -s "${STUB_DELETE_LOG}" ]] || fail "kubectl stub did not record deletes"
+: > "${STUB_DELETE_LOG}"
 rc=0
 OUT="$(STUB_RUNNER_SET_ERR="Unable to connect to the server" DRY_RUN=false CONFIRM=true "${NOTTY[@]}" "${INSTALL}" --repo alice/app --uninstall < /dev/null 2>&1)" || rc=$?
-[[ "${rc}" == 1 && "${OUT}" == *"Secret retained; Helm release may already be removed"* && "${OUT}" != *"recipe_kdelete secret"* ]] ||
+[[ "${rc}" == 1 && "${OUT}" == *"Secret retained; Helm release may already be removed"* && ! -s "${STUB_DELETE_LOG}" ]] ||
   fail "uninstall read failure did not preserve the Secret or describe partial progress"
 
 if ((fails > 0)); then
