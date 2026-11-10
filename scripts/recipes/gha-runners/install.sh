@@ -158,8 +158,11 @@ NAME="${NAME:-${REPO_NAME}}"
 # The chart renders runnerScaleSetName unquoted, so a name that YAML reads as a
 # number, boolean, null or date would reach the scale set as a non-string.
 YAML_TYPED_RE='^([0-9]+|0x[0-9a-f]+|0o[0-7]+|0b[01]+|[0-9]+e-?[0-9]+|[0-9]{4}-[0-9]{1,2}-[0-9]{1,2}|y|yes|n|no|true|false|on|off|null)$'
-[[ ! "${NAME}" =~ ${YAML_TYPED_RE} ]] ||
-  die "--name '${NAME}' reads as a YAML number, boolean, null or date; pass an explicit --name that YAML reads as a string (for example --name runners-${NAME})"
+if [[ "${NAME}" =~ ${YAML_TYPED_RE} ]]; then
+  suggested_name="${NAME:0:37}"
+  suggested_name="${suggested_name%-}"
+  die "--name '${NAME}' reads as a YAML number, boolean, null or date; pass an explicit --name that YAML reads as a string (for example --name runners-${suggested_name})"
+fi
 # The image goes unquoted into two YAML documents, so allow only reference characters.
 [[ "${IMAGE}" =~ ^[A-Za-z0-9][A-Za-z0-9._/:@-]*$ && "${IMAGE}" != *: ]] || die "--image must be an image reference (for example registry/repo:tag or repo@sha256:...): '${IMAGE}'"
 COUNT_RE='^(0|[1-9][0-9]*)$'
@@ -195,6 +198,14 @@ if status_err="$(helm status "${NAME}" --namespace "${RUNNER_NS}" 2>&1 > /dev/nu
   fi
   [[ "${owner_url}" == "https://github.com/${REPO}" ]] ||
     die "Release ${RUNNER_NS}/${NAME} serves '${owner_url}', not https://github.com/${REPO}. Pass a distinct --name."
+  set_name=""
+  secret_name=""
+  [[ "${values_json}" =~ \"runnerScaleSetName\":\"([^\"]*)\" ]] && set_name="${BASH_REMATCH[1]}"
+  [[ "${values_json}" =~ \"githubConfigSecret\":\"([^\"]*)\" ]] && secret_name="${BASH_REMATCH[1]}"
+  [[ "${set_name}" == "${NAME}" ]] ||
+    die "Release ${RUNNER_NS}/${NAME} uses AutoscalingRunnerSet '${set_name}', not '${NAME}'. Pass a distinct --name."
+  [[ "${secret_name}" == "${SECRET}" ]] ||
+    die "Release ${RUNNER_NS}/${NAME} uses Secret '${secret_name}', not '${SECRET}'. Pass a distinct --name."
 elif [[ "${status_err}" != *"release: not found"* ]]; then
   die "helm status ${NAME} failed, nothing changed: ${status_err}"
 fi
@@ -210,7 +221,7 @@ secret_repo() {
   { err="$(k get secret "${SECRET}" -n "${RUNNER_NS}" \
     -o "jsonpath={.metadata.annotations.${REPO_ANNOTATION//./\\.}}" 2>&1 >&3)" || rc=$?; } 3>&1
   ((rc == 0)) && return 0
-  [[ "${err}" == *"NotFound"* ]] && return 1
+  [[ "${err}" == *"(NotFound)"* ]] && return 1
   printf '%s\n' "${err}" >&2
   return 2
 }
@@ -237,6 +248,14 @@ if [[ "${UNINSTALL}" == "true" ]]; then
   if [[ "${RELEASE_EXISTS}" == "true" ]]; then
     run helm uninstall "${NAME}" --namespace "${RUNNER_NS}" --wait --timeout 5m
   fi
+  # A dry-run Helm uninstall cannot remove the set; still guard absent releases.
+  if [[ "${DRY_RUN:-false}" != "true" || "${RELEASE_EXISTS}" != "true" ]]; then
+    if set_err="$(k get autoscalingrunnerset "${NAME}" -n "${RUNNER_NS}" -o name 2>&1 > /dev/null)"; then
+      die "AutoscalingRunnerSet ${RUNNER_NS}/${NAME} still exists; keep its Secret and retry --uninstall later"
+    elif [[ "${set_err}" != *"(NotFound)"* ]]; then
+      die "Cannot read AutoscalingRunnerSet ${RUNNER_NS}/${NAME}; Secret retained; Helm release may already be removed: ${set_err}"
+    fi
+  fi
   run recipe_kdelete daemonset "${PREPULL}" -n "${RUNNER_NS}"
   run recipe_kdelete secret "${SECRET}" -n "${RUNNER_NS}"
   exit 0
@@ -261,6 +280,8 @@ if [[ -z "${TOKEN}" ]]; then
   ((repo_rc != 2)) || die "${read_err}"
   ((repo_rc == 0)) ||
     die "No GitHub token: pass --token-file or GITHUB_PAT (Secret ${RUNNER_NS}/${SECRET} does not exist yet)"
+  [[ "${RELEASE_EXISTS}" == "true" || -n "${annotated_repo}" ]] ||
+    die "Secret ${RUNNER_NS}/${SECRET} is missing ${REPO_ANNOTATION} annotation; pass --token-file or GITHUB_PAT"
   [[ "${RELEASE_EXISTS}" == "true" || "${annotated_repo}" == "${REPO}" ]] ||
     die "Secret ${RUNNER_NS}/${SECRET} was written for '${annotated_repo}', not ${REPO}. Pass --token-file or GITHUB_PAT, or a distinct --name."
 fi
