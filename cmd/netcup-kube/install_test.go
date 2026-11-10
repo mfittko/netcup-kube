@@ -9,6 +9,74 @@ import (
 	"github.com/mfittko/netcup-kube/internal/tunnel"
 )
 
+func TestInstallDomainFollowup(t *testing.T) {
+	if _, err := os.Stat("/etc/caddy/Caddyfile"); err == nil {
+		t.Skip("automatic remote domains only run on a local installation")
+	}
+	oldDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldCfg, oldExecutor, oldEnvFile, oldDry, oldWrite := cfg, scriptExecutor, envFile, dryRun, dryRunWriteFiles
+	t.Cleanup(func() {
+		_ = os.Chdir(oldDir)
+		cfg, scriptExecutor, envFile, dryRun, dryRunWriteFiles = oldCfg, oldExecutor, oldEnvFile, oldDry, oldWrite
+	})
+	for _, mode := range []string{"flag", "environment", "env-file", "quoted-env-file", "flag-over-file", "live"} {
+		t.Run(mode, func(t *testing.T) {
+			dir := t.TempDir()
+			for path, content := range map[string]string{
+				"scripts/main.sh":                    "#!/bin/sh\nexit 0\n",
+				"scripts/recipes/fixture/install.sh": "#!/bin/sh\nprintf '%s' \"$DRY_RUN\" > \"$FIXTURE_RECIPE\"\n",
+				"bin/netcup-kube":                    "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$FIXTURE_DOMAINS\"\n",
+				"config/fixture.env":                 "DRY_RUN=" + map[string]string{"env-file": "true", "quoted-env-file": `"true"`, "flag-over-file": `'false'`}[mode] + "\n",
+			} {
+				full := filepath.Join(dir, path)
+				if err := os.MkdirAll(filepath.Dir(full), 0755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(full, []byte(content), 0700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := os.Chdir(dir); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("KUBECONFIG", serverKubeconfigPath)
+			t.Setenv("FIXTURE_RECIPE", filepath.Join(dir, "recipe"))
+			t.Setenv("FIXTURE_DOMAINS", filepath.Join(dir, "domains"))
+			t.Setenv("DRY_RUN", map[bool]string{true: "true", false: "false"}[mode == "environment"])
+			envFile, dryRun, dryRunWriteFiles = "", false, false
+			args := []string{"fixture", "--host", "proxy.example.com", "--admin-host=admin.example.com"}
+			if mode == "flag" || mode == "flag-over-file" {
+				args = append(args, "--dry-run")
+			}
+			if mode == "env-file" || mode == "quoted-env-file" || mode == "flag-over-file" {
+				args = append(args, "--env-file", filepath.Join(dir, "config/fixture.env"))
+			}
+			if err := rootCmd.PersistentPreRunE(installCmd, args); err != nil {
+				t.Fatal(err)
+			}
+			if err := installCmd.RunE(installCmd, args); err != nil {
+				t.Fatal(err)
+			}
+			recipe, err := os.ReadFile(filepath.Join(dir, "recipe"))
+			wantDry := mode != "live"
+			if err != nil || (string(recipe) == "true") != wantDry {
+				t.Fatal("recipe did not receive resolved dry-run configuration")
+			}
+			domains, err := os.ReadFile(filepath.Join(dir, "domains"))
+			if wantDry {
+				if !os.IsNotExist(err) {
+					t.Fatal("dry-run invoked automatic domain mutation")
+				}
+			} else if err != nil || strings.Count(string(domains), "--add-domains") != 2 || !strings.Contains(string(domains), "proxy.example.com") || !strings.Contains(string(domains), "admin.example.com") {
+				t.Fatal("live domain updates were lost")
+			}
+		})
+	}
+}
+
 func TestFetchKubeconfig(t *testing.T) {
 	// Create temporary environment file
 	tmpDir := t.TempDir()

@@ -33,6 +33,7 @@ echo "  ✓ netcup-kube ssh --help"
 # Recipe installer sanity check
 ./bin/netcup-kube install --help > /dev/null
 echo "  ✓ netcup-kube install --help"
+bash tests/integration/llm-proxy-secret.sh
 
 # metoro --client-service is interpolated into OTTL/YAML; unsafe values must be refused
 # before any kubectl/helm call (the guard runs right after argument parsing).

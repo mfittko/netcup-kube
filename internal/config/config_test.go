@@ -64,6 +64,24 @@ KEY2=value2`,
 			wantErr: false,
 		},
 		{
+			name: "matching quotes and literal quote characters",
+			fileContent: `DOUBLE="true"
+SINGLE='true'
+EMPTY_DOUBLE=""
+EMPTY_SINGLE=''
+UNMATCHED="true
+MISMATCHED="true'
+LITERAL=a"b'c
+NESTED='"literal"'
+EXPANDED=${CONFIG_QUOTED_LITERAL}
+SHELL="$(printf should-not-run)"`,
+			want: map[string]string{
+				"DOUBLE": "true", "SINGLE": "true", "EMPTY_DOUBLE": "", "EMPTY_SINGLE": "",
+				"UNMATCHED": `"true`, "MISMATCHED": `"true'`, "LITERAL": `a"b'c`,
+				"NESTED": `"literal"`, "EXPANDED": `"inherited"`, "SHELL": "$(printf should-not-run)",
+			},
+		},
+		{
 			name: "with variable expansion",
 			fileContent: `BASE=/tmp
 SUBDIR=${BASE}/data`,
@@ -88,6 +106,7 @@ KEY2=value2`,
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("CONFIG_QUOTED_LITERAL", `"inherited"`)
 			// Create temp file
 			tmpDir := t.TempDir()
 			tmpFile := filepath.Join(tmpDir, "test.env")
@@ -150,6 +169,32 @@ func TestLoadEnvFile_Precedence(t *testing.T) {
 	}
 	if cfg.Env["KEY2"] != "also_from_file" {
 		t.Errorf("LoadEnvFile should add new values, got %q, want 'also_from_file'", cfg.Env["KEY2"])
+	}
+}
+
+func TestLoadEnvFile_QuotedPrecedence(t *testing.T) {
+	for _, fileFirst := range []bool{false, true} {
+		cfg := New()
+		t.Setenv("CONFIG_FILE_VALUE", "process")
+		t.Setenv("CONFIG_LITERAL_VALUE", `"process literal"`)
+		path := filepath.Join(t.TempDir(), "quoted.env")
+		if err := os.WriteFile(path, []byte("CONFIG_FILE_VALUE='file'\nCONFIG_EMPTY_VALUE=\"\"\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if !fileFirst {
+			cfg.LoadFromEnvironment()
+		}
+		if err := cfg.LoadEnvFile(path); err != nil {
+			t.Fatal(err)
+		}
+		cfg.LoadFromEnvironment()
+		if cfg.Env["CONFIG_FILE_VALUE"] != "file" || cfg.Env["CONFIG_EMPTY_VALUE"] != "" || cfg.Env["CONFIG_LITERAL_VALUE"] != `"process literal"` {
+			t.Fatal("file decoding changed precedence or inherited literal bytes")
+		}
+		cfg.SetFlag("CONFIG_FILE_VALUE", `"flag literal"`)
+		if cfg.Env["CONFIG_FILE_VALUE"] != `"flag literal"` {
+			t.Fatal("flag literal bytes changed")
+		}
 	}
 }
 
