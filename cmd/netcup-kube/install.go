@@ -58,7 +58,7 @@ Examples:
 		}
 
 		recipe := args[0]
-		recipeArgs := args[1:]
+		_, _, _, recipeArgs := parseGlobalFlagsFromArgs(args[1:])
 
 		// Find project root
 		projectRoot, err := findProjectRoot()
@@ -134,10 +134,14 @@ Examples:
 
 		// Run the recipe
 		recipeCmd := exec.Command(recipeScript, recipeArgs...)
+		executable, err := os.Executable()
+		if err != nil {
+			return fmt.Errorf("could not locate running executable: %w", err)
+		}
+		recipeCmd.Env = append(os.Environ(), cfg.ToEnvSlice()...)
+		recipeCmd.Env = append(recipeCmd.Env, "NETCUP_KUBE_BIN="+executable)
 		if kubeconfig != "" {
-			recipeCmd.Env = append(os.Environ(), fmt.Sprintf("KUBECONFIG=%s", kubeconfig))
-		} else {
-			recipeCmd.Env = os.Environ()
+			recipeCmd.Env = append(recipeCmd.Env, fmt.Sprintf("KUBECONFIG=%s", kubeconfig))
 		}
 		recipeCmd.Stdin = os.Stdin
 		recipeCmd.Stdout = os.Stdout

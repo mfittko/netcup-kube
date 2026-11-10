@@ -76,6 +76,13 @@ netcup-kube install <recipe> [recipe-options]
 - `postgres` — Install PostgreSQL (Bitnami Helm chart)
 - `redis` — Install Redis (Bitnami Helm chart)
 - `llm-proxy` — Install llm-proxy (Helm chart; Secret-backed config)
+  - Application Secret reconciliation runs inside the current CLI executable.
+    Direct scripts require `bin/netcup-kube` (or `NETCUP_KUBE_BIN`); help remains binary-free.
+  - `--create-secret` reuses stored nonempty credentials, generates missing values,
+    and preserves unrelated Secret data; supplied values take precedence.
+    `--create-secret=false` validates required `MANAGEMENT_TOKEN` and `ENCRYPTION_KEY`
+    without writes. Read errors refuse credential replacement.
+  - Dry-run still reads the application Secret, with no credential generation or Secret writes.
 - `sealed-secrets` — Install Sealed Secrets (encrypt secrets for Git)
 - `redisinsight` — Install RedisInsight (Redis GUI)
 - `kube-prometheus-stack` — Install Grafana + Prometheus + Alertmanager

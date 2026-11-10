@@ -7,6 +7,11 @@ set -euo pipefail
 # - Recipes already source `scripts/lib/common.sh` (for log/die/is_tty/prompt/k).
 # - Recipes set SCRIPTS_DIR to the repo's scripts/ directory.
 
+recipe_require_binary() {
+  NETCUP_KUBE_BIN="${NETCUP_KUBE_BIN:-${SCRIPTS_DIR}/../bin/netcup-kube}"
+  [[ -x "${NETCUP_KUBE_BIN}" ]] || die "Build bin/netcup-kube before running this recipe directly."
+}
+
 recipe_confirm_or_die() {
   local msg="$1"
   if is_tty; then

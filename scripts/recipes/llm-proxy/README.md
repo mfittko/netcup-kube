@@ -9,7 +9,7 @@ Installs `llm-proxy` using the official OCI Helm chart from GitHub Container Reg
 By default, the recipe expects a Kubernetes Secret in the target namespace:
 
 - Name: `<release>-secrets` (default: `llm-proxy-secrets`)
-- Keys: `MANAGEMENT_TOKEN` (required), `DATABASE_URL` (optional)
+- Keys: `MANAGEMENT_TOKEN` and `ENCRYPTION_KEY` (required), `DATABASE_URL` (optional)
 
 Create it in advance (recommended):
 
@@ -23,6 +23,7 @@ metadata:
 type: Opaque
 stringData:
   MANAGEMENT_TOKEN: "..."
+  ENCRYPTION_KEY: "..."
 EOF
 ```
 
@@ -35,11 +36,22 @@ netcup-kube install llm-proxy
 ```
 
 If you prefer the recipe to manage the Secret, use `--create-secret`.
-This is non-interactive and auto-generates `MANAGEMENT_TOKEN` when not provided:
+This is non-interactive. Explicit credentials win; otherwise existing nonempty
+values are reused and missing `MANAGEMENT_TOKEN` / `ENCRYPTION_KEY` values are
+generated. Unrelated Secret data is preserved. Read failures refuse replacement.
+Without `--create-secret` (or with `--create-secret=false`), both required fields
+are validated and the Secret is never written. Supplied credentials require
+`--create-secret`.
 
 ```bash
 netcup-kube install llm-proxy --create-secret
 ```
+
+The CLI uses its running executable for Secret reconciliation. Before invoking
+`scripts/recipes/llm-proxy/install.sh` directly, build `bin/netcup-kube` with
+`make build-go`; `NETCUP_KUBE_BIN` can select another executable. Help needs no
+binary or cluster. `DRY_RUN=true` still reads and validates the application
+Secret, reports intent, and performs no Secret writes or credential generation.
 
 ### Ingress hostnames (DNS)
 

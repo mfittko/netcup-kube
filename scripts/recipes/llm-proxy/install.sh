@@ -151,48 +151,6 @@ HOSTNAME_ADMIN="${LLM_PROXY_ADMIN_HOST:-}"
 
 UNINSTALL="false"
 
-generate_management_token() {
-  if command -v openssl > /dev/null 2>&1; then
-    # 256-bit token as hex; URL-safe, no padding.
-    openssl rand -hex 32
-    return 0
-  fi
-
-  if command -v python3 > /dev/null 2>&1; then
-    python3 - << 'PY'
-import secrets
-print(secrets.token_urlsafe(48))
-PY
-    return 0
-  fi
-
-  if [[ -r /dev/urandom ]] && command -v tr > /dev/null 2>&1 && command -v head > /dev/null 2>&1; then
-    LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 64
-    echo
-    return 0
-  fi
-
-  return 1
-}
-
-generate_encryption_key() {
-  if command -v openssl > /dev/null 2>&1; then
-    openssl rand -base64 32
-    return 0
-  fi
-
-  if command -v python3 > /dev/null 2>&1; then
-    python3 - << 'PY'
-import os
-import base64
-print(base64.b64encode(os.urandom(32)).decode())
-PY
-    return 0
-  fi
-
-  return 1
-}
-
 generate_password() {
   if command -v openssl > /dev/null 2>&1; then
     # Base64 can include /+; keep only URL-safe-ish characters.
@@ -237,6 +195,9 @@ while [[ $# -gt 0 ]]; do
       ;;
     --create-secret)
       CREATE_SECRET="true"
+      ;;
+    --create-secret=true | --create-secret=false)
+      CREATE_SECRET="${1#*=}"
       ;;
     --restart)
       RESTART_AFTER_INSTALL="true"
@@ -383,6 +344,9 @@ if [[ -z "${SECRET_NAME}" ]]; then
   SECRET_NAME="${RELEASE}-secrets"
 fi
 
+if [[ "${UNINSTALL}" != "true" ]]; then
+  recipe_require_binary
+fi
 recipe_check_kubeconfig
 need_cmd helm
 
@@ -673,90 +637,20 @@ else
   log "Using local Helm chart from: ${CHART_SOURCE}"
 fi
 
+app_database_url="${DATABASE_URL}"
+if [[ "${CREATE_SECRET}" != "true" ]]; then
+  app_database_url="${USER_DATABASE_URL}"
+fi
+LLM_PROXY_MANAGEMENT_TOKEN="${MANAGEMENT_TOKEN}" \
+  LLM_PROXY_ENCRYPTION_KEY="${ENCRYPTION_KEY}" \
+  LLM_PROXY_DATABASE_URL="${app_database_url}" \
+  "${NETCUP_KUBE_BIN}" recipe-internal llm-proxy-secret \
+  --namespace "${NAMESPACE}" --secret-name "${SECRET_NAME}" \
+  --create-secret="${CREATE_SECRET}" --dry-run="${DRY_RUN:-false}"
+
 if [[ "${CREATE_SECRET}" == "true" ]]; then
-  if [[ -z "${MANAGEMENT_TOKEN}" ]]; then
-    if k get secret -n "${NAMESPACE}" "${SECRET_NAME}" > /dev/null 2>&1; then
-      existing_token="$(k get secret -n "${NAMESPACE}" "${SECRET_NAME}" -o jsonpath='{.data.MANAGEMENT_TOKEN}' 2> /dev/null | base64 -d 2> /dev/null || true)"
-      if [[ -n "${existing_token}" ]]; then
-        log "No MANAGEMENT_TOKEN provided; reusing existing one from Secret '${SECRET_NAME}'"
-        MANAGEMENT_TOKEN="${existing_token}"
-      fi
-    fi
-
-    if [[ -z "${MANAGEMENT_TOKEN}" ]]; then
-      log "No MANAGEMENT_TOKEN provided; generating one"
-      MANAGEMENT_TOKEN="$(generate_management_token || true)"
-    fi
-  fi
-  [[ -n "${MANAGEMENT_TOKEN}" ]] || die "Failed to generate MANAGEMENT_TOKEN. Install openssl or python3, or provide LLM_PROXY_MANAGEMENT_TOKEN/--management-token."
-
-  if [[ -z "${ENCRYPTION_KEY}" ]]; then
-    if k get secret -n "${NAMESPACE}" "${SECRET_NAME}" > /dev/null 2>&1; then
-      existing_key="$(k get secret -n "${NAMESPACE}" "${SECRET_NAME}" -o jsonpath='{.data.ENCRYPTION_KEY}' 2> /dev/null | base64 -d 2> /dev/null || true)"
-      if [[ -n "${existing_key}" ]]; then
-        log "No ENCRYPTION_KEY provided; reusing existing one from Secret '${SECRET_NAME}'"
-        ENCRYPTION_KEY="${existing_key}"
-      fi
-    fi
-
-    if [[ -z "${ENCRYPTION_KEY}" ]]; then
-      log "No ENCRYPTION_KEY provided; generating one"
-      ENCRYPTION_KEY="$(generate_encryption_key || true)"
-    fi
-  fi
-  [[ -n "${ENCRYPTION_KEY}" ]] || die "Failed to generate ENCRYPTION_KEY. Install openssl or python3, or provide LLM_PROXY_ENCRYPTION_KEY."
-
-  log "Creating/Updating Kubernetes Secret '${SECRET_NAME}' in namespace '${NAMESPACE}'"
-
-  # SECURITY: Avoid passing secrets via process arguments (e.g., --from-literal) to reduce accidental exposure.
-  # Apply a Secret manifest via stdin instead.
-  if [[ -n "${DATABASE_URL}" ]]; then
-    run k apply -f - << EOF
-apiVersion: v1
-kind: Secret
-metadata:
-  name: ${SECRET_NAME}
-  namespace: ${NAMESPACE}
-type: Opaque
-stringData:
-  MANAGEMENT_TOKEN: |-
-    ${MANAGEMENT_TOKEN}
-  DATABASE_URL: |-
-    ${DATABASE_URL}
-  ENCRYPTION_KEY: |-
-    ${ENCRYPTION_KEY}
-EOF
-  else
-    run k apply -f - << EOF
-apiVersion: v1
-kind: Secret
-metadata:
-  name: ${SECRET_NAME}
-  namespace: ${NAMESPACE}
-type: Opaque
-stringData:
-  MANAGEMENT_TOKEN: |-
-    ${MANAGEMENT_TOKEN}
-  ENCRYPTION_KEY: |-
-    ${ENCRYPTION_KEY}
-EOF
-  fi
-
-  # Ensure pods pick up any updated Secret values (env vars from Secrets are read at pod start).
-  # We pass this via Helm so `--wait` covers the resulting rollout.
+  # Secret environment variables are read at pod start; Helm waits for this rollout.
   POD_RESTART_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-else
-  if [[ -n "${MANAGEMENT_TOKEN}" || -n "${USER_DATABASE_URL}" || -n "${ENCRYPTION_KEY}" ]]; then
-    die "Refusing to accept secret values without --create-secret. Either pre-create Secret '${SECRET_NAME}' or re-run with --create-secret."
-  fi
-  if ! k get secret -n "${NAMESPACE}" "${SECRET_NAME}" > /dev/null 2>&1; then
-    die "Secret '${SECRET_NAME}' not found in namespace '${NAMESPACE}'. Create it first or re-run with --create-secret."
-  fi
-  existing_key="$(k get secret -n "${NAMESPACE}" "${SECRET_NAME}" -o jsonpath='{.data.ENCRYPTION_KEY}' 2> /dev/null | base64 -d 2> /dev/null || true)"
-  if [[ -z "${existing_key}" ]]; then
-    die "Secret '${SECRET_NAME}' is missing ENCRYPTION_KEY. Add it or re-run with --create-secret to generate it."
-  fi
-  log "Using existing Kubernetes Secret '${SECRET_NAME}' in namespace '${NAMESPACE}'"
 fi
 
 HELM_ARGS=(
