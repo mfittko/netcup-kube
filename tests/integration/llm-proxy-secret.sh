@@ -28,6 +28,10 @@ case "$*" in
   'apply -f -' | 'create -f -' | 'replace -f -')
     payload="$(cat)"
     if [[ "${payload}" == *'"kind":"Secret"'* ]]; then
+      if [[ "${EXPECT_STORED_KEY:-false}" == true ]] && [[ "${payload}" != *'"ENCRYPTION_KEY":"aw=="'* ]]; then
+        echo 'Stored field changed' >&2
+        exit 1
+      fi
       printf 'application-secret-write\n' >> "${STUB_LOG}"
     fi
     ;;
@@ -68,6 +72,29 @@ for entry in cli direct; do
       exit 1
     fi
   done
+done
+
+# Exercise file decoding through the real CLI before recipe environment forwarding.
+for quote in "'" '"'; do
+  printf 'DRY_RUN=%strue%s\n' "${quote}" "${quote}" > "${fixture}/quoted.env"
+  : > "${STUB_LOG}"
+  DRY_RUN=false bin/netcup-kube install llm-proxy --env-file "${fixture}/quoted.env" \
+    --namespace smoke-ns --secret-name smoke-app --db-driver sqlite --create-secret > "${fixture}/output" 2>&1
+  grep -q 'would reconcile application Secret' "${fixture}/output"
+  if grep -Eq 'application-secret-write|apply|replace|helm' "${STUB_LOG}"; then
+    echo 'Quoted file dry-run performed a write' >&2
+    exit 1
+  fi
+
+  cat > "${fixture}/quoted.env" << EOF
+DRY_RUN=${quote}false${quote}
+LLM_PROXY_ENCRYPTION_KEY=${quote}${quote}
+EOF
+  : > "${STUB_LOG}"
+  EXPECT_STORED_KEY=true DRY_RUN=true bin/netcup-kube install llm-proxy --env-file "${fixture}/quoted.env" \
+    --namespace smoke-ns --secret-name smoke-app --db-driver sqlite --create-secret > "${fixture}/output" 2>&1
+  grep -q 'Application Secret reconciled' "${fixture}/output"
+  [[ "$(grep -c '^application-secret-write$' "${STUB_LOG}")" == 1 ]]
 done
 
 # Own the whole project layout so the missing-kubeconfig path cannot load real config.

@@ -22,14 +22,14 @@ func TestInstallDomainFollowup(t *testing.T) {
 		_ = os.Chdir(oldDir)
 		cfg, scriptExecutor, envFile, dryRun, dryRunWriteFiles = oldCfg, oldExecutor, oldEnvFile, oldDry, oldWrite
 	})
-	for _, mode := range []string{"flag", "environment", "env-file", "live"} {
+	for _, mode := range []string{"flag", "environment", "env-file", "quoted-env-file", "flag-over-file", "live"} {
 		t.Run(mode, func(t *testing.T) {
 			dir := t.TempDir()
 			for path, content := range map[string]string{
 				"scripts/main.sh":                    "#!/bin/sh\nexit 0\n",
 				"scripts/recipes/fixture/install.sh": "#!/bin/sh\nprintf '%s' \"$DRY_RUN\" > \"$FIXTURE_RECIPE\"\n",
 				"bin/netcup-kube":                    "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$FIXTURE_DOMAINS\"\n",
-				"config/fixture.env":                 "DRY_RUN=" + map[bool]string{true: "true", false: "false"}[mode == "env-file"] + "\n",
+				"config/fixture.env":                 "DRY_RUN=" + map[string]string{"env-file": "true", "quoted-env-file": `"true"`, "flag-over-file": `'false'`}[mode] + "\n",
 			} {
 				full := filepath.Join(dir, path)
 				if err := os.MkdirAll(filepath.Dir(full), 0755); err != nil {
@@ -48,10 +48,10 @@ func TestInstallDomainFollowup(t *testing.T) {
 			t.Setenv("DRY_RUN", map[bool]string{true: "true", false: "false"}[mode == "environment"])
 			envFile, dryRun, dryRunWriteFiles = "", false, false
 			args := []string{"fixture", "--host", "proxy.example.com", "--admin-host=admin.example.com"}
-			if mode == "flag" {
+			if mode == "flag" || mode == "flag-over-file" {
 				args = append(args, "--dry-run")
 			}
-			if mode == "env-file" {
+			if mode == "env-file" || mode == "quoted-env-file" || mode == "flag-over-file" {
 				args = append(args, "--env-file", filepath.Join(dir, "config/fixture.env"))
 			}
 			if err := rootCmd.PersistentPreRunE(installCmd, args); err != nil {

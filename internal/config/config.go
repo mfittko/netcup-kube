@@ -110,7 +110,7 @@ func New() *Config {
 	}
 }
 
-// LoadEnvFile loads environment variables from a file
+// LoadEnvFile loads environment variables from a file, removing matching outer quotes before expansion.
 // Returns nil if the file doesn't exist (not an error)
 // NOTE: Values from env files are considered trusted. Ensure env files come from trusted sources only.
 func (c *Config) LoadEnvFile(path string) error {
@@ -140,6 +140,11 @@ func (c *Config) LoadEnvFile(path string) error {
 
 		key := strings.TrimSpace(parts[0])
 		value := strings.TrimSpace(parts[1])
+
+		if len(value) >= 2 && ((value[0] == '"' && value[len(value)-1] == '"') ||
+			(value[0] == '\'' && value[len(value)-1] == '\'')) {
+			value = value[1 : len(value)-1]
+		}
 
 		// Simple variable expansion: ${VAR} -> value of VAR
 		value = c.expandVars(value)
