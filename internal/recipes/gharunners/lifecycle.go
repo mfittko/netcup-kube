@@ -47,19 +47,42 @@ func (o Options) validate() error {
 	return nil
 }
 
-// releaseOwned accepts absence only from a successful, structured, exact-target list.
+// releaseOwned checks storage directly because Helm list omits unknown-status releases.
 func releaseOwned(ctx context.Context, o Options, run recipes.Command) (bool, error) {
-	// Explicit status flags work with both Helm 3 and Helm 4 (which removed --all).
-	raw, _, err := run(ctx, "helm", []string{"list", "--namespace", o.Namespace, "--filter", "^" + o.Name + "$", "--deployed", "--failed", "--pending", "--uninstalled", "--superseded", "--uninstalling", "-o", "json"}, nil)
-	var releases []struct{ Name, Namespace string }
-	if err != nil || json.Unmarshal(raw, &releases) != nil || releases == nil {
+	for _, variable := range os.Environ() {
+		key, value, _ := strings.Cut(variable, "=")
+		if strings.HasPrefix(key, "HELM_KUBE") && value != "" {
+			return false, errors.New("Helm-specific Kubernetes overrides are unsupported; use KUBECONFIG; refusing mutation")
+		}
+	}
+	kind := "secrets"
+	switch os.Getenv("HELM_DRIVER") {
+	case "", "secret", "secrets":
+	case "configmap", "configmaps":
+		kind = "configmaps"
+	default:
+		return false, errors.New("unsupported HELM_DRIVER; refusing mutation")
+	}
+	raw, _, err := run(ctx, "kubectl", []string{"get", kind, "--namespace", o.Namespace, "--selector", "owner=helm,name=" + o.Name, "-o", "json"}, nil)
+	var releases struct {
+		Items []struct {
+			Metadata struct {
+				Name, Namespace string
+				Labels          map[string]string
+			}
+		}
+	}
+	if err != nil || json.Unmarshal(raw, &releases) != nil || releases.Items == nil {
 		return false, errors.New("could not list runner release; refusing mutation")
 	}
-	if len(releases) == 0 {
+	if len(releases.Items) == 0 {
 		return false, nil
 	}
-	if len(releases) != 1 || releases[0].Name != o.Name || releases[0].Namespace != o.Namespace {
-		return false, errors.New("invalid runner release identity; refusing mutation")
+	for _, release := range releases.Items {
+		m := release.Metadata
+		if m.Name == "" || m.Namespace != o.Namespace || m.Labels["name"] != o.Name || m.Labels["owner"] != "helm" {
+			return false, errors.New("invalid runner release identity; refusing mutation")
+		}
 	}
 	raw, _, err = run(ctx, "helm", []string{"get", "values", o.Name, "--namespace", o.Namespace, "-o", "json"}, nil)
 	var values struct{ GithubConfigURL, GithubConfigSecret, RunnerScaleSetName string }

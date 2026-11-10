@@ -18,12 +18,10 @@ func TestRecipeInternalRunnerCommand(t *testing.T) {
 			t.Setenv("CALLS", logPath)
 			t.Setenv("KUBECONFIG", "fixture-kubeconfig")
 			t.Setenv("GITHUB_PAT", "fixture-canary")
+			t.Setenv("HELM_DRIVER", "")
 			helm := `#!/bin/sh
 [ "$KUBECONFIG" = fixture-kubeconfig ] || exit 1
 printf 'helm fixture-kubeconfig %s\n' "$*" >> "$CALLS"
-if [ "$1" = list ]; then
- if [ "$INSTALLED" = true ]; then printf '[{"name":"app","namespace":"arc-runners"}]'; else printf '[]'; fi
-fi
 if [ "$1" = get ]; then
  /bin/cat << 'STUB_JSON'
 {"githubConfigUrl":"https://github.com/o/app","runnerScaleSetName":"app","githubConfigSecret":"gha-app-github"}
@@ -34,6 +32,13 @@ fi
 [ "$KUBECONFIG" = fixture-kubeconfig ] || exit 1
 printf 'kube fixture-kubeconfig %s\n' "$*" >> "$CALLS"
 if [ "$1" = kubectl ]; then shift; fi
+if [ "$1 $2" = 'get secrets' ]; then
+ if [ "$INSTALLED" = true ]; then
+  /bin/cat << 'STUB_JSON'
+{"items":[{"metadata":{"name":"sh.helm.release.v1.app.v1","namespace":"arc-runners","labels":{"name":"app","owner":"helm","status":"unknown"}}}]}
+STUB_JSON
+ else printf '{"items":[]}'; fi
+fi
 if [ "$1" = apply ]; then
  /bin/cat >> "$CALLS.payload"
  if [ "$FAIL_APPLY" = true ]; then echo fixture-canary >&2; exit 1; fi
@@ -82,7 +87,7 @@ fi
 					if strings.Contains(string(calls)+out.String(), "fixture-canary") || err != nil && strings.Contains(err.Error(), "fixture-canary") {
 						t.Fatal("credential leaked")
 					}
-					if !strings.Contains(string(calls), "helm fixture-kubeconfig list") || !strings.Contains(string(calls), "kube fixture-kubeconfig "+map[bool]string{false: "apply", true: "kubectl apply"}[useK3s]) {
+					if !strings.Contains(string(calls), "kube fixture-kubeconfig "+map[bool]string{false: "get secrets", true: "kubectl get secrets"}[useK3s]) || !strings.Contains(string(calls), "kube fixture-kubeconfig "+map[bool]string{false: "apply", true: "kubectl apply"}[useK3s]) {
 						t.Fatalf("routing lost: %s", calls)
 					}
 				})

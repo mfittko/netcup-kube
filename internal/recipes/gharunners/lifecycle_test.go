@@ -16,7 +16,8 @@ import (
 
 const sentinel = "TOKEN-SENTINEL"
 const ownedValues = `{ "githubConfigSecret": "gha-app-github", "runnerScaleSetName": "app", "githubConfigUrl": "https://github.com/o/app" }`
-const listed = `[{"namespace":"arc-runners","name":"app"}]`
+const listed = `{"items":[{"metadata":{"name":"sh.helm.release.v1.app.v1","namespace":"arc-runners","labels":{"name":"app","owner":"helm","status":"unknown"}}}]}`
+const noReleases = `{"items":[]}`
 
 type step struct {
 	command, args, stdout string
@@ -57,7 +58,7 @@ func opts() Options {
 	return Options{Repo: "o/app", Name: "app", Namespace: "arc-runners", ControllerNamespace: "arc-systems", Confirmed: true}
 }
 func list(raw string) step {
-	return step{command: "helm", args: "list --namespace arc-runners --filter ^app$ --deployed --failed --pending --uninstalled --superseded --uninstalling -o json", stdout: raw}
+	return step{command: "kubectl", args: "get secrets --namespace arc-runners --selector owner=helm,name=app -o json", stdout: raw}
 }
 func values(raw string) step {
 	return step{command: "helm", args: "get values app --namespace arc-runners -o json", stdout: raw}
@@ -101,8 +102,11 @@ func TestReleaseOwnership(t *testing.T) {
 		{"other-set", strings.ReplaceAll(ownedValues, `"app"`, `"other"`), false, true},
 		{"other-secret", strings.ReplaceAll(ownedValues, "gha-app-github", "other"), false, true},
 		{"missing", `{}`, false, true}, {"null", `null`, false, true}, {"type", `{"runnerScaleSetName":5}`, false, true}, {"malformed", `{`, false, true},
-		{"wrong-list-name", `[{"name":"other","namespace":"arc-runners"}]`, true, true},
-		{"wrong-list-namespace", `[{"name":"app","namespace":"other"}]`, true, true},
+		{"wrong-list-name", strings.ReplaceAll(listed, `"name":"app"`, `"name":"other"`), true, true},
+		{"wrong-list-namespace", strings.ReplaceAll(listed, "arc-runners", "other"), true, true},
+		{"wrong-list-owner", strings.ReplaceAll(listed, `"owner":"helm"`, `"owner":"other"`), true, true},
+		{"missing-list-name", strings.ReplaceAll(listed, "sh.helm.release.v1.app.v1", ""), true, true},
+		{"missing-items", `{}`, true, true}, {"null-items", `{"items":null}`, true, true},
 		{"null-list", `null`, true, true}, {"malformed-list", `{`, true, true}, {"empty-list-output", ``, true, true},
 	} {
 		for _, remove := range []bool{false, true} {
@@ -147,13 +151,112 @@ func TestReleaseOwnership(t *testing.T) {
 	}
 }
 
+func TestUnknownReleaseOwnership(t *testing.T) {
+	for _, operation := range []string{"credentials", "reuse", "uninstall"} {
+		for _, dry := range []bool{false, true} {
+			t.Run(operation+map[bool]string{false: "/live", true: "/dry"}[dry], func(t *testing.T) {
+				t.Setenv("HELM_DRIVER", "")
+				o := opts()
+				o.DryRun = dry
+				if operation == "credentials" {
+					o.Token = sentinel
+				}
+				writes, valuesReads := 0, 0
+				run := func(_ context.Context, command string, args []string, _ []byte) ([]byte, []byte, error) {
+					switch command + " " + strings.Join(args, " ") {
+					case "helm list --namespace arc-runners --filter ^app$ --deployed --failed --pending --uninstalled --superseded --uninstalling -o json":
+						// Helm's status filter hides valid unknown-status release records.
+						return []byte(`[]`), nil, nil
+					case "kubectl get secrets --namespace arc-runners --selector owner=helm,name=app -o json":
+						return []byte(`{"items":[{"metadata":{"name":"sh.helm.release.v1.app.v1","namespace":"arc-runners","labels":{"owner":"helm","name":"app","status":"unknown"}}}]}`), nil, nil
+					case values("").command + " " + values("").args:
+						valuesReads++
+						return []byte(strings.ReplaceAll(ownedValues, "o/app", "other/app")), nil, nil
+					case secret("").command + " " + secret("").args, runnerSet("").command + " " + runnerSet("").args:
+						return nil, nil, nil
+					default:
+						writes++
+						return nil, nil, nil
+					}
+				}
+				var out bytes.Buffer
+				var err error
+				if operation == "uninstall" {
+					err = Uninstall(context.Background(), o, run, &out)
+				} else {
+					err = PrepareCredentials(context.Background(), o, run, &out)
+				}
+				checkError(t, err, "ownership mismatch")
+				if writes != 0 || valuesReads != 1 || out.Len() != 0 {
+					t.Fatalf("unsafe release handling: writes=%d values reads=%d preview=%q", writes, valuesReads, out.String())
+				}
+			})
+		}
+	}
+}
+
+func TestReleaseStorage(t *testing.T) {
+	for _, driver := range []string{"", "secret", "secrets", "configmap", "configmaps"} {
+		for _, present := range []bool{false, true} {
+			t.Run(driver+map[bool]string{false: "/fresh-namespace", true: "/history"}[present], func(t *testing.T) {
+				t.Setenv("HELM_DRIVER", driver)
+				o := opts()
+				s := list(noReleases)
+				if !present {
+					o.Namespace = "fresh"
+					s.args = strings.ReplaceAll(s.args, "arc-runners", "fresh")
+				} else {
+					s.stdout = strings.ReplaceAll(listed, `}]}`, `},{"metadata":{"name":"sh.helm.release.v1.app.v2","namespace":"arc-runners","labels":{"name":"app","owner":"helm"}}}]}`)
+				}
+				if strings.HasPrefix(driver, "configmap") {
+					s.args = strings.ReplaceAll(s.args, "get secrets", "get configmaps")
+				}
+				steps := []step{s}
+				if present {
+					steps = append(steps, values(ownedValues))
+				}
+				owned, err := releaseOwned(context.Background(), o, fake(t, steps...))
+				checkError(t, err, "")
+				if owned != present {
+					t.Fatalf("ownership %v, want %v", owned, present)
+				}
+			})
+		}
+	}
+	for _, driver := range []string{"sql", "memory", "custom"} {
+		t.Run(driver, func(t *testing.T) {
+			t.Setenv("HELM_DRIVER", driver)
+			checkError(t, PrepareCredentials(context.Background(), opts(), fake(t), &bytes.Buffer{}), "unsupported HELM_DRIVER")
+			checkError(t, Uninstall(context.Background(), opts(), fake(t), &bytes.Buffer{}), "unsupported HELM_DRIVER")
+		})
+	}
+	for _, failure := range []error{context.DeadlineExceeded, errors.New("Forbidden " + sentinel), errors.New("Proxy NotFound " + sentinel)} {
+		t.Run(failure.Error(), func(t *testing.T) {
+			s := list(noReleases)
+			s.err = failure
+			checkError(t, PrepareCredentials(context.Background(), opts(), fake(t, s), &bytes.Buffer{}), "refusing")
+			checkError(t, Uninstall(context.Background(), opts(), fake(t, s), &bytes.Buffer{}), "refusing")
+		})
+	}
+}
+
+func TestHelmTargetOverrides(t *testing.T) {
+	for _, key := range []string{"HELM_KUBECONTEXT", "HELM_KUBEAPISERVER", "HELM_KUBETOKEN", "HELM_KUBECAFILE", "HELM_KUBEINSECURE_SKIP_TLS_VERIFY", "HELM_KUBETLS_SERVER_NAME", "HELM_KUBEASUSER", "HELM_KUBEASGROUPS"} {
+		t.Run(key, func(t *testing.T) {
+			t.Setenv(key, sentinel)
+			checkError(t, PrepareCredentials(context.Background(), opts(), fake(t), &bytes.Buffer{}), "use KUBECONFIG")
+			checkError(t, Uninstall(context.Background(), opts(), fake(t), &bytes.Buffer{}), "use KUBECONFIG")
+		})
+	}
+}
+
 func TestCredentialReuse(t *testing.T) {
 	for _, present := range []bool{false, true} {
 		for _, ann := range []string{"", "o/app", "other/app"} {
 			t.Run(map[bool]string{false: "orphan/", true: "owned/"}[present]+ann, func(t *testing.T) {
 				o := opts()
 				o.DryRun = true
-				steps := []step{list("[]")}
+				steps := []step{list(noReleases)}
 				if present {
 					steps = []step{list(listed), values(ownedValues)}
 				}
@@ -177,7 +280,7 @@ func TestCredentialReuse(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			s := secret(tc.raw)
 			s.err = tc.err
-			err := PrepareCredentials(context.Background(), opts(), fake(t, list("[]"), s), &bytes.Buffer{})
+			err := PrepareCredentials(context.Background(), opts(), fake(t, list(noReleases), s), &bytes.Buffer{})
 			if err == nil {
 				t.Fatal("accepted unsafe reuse")
 			}
@@ -221,7 +324,7 @@ func TestCredentials(t *testing.T) {
 			if tc.name == "file-wins" {
 				o.Token = "wrong-env-token"
 			}
-			steps := []step{list("[]")}
+			steps := []step{list(noReleases)}
 			if tc.name == "owned-explicit" {
 				steps = []step{list(listed), values(ownedValues)}
 			}
@@ -252,7 +355,7 @@ func TestCredentials(t *testing.T) {
 			o.Token = sentinel
 			writes := []step{namespaceStep(t, "arc-systems"), namespaceStep(t, "arc-runners"), {command: "kubectl", args: "apply -f -", payload: func([]byte) {}}}
 			writes[failure].err = errors.New(sentinel)
-			checkError(t, PrepareCredentials(context.Background(), o, fake(t, append([]step{list("[]")}, writes[:failure+1]...)...), &bytes.Buffer{}), "could not")
+			checkError(t, PrepareCredentials(context.Background(), o, fake(t, append([]step{list(noReleases)}, writes[:failure+1]...)...), &bytes.Buffer{}), "could not")
 		})
 	}
 }
@@ -280,7 +383,7 @@ func TestUninstallOrphanOwnership(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			s := secret(tc.raw)
 			s.err = tc.err
-			steps := []step{list("[]"), s}
+			steps := []step{list(noReleases), s}
 			if tc.want == "" {
 				steps = append(steps, runnerSet(""))
 				steps = append(steps, cleanup()...)
@@ -350,7 +453,7 @@ func TestUninstallDryRun(t *testing.T) {
 			if !tc.present {
 				s := runnerSet(tc.raw)
 				s.err = tc.err
-				steps = []step{list("[]"), secret(""), s}
+				steps = []step{list(noReleases), secret(""), s}
 			}
 			var out bytes.Buffer
 			checkError(t, Uninstall(context.Background(), o, fake(t, steps...), &out), tc.want)

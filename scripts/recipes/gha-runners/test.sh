@@ -23,13 +23,6 @@ cat > "${TMP}/bin/helm" << 'EOF'
 [[ "${KUBECONFIG}" == "${CALLS%/calls}/kubeconfig" ]] || exit 1
 printf 'helm fixture-kubeconfig %s\n' "$*" >> "${CALLS}"
 case "$1 ${2:-}" in
-  "list "*)
-    if [[ "${STUB_INSTALLED:-false}" == true ]]; then
-      printf '[{"name":"app","namespace":"arc-runners"}]'
-    else
-      printf '[]'
-    fi
-    ;;
   "get values")
     cat << STUB_JSON
 {"githubConfigUrl":"https://github.com/o/app","runnerScaleSetName":"app","githubConfigSecret":"gha-app-github"}
@@ -46,6 +39,15 @@ if [[ "${STUB_READ_FAILURE:-false}" == true && "$1" == get ]]; then
   echo "fixture-canary" >&2
   exit 1
 fi
+if [[ "$1 ${2:-}" == "get secrets" ]]; then
+  if [[ "${STUB_INSTALLED:-false}" == true ]]; then
+    cat << 'STUB_JSON'
+{"items":[{"metadata":{"name":"sh.helm.release.v1.app.v1","namespace":"arc-runners","labels":{"name":"app","owner":"helm","status":"unknown"}}}]}
+STUB_JSON
+  else
+    printf '{"items":[]}'
+  fi
+fi
 if [[ "$1" == apply ]]; then cat > /dev/null; fi
 exit 0
 EOF
@@ -55,7 +57,7 @@ chmod +x "${TMP}/bin/helm" "${TMP}/bin/kubectl"
 
 # Most cases pass a token; it must never appear in the output.
 SENTINEL="fixture-canary"
-export PATH="${TMP}/bin:${PATH}" DRY_RUN=true KUBECONFIG="${TMP}/kubeconfig" GITHUB_PAT="${SENTINEL}" CALLS="${TMP}/calls"
+export PATH="${TMP}/bin:${PATH}" DRY_RUN=true KUBECONFIG="${TMP}/kubeconfig" GITHUB_PAT="${SENTINEL}" CALLS="${TMP}/calls" HELM_DRIVER=""
 unset STUB_INSTALLED STUB_READ_FAILURE
 
 # is_tty also accepts an openable /dev/tty, so on a terminal the uninstall
@@ -163,10 +165,10 @@ expect 1 "Unknown argument" -- --repo o/app --host example.test
 CONFIRM=false expect 1 "requires CONFIRM=true" -- --repo o/app --uninstall
 CONFIRM=true expect 0 "secret gha-app-github" -- --repo=o/app --uninstall
 STUB_INSTALLED=true CONFIRM=true expect 0 "helm uninstall app" -- --repo o/app --uninstall
-STUB_READ_FAILURE=true CONFIRM=true expect 1 "Cannot read Secret" -- --repo o/app --uninstall
+STUB_READ_FAILURE=true CONFIRM=true expect 1 "could not list runner release" -- --repo o/app --uninstall
 NETCUP_KUBE_BIN="${TMP}/missing" expect 0 "Usage:" -- --help
 NETCUP_KUBE_BIN="${TMP}/missing" expect 1 "Build bin/netcup-kube" -- --repo o/app
-grep -Fq "helm fixture-kubeconfig list --namespace arc-runners --filter ^app$" "${CALLS}" || fail "missing live Helm guard in dry-run"
+grep -Fq "kubectl fixture-kubeconfig get secrets --namespace arc-runners --selector owner=helm,name=app -o json" "${CALLS}" || fail "missing live Helm storage guard in dry-run"
 grep -Fq "kubectl fixture-kubeconfig get autoscalingrunnerset app --namespace arc-runners --ignore-not-found=true -o json" "${CALLS}" || fail "missing exact live RunnerSet target"
 if grep -Eq ' (apply|delete|uninstall|upgrade) ' "${CALLS}"; then fail "dry-run mutated"; fi
 if grep -Fq "${SENTINEL}" "${CALLS}"; then fail "token in argv"; fi
