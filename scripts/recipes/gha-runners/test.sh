@@ -175,9 +175,12 @@ done
 # Container mode.
 for m in "" docker Kubernetes; do
   expect 1 "--container-mode must be runner or kubernetes" -- --repo o/app --container-mode "${m}"
+  expect 1 "--container-mode must be runner or kubernetes" -- --repo o/app "--container-mode=${m}"
 done
 expect 0 "(kubernetes mode, min 1, max 2)" -- --repo o/app --container-mode kubernetes
+[[ "${OUT}" != *"recipe_kdelete configmap gha-app-hook"* ]] || fail "kubernetes mode deletes its job pod template"
 expect 0 "(runner mode, min 1, max 2)" -- --repo o/app
+[[ "${OUT}" == *"recipe_kdelete configmap gha-app-hook"* ]] || fail "runner mode keeps a leftover job pod template"
 # Without DRY_RUN the stubs log what they receive on stdin, so the sent YAML is checked.
 sent() {
   : > "${TMP}/stdin.log"
@@ -188,7 +191,10 @@ sent --repo o/app --container-mode kubernetes --image r:1 --prepull-image j:1 --
 [[ "${SENT}" == *"name: pull-0"*"image: r:1"*"name: pull-1"*"image: j:1"*"name: pull-2"*"image: j:2"* ]] || fail "pre-pull images missing or out of order"
 [[ "${SENT}" != *"pull-3"* ]] || fail "duplicate pre-pull image not dropped"
 [[ "${SENT}" == *"name: gha-app-hook"*"- name: \$job"*'memory: "5Gi"'* ]] || fail "job pod template missing or not sized"
-[[ "${SENT}" == *"type: kubernetes"*"actions.github.com/scale-set-name: app"*"ACTIONS_RUNNER_CONTAINER_HOOK_TEMPLATE"*"ACTIONS_RUNNER_REQUIRE_JOB_CONTAINER, value: \"false\""*"configMap: {name: gha-app-hook}"* ]] || fail "kubernetes mode values incomplete"
+[[ "${SENT}" == *"type: kubernetes"*"accessModes: [ReadWriteOnce]"*"storage: 10Gi"*"topologyKey: kubernetes.io/hostname"*"actions.github.com/scale-set-name: app"*"ACTIONS_RUNNER_CONTAINER_HOOK_TEMPLATE"*"ACTIONS_RUNNER_REQUIRE_JOB_CONTAINER, value: \"false\""*"cpu: 100m, memory: 256Mi"*"limits: {memory: 1Gi}"*"configMap: {name: gha-app-hook}"* ]] || fail "kubernetes mode values incomplete"
+# The --flag=value forms.
+sent --repo o/app --container-mode=kubernetes --image r:1 --prepull-image=j:1
+[[ "${SENT}" == *"name: pull-1"*"image: j:1"*"type: kubernetes"* ]] || fail "--container-mode= or --prepull-image= form ignored"
 sent --repo o/app --image r:1
 [[ "${SENT}" == *"name: pull-0"*"image: r:1"* && "${SENT}" != *"pull-1"* ]] || fail "runner mode pre-pull wrong"
 [[ "${SENT}" != *"containerMode"* && "${SENT}" != *"gha-app-hook"* && "${SENT}" == *'memory: "4Gi"'* ]] || fail "runner mode values wrong"

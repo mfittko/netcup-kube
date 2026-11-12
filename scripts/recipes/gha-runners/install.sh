@@ -40,7 +40,8 @@ Options:
                             In runner mode they size the runner pod. In kubernetes mode they
                             size the job pod, and the runner pod gets a small fixed size.
   --token-file <path>       File with a GitHub token for ARC (see Credentials).
-  --uninstall               Remove this repo's scale set, its secret and its image pre-pull.
+  --uninstall               Remove this repo's scale set, its secret, its job pod template and its
+                            image pre-pull.
                             The shared controller stays installed.
   -h, --help                Show this help.
 
@@ -60,8 +61,10 @@ Notes:
   - The controller runs in namespace arc-systems, the runners in arc-runners.
     The namespaces are fixed: the common --namespace and --host options are not accepted.
   - Two repos with the same name under different owners need distinct --name values.
-  - Runners are ephemeral: each job gets a fresh pod from the runner image.
-  - A DaemonSet pre-pulls the runner image on every node, so jobs never wait for the download.
+  - Runners are ephemeral. In runner mode each job gets a fresh pod from the runner image.
+    In kubernetes mode a job with `container: <image>` runs in its own pod on that image.
+  - A DaemonSet pre-pulls the runner image and every --prepull-image on every node. A job
+    image that is not passed with --prepull-image is pulled when the job starts.
   - In a workflow, use: runs-on: <name>
   - Kubernetes mode keeps one runner per node, because the job pod must run on its
     runner's node (the work volume is ReadWriteOnce). The work volume is a 10Gi
