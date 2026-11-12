@@ -104,7 +104,9 @@ netcup-kube install <recipe> [recipe-options]
 - `--repo <owner/name>` — GitHub repository the runners serve (required).
 - `--name <name>` — Scale set name and `runs-on` label (default: the repo name). It must be a lowercase DNS label (letters, digits, `-`) of at most 45 characters. Names YAML reads as numbers (including all digits, `0x` and exponent forms), dates, booleans (`yes/no`, `true/false`, `on/off`) or null are refused. A repo whose name does not fit needs an explicit `--name`. Two repos with the same name under different owners need distinct names.
 - `--token-file <path>` — File with the GitHub token for ARC. `GITHUB_PAT` is the env alternative. Without either, the existing Secret is reused when the scale set release exists or the Secret was written for the same `--repo`.
-- `--uninstall` — Remove the repo's scale set, Secret and image pre-pull (the shared controller stays).
+- `--container-mode <runner|kubernetes>` — `runner` (default) runs jobs in the runner pod on `--image`. `kubernetes` runs each job that sets `container: <image>` in its own pod on that image; a job without it runs in the small runner pod (256Mi request, 1Gi limit), which suits only light jobs. The resource options then size the job pod, and the scale set keeps at most one runner per node.
+- `--prepull-image <ref>` — Extra image to pre-pull on every node (repeatable), for example the job images of the kubernetes mode.
+- `--uninstall` — Remove the repo's scale set, Secret, job pod template and image pre-pull (the shared controller stays).
 - See `--help` for image, runner count and resource options.
 
 **Common Options:**
