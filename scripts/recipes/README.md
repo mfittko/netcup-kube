@@ -48,7 +48,7 @@ NAMESPACE=prod-db STORAGE=50Gi netcup-kube install postgres
 - **llm-proxy**: Install llm-proxy from its Helm chart (Secret-backed config)
 - **metoro**: Metoro eBPF monitoring (exporter + node-agent) and in-cluster OTLP collector
 - **openclaw**: OpenClaw agent with mandatory kernel-level network monitoring
-- **gha-runners**: Self-hosted GitHub Actions runners for one repository (Actions Runner Controller in scale set mode, image pre-pull, token from `--token-file` or `GITHUB_PAT`; fixed namespaces `arc-systems` and `arc-runners`, no `--namespace` or `--host`)
+- **gha-runners**: Self-hosted GitHub Actions runners for one repository (Actions Runner Controller in scale set mode, optional kubernetes container mode where the workflow picks the job image, image pre-pull, token from `--token-file` or `GITHUB_PAT`; fixed namespaces `arc-systems` and `arc-runners`, no `--namespace` or `--host`)
 
 ## Usage
 

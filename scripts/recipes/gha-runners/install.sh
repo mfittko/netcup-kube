@@ -25,12 +25,20 @@ Options:
                             or date (for example 123, true, no) is refused.
                             A repo whose name does not fit needs an explicit --name.
   --image <repo:tag>        Runner image (default: IMAGE_GHA_RUNNER from recipes.conf).
+  --container-mode <mode>   runner (default): jobs run in the runner pod, on --image.
+                            kubernetes: a job with `container: <image>` runs in its own pod
+                            on that image. A job without it runs in the small runner pod, which
+                            suits only light jobs (for example a step that picks the image tag).
+  --prepull-image <ref>     Extra image to pre-pull on every node (repeatable). Use it for
+                            the job images of the kubernetes mode.
   --min-runners <n>         Idle runners kept ready (default: 1).
   --max-runners <n>         Concurrent runners (default: 2).
-  --cpu-request <q>         CPU request per runner (default: 1).
-  --cpu-limit <q>           CPU limit per runner (default: 2).
-  --memory-request <q>      Memory request per runner (default: 3584Mi).
-  --memory-limit <q>        Memory limit per runner (default: 4Gi).
+  --cpu-request <q>         CPU request per job (default: 1).
+  --cpu-limit <q>           CPU limit per job (default: 2).
+  --memory-request <q>      Memory request per job (default: 3584Mi).
+  --memory-limit <q>        Memory limit per job (default: 4Gi).
+                            In runner mode they size the runner pod. In kubernetes mode they
+                            size the job pod, and the runner pod gets a small fixed size.
   --token-file <path>       File with a GitHub token for ARC (see Credentials).
   --uninstall               Remove this repo's scale set, its secret and its image pre-pull.
                             The shared controller stays installed.
@@ -55,6 +63,9 @@ Notes:
   - Runners are ephemeral: each job gets a fresh pod from the runner image.
   - A DaemonSet pre-pulls the runner image on every node, so jobs never wait for the download.
   - In a workflow, use: runs-on: <name>
+  - Kubernetes mode keeps one runner per node, because the job pod must run on its
+    runner's node (the work volume is ReadWriteOnce). The work volume is a 10Gi
+    ephemeral claim on the default StorageClass.
 EOF
 }
 
@@ -70,6 +81,8 @@ MEMORY_LIMIT="4Gi"
 TOKEN_FILE=""
 TOKEN_FILE_GIVEN="false"
 UNINSTALL="false"
+CONTAINER_MODE="runner"
+PREPULL_IMAGES=()
 CONTROLLER_NS="${NAMESPACE_ARC_SYSTEMS}"
 RUNNER_NS="${NAMESPACE_ARC_RUNNERS}"
 
@@ -90,6 +103,16 @@ while [[ $# -gt 0 ]]; do
       IMAGE="${1:-}"
       ;;
     --image=*) IMAGE="${1#*=}" ;;
+    --container-mode)
+      shift
+      CONTAINER_MODE="${1:-}"
+      ;;
+    --container-mode=*) CONTAINER_MODE="${1#*=}" ;;
+    --prepull-image)
+      shift
+      PREPULL_IMAGES+=("${1:-}")
+      ;;
+    --prepull-image=*) PREPULL_IMAGES+=("${1#*=}") ;;
     --min-runners)
       shift
       MIN_RUNNERS="${1:-}"
@@ -163,8 +186,17 @@ if [[ "${NAME}" =~ ${YAML_TYPED_RE} ]]; then
   suggested_name="${suggested_name%-}"
   die "--name '${NAME}' reads as a YAML number, boolean, null or date; pass an explicit --name that YAML reads as a string (for example --name runners-${suggested_name})"
 fi
-# The image goes unquoted into two YAML documents, so allow only reference characters.
-[[ "${IMAGE}" =~ ^[A-Za-z0-9][A-Za-z0-9._/:@-]*$ && "${IMAGE}" != *: ]] || die "--image must be an image reference (for example registry/repo:tag or repo@sha256:...): '${IMAGE}'"
+[[ "${CONTAINER_MODE}" == "runner" || "${CONTAINER_MODE}" == "kubernetes" ]] ||
+  die "--container-mode must be runner or kubernetes: '${CONTAINER_MODE}'"
+# Images go unquoted into YAML documents, so allow only reference characters.
+IMAGE_RE='^[A-Za-z0-9][A-Za-z0-9._/:@-]*$'
+check_image() {
+  [[ "$2" =~ ${IMAGE_RE} && "$2" != *: ]] || die "$1 must be an image reference (for example registry/repo:tag or repo@sha256:...): '$2'"
+}
+check_image --image "${IMAGE}"
+for ref in ${PREPULL_IMAGES[@]+"${PREPULL_IMAGES[@]}"}; do
+  check_image --prepull-image "${ref}"
+done
 COUNT_RE='^(0|[1-9][0-9]*)$'
 [[ "${MIN_RUNNERS}" =~ ${COUNT_RE} && "${MAX_RUNNERS}" =~ ${COUNT_RE} ]] || die "--min-runners and --max-runners must be whole numbers without leading zeros"
 ((MIN_RUNNERS <= MAX_RUNNERS)) || die "--min-runners must not exceed --max-runners"
@@ -183,6 +215,7 @@ need_cmd helm
 
 SECRET="gha-${NAME}-github"
 PREPULL="gha-${NAME}-prepull"
+HOOK_CM="gha-${NAME}-hook"
 
 # Ownership guard: the release, its Secret and its pre-pull key on NAME only,
 # so a release named NAME that serves another repo must never be overwritten
@@ -257,6 +290,7 @@ if [[ "${UNINSTALL}" == "true" ]]; then
     fi
   fi
   run recipe_kdelete daemonset "${PREPULL}" -n "${RUNNER_NS}"
+  run recipe_kdelete configmap "${HOOK_CM}" -n "${RUNNER_NS}"
   run recipe_kdelete secret "${SECRET}" -n "${RUNNER_NS}"
   exit 0
 fi
@@ -308,7 +342,21 @@ run helm upgrade --install arc \
   --wait \
   --timeout 5m
 
-log "Pre-pulling ${IMAGE} on every node"
+ALL_IMAGES=("${IMAGE}")
+for ref in ${PREPULL_IMAGES[@]+"${PREPULL_IMAGES[@]}"}; do
+  [[ " ${ALL_IMAGES[*]} " == *" ${ref} "* ]] || ALL_IMAGES+=("${ref}")
+done
+PULL_CONTAINERS=""
+for i in "${!ALL_IMAGES[@]}"; do
+  PULL_CONTAINERS+="        - name: pull-${i}
+          image: ${ALL_IMAGES[i]}
+          imagePullPolicy: IfNotPresent
+          command: [\"true\"]
+          resources: {requests: {cpu: 1m, memory: 8Mi}}
+"
+done
+
+log "Pre-pulling ${ALL_IMAGES[*]} on every node"
 run k apply -f - << EOF
 apiVersion: apps/v1
 kind: DaemonSet
@@ -323,23 +371,81 @@ spec:
       labels: {app: ${PREPULL}}
     spec:
       initContainers:
-        - name: pull
-          image: ${IMAGE}
-          imagePullPolicy: IfNotPresent
-          command: ["true"]
-          resources: {requests: {cpu: 1m, memory: 8Mi}}
-      containers:
+${PULL_CONTAINERS}      containers:
         - name: pause
           image: registry.k8s.io/pause:3.10
           resources: {requests: {cpu: 1m, memory: 8Mi}, limits: {memory: 16Mi}}
 EOF
 
-# A pod turns ready only after its init container pulled the image, so the
-# scale set is installed only once every node holds the runner image.
-log "Waiting for the runner image pull on every node"
+# A pod turns ready only after its init containers pulled the images, so the
+# scale set is installed only once every node holds them.
+log "Waiting for the image pull on every node"
 run k -n "${RUNNER_NS}" rollout status "daemonset/${PREPULL}" --timeout=15m
 
-log "Installing/Upgrading runner scale set ${NAME} for ${REPO} (min ${MIN_RUNNERS}, max ${MAX_RUNNERS})"
+if [[ "${CONTAINER_MODE}" == "kubernetes" ]]; then
+  # The container hook merges this template into each job pod ($job is the job container).
+  log "Writing the job pod template to ConfigMap ${RUNNER_NS}/${HOOK_CM}"
+  run k apply -f - << EOF
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ${HOOK_CM}
+  namespace: ${RUNNER_NS}
+data:
+  job.yaml: |
+    spec:
+      containers:
+        - name: \$job
+          resources:
+            requests: {cpu: "${CPU_REQUEST}", memory: "${MEMORY_REQUEST}"}
+            limits: {cpu: "${CPU_LIMIT}", memory: "${MEMORY_LIMIT}"}
+EOF
+  # The scheduler does not see the job pod, which lands on the runner's node,
+  # so at most one runner per node keeps room for its job.
+  MODE_VALUES="containerMode:
+  type: kubernetes
+  kubernetesModeWorkVolumeClaim:
+    accessModes: [ReadWriteOnce]
+    resources: {requests: {storage: 10Gi}}
+template:
+  spec:
+    affinity:
+      podAntiAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          - topologyKey: kubernetes.io/hostname
+            labelSelector:
+              matchLabels: {actions.github.com/scale-set-name: ${NAME}}
+    containers:
+      - name: runner
+        image: ${IMAGE}
+        imagePullPolicy: IfNotPresent
+        command: [\"/home/runner/run.sh\"]
+        env:
+          - {name: ACTIONS_RUNNER_CONTAINER_HOOK_TEMPLATE, value: /home/runner/hook/job.yaml}
+          # Light jobs (tag lookup, aggregate checks) may run in the runner pod itself.
+          - {name: ACTIONS_RUNNER_REQUIRE_JOB_CONTAINER, value: \"false\"}
+        volumeMounts:
+          - {name: hook-template, mountPath: /home/runner/hook, readOnly: true}
+        resources:
+          requests: {cpu: 100m, memory: 256Mi}
+          limits: {memory: 1Gi}
+    volumes:
+      - name: hook-template
+        configMap: {name: ${HOOK_CM}}"
+else
+  MODE_VALUES="template:
+  spec:
+    containers:
+      - name: runner
+        image: ${IMAGE}
+        imagePullPolicy: IfNotPresent
+        command: [\"/home/runner/run.sh\"]
+        resources:
+          requests: {cpu: \"${CPU_REQUEST}\", memory: \"${MEMORY_REQUEST}\"}
+          limits: {cpu: \"${CPU_LIMIT}\", memory: \"${MEMORY_LIMIT}\"}"
+fi
+
+log "Installing/Upgrading runner scale set ${NAME} for ${REPO} (${CONTAINER_MODE} mode, min ${MIN_RUNNERS}, max ${MAX_RUNNERS})"
 run helm upgrade --install "${NAME}" \
   oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set \
   --namespace "${RUNNER_NS}" \
@@ -355,22 +461,15 @@ maxRunners: ${MAX_RUNNERS}
 controllerServiceAccount:
   namespace: ${CONTROLLER_NS}
   name: arc-gha-rs-controller
-template:
-  spec:
-    containers:
-      - name: runner
-        image: ${IMAGE}
-        imagePullPolicy: IfNotPresent
-        command: ["/home/runner/run.sh"]
-        resources:
-          requests: {cpu: "${CPU_REQUEST}", memory: "${MEMORY_REQUEST}"}
-          limits: {cpu: "${CPU_LIMIT}", memory: "${MEMORY_LIMIT}"}
+${MODE_VALUES}
 EOF
+[[ "${CONTAINER_MODE}" == "kubernetes" ]] || run recipe_kdelete configmap "${HOOK_CM}" -n "${RUNNER_NS}"
 
 log "Runner scale set ${NAME} installed."
 echo
 echo "Use it in a workflow of ${REPO}:"
 echo "  runs-on: ${NAME}"
+[[ "${CONTAINER_MODE}" == "kubernetes" ]] && echo "  container: <image>   (on every job that needs more than the runner pod)"
 echo
 echo "Check the listener and runners:"
 echo "  kubectl get pods -n ${CONTROLLER_NS}"

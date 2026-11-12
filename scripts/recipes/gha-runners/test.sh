@@ -14,6 +14,9 @@ mkdir -p "${TMP}/bin"
 # helm stub: STUB_RELEASE_URL set means the release exists and serves that URL.
 cat > "${TMP}/bin/helm" << 'EOF'
 #!/usr/bin/env bash
+if [[ "$1" == "upgrade" && -n "${STUB_STDIN_LOG:-}" ]]; then
+  { printf '# helm %s\n' "$*"; cat; } >> "${STUB_STDIN_LOG}"
+fi
 case "$1 ${2:-}" in
   "status "*)
     [[ -n "${STUB_RELEASE_URL:-}" ]] && exit 0
@@ -33,6 +36,9 @@ EOF
 # Secret's repo annotation STUB_ANNOTATED_REPO. Every other call succeeds.
 cat > "${TMP}/bin/kubectl" << 'EOF'
 #!/usr/bin/env bash
+if [[ "$1 ${2:-} ${3:-}" == "apply -f -" && -n "${STUB_STDIN_LOG:-}" ]]; then
+  { printf '# kubectl %s\n' "$*"; cat; } >> "${STUB_STDIN_LOG}"
+fi
 if [[ "$1" == "delete" && -n "${STUB_DELETE_LOG:-}" ]]; then
   printf '%s\n' "$*" >> "${STUB_DELETE_LOG}"
 fi
@@ -162,6 +168,31 @@ for img in "" --uninstall -h "ghcr.io/x/runner:v2 #old" "a b" $'a\nb' "{x}" "a: 
   expect 1 "--image must be an image reference" -- --repo o/app --image "${img}"
 done
 
+for img in "" "a b" "x:"; do
+  expect 1 "--prepull-image must be an image reference" -- --repo o/app --prepull-image "${img}"
+done
+
+# Container mode.
+for m in "" docker Kubernetes; do
+  expect 1 "--container-mode must be runner or kubernetes" -- --repo o/app --container-mode "${m}"
+done
+expect 0 "(kubernetes mode, min 1, max 2)" -- --repo o/app --container-mode kubernetes
+expect 0 "(runner mode, min 1, max 2)" -- --repo o/app
+# Without DRY_RUN the stubs log what they receive on stdin, so the sent YAML is checked.
+sent() {
+  : > "${TMP}/stdin.log"
+  DRY_RUN=false STUB_STDIN_LOG="${TMP}/stdin.log" expect 0 "installed" -- "$@"
+  SENT="$(cat "${TMP}/stdin.log")"
+}
+sent --repo o/app --container-mode kubernetes --image r:1 --prepull-image j:1 --prepull-image r:1 --prepull-image j:2 --memory-limit 5Gi
+[[ "${SENT}" == *"name: pull-0"*"image: r:1"*"name: pull-1"*"image: j:1"*"name: pull-2"*"image: j:2"* ]] || fail "pre-pull images missing or out of order"
+[[ "${SENT}" != *"pull-3"* ]] || fail "duplicate pre-pull image not dropped"
+[[ "${SENT}" == *"name: gha-app-hook"*"- name: \$job"*'memory: "5Gi"'* ]] || fail "job pod template missing or not sized"
+[[ "${SENT}" == *"type: kubernetes"*"actions.github.com/scale-set-name: app"*"ACTIONS_RUNNER_CONTAINER_HOOK_TEMPLATE"*"ACTIONS_RUNNER_REQUIRE_JOB_CONTAINER, value: \"false\""*"configMap: {name: gha-app-hook}"* ]] || fail "kubernetes mode values incomplete"
+sent --repo o/app --image r:1
+[[ "${SENT}" == *"name: pull-0"*"image: r:1"* && "${SENT}" != *"pull-1"* ]] || fail "runner mode pre-pull wrong"
+[[ "${SENT}" != *"containerMode"* && "${SENT}" != *"gha-app-hook"* && "${SENT}" == *'memory: "4Gi"'* ]] || fail "runner mode values wrong"
+
 # Token file.
 expect 1 "Token file is empty" -- --repo o/app --token-file "${TMP}/empty-token"
 expect 1 "--token-file requires a path" -- --repo o/app --token-file
@@ -208,6 +239,7 @@ expect 0 "helm upgrade --install app" -- --repo alice/app
 GITHUB_PAT="" expect 0 "helm upgrade --install app" -- --repo alice/app
 CONFIRM=true expect 0 "helm uninstall app" -- --repo alice/app --uninstall
 STUB_RUNNER_SET_EXISTS=1 CONFIRM=true expect 0 "recipe_kdelete secret gha-app-github" -- --repo alice/app --uninstall
+[[ "${OUT}" == *"recipe_kdelete configmap gha-app-hook"* ]] || fail "uninstall keeps the job pod template"
 STUB_RUNNER_SET_EXISTS=1 DRY_RUN=false CONFIRM=true expect 1 "AutoscalingRunnerSet arc-runners/app still exists" -- --repo alice/app --uninstall
 export STUB_DELETE_LOG="${TMP}/deletes"
 kubectl delete secret stub-probe
