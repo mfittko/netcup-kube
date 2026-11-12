@@ -187,10 +187,12 @@ sent() {
   DRY_RUN=false STUB_STDIN_LOG="${TMP}/stdin.log" expect 0 "installed" -- "$@"
   SENT="$(cat "${TMP}/stdin.log")"
 }
-sent --repo o/app --container-mode kubernetes --image r:1 --prepull-image j:1 --prepull-image r:1 --prepull-image j:2 --memory-limit 5Gi
+sent --repo o/app --container-mode kubernetes --image r:1 --prepull-image j:1 --prepull-image r:1 --prepull-image j:2 --cpu-request 3 --cpu-limit 4 --memory-request 5Mi --memory-limit 5Gi
 [[ "${SENT}" == *"name: pull-0"*"image: r:1"*"name: pull-1"*"image: j:1"*"name: pull-2"*"image: j:2"* ]] || fail "pre-pull images missing or out of order"
 [[ "${SENT}" != *"pull-3"* ]] || fail "duplicate pre-pull image not dropped"
-[[ "${SENT}" == *"name: gha-app-hook"*"- name: \$job"*'memory: "5Gi"'* ]] || fail "job pod template missing or not sized"
+# Contiguous lines bind the sizing to the $job container of job.yaml, not the runner container.
+job_tpl=$'        - name: $job\n          resources:\n            requests: {cpu: "3", memory: "5Mi"}\n            limits: {cpu: "4", memory: "5Gi"}'
+[[ "${SENT}" == *"name: gha-app-hook"*"${job_tpl}"* ]] || fail "job pod template missing or not sized"
 [[ "${SENT}" == *"type: kubernetes"*"accessModes: [ReadWriteOnce]"*"storage: 10Gi"*"topologyKey: kubernetes.io/hostname"*"actions.github.com/scale-set-name: app"*"ACTIONS_RUNNER_CONTAINER_HOOK_TEMPLATE"*"ACTIONS_RUNNER_REQUIRE_JOB_CONTAINER, value: \"false\""*"cpu: 100m, memory: 256Mi"*"limits: {memory: 1Gi}"*"configMap: {name: gha-app-hook}"* ]] || fail "kubernetes mode values incomplete"
 # The --flag=value forms.
 sent --repo o/app --container-mode=kubernetes --image r:1 --prepull-image=j:1
