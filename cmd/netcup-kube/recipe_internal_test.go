@@ -19,6 +19,11 @@ func TestRecipeInternalRunnerCommand(t *testing.T) {
 			t.Setenv("KUBECONFIG", "fixture-kubeconfig")
 			t.Setenv("GITHUB_PAT", "fixture-canary")
 			t.Setenv("HELM_DRIVER", "")
+			for _, variable := range os.Environ() {
+				if key, _, _ := strings.Cut(variable, "="); strings.HasPrefix(key, "HELM_KUBE") {
+					t.Setenv(key, "") // the lifecycle treats an empty override as unset
+				}
+			}
 			helm := `#!/bin/sh
 [ "$KUBECONFIG" = fixture-kubeconfig ] || exit 1
 printf 'helm fixture-kubeconfig %s\n' "$*" >> "$CALLS"

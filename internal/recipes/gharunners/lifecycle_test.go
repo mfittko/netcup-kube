@@ -19,6 +19,16 @@ const ownedValues = `{ "githubConfigSecret": "gha-app-github", "runnerScaleSetNa
 const listed = `{"items":[{"metadata":{"name":"sh.helm.release.v1.app.v1","namespace":"arc-runners","labels":{"name":"app","owner":"helm","status":"unknown"}}}]}`
 const noReleases = `{"items":[]}`
 
+// TestMain isolates the tests from the invoking shell's Helm settings; cases that need one set it with t.Setenv.
+func TestMain(m *testing.M) {
+	for _, variable := range os.Environ() {
+		if key, _, _ := strings.Cut(variable, "="); key == "HELM_DRIVER" || strings.HasPrefix(key, "HELM_KUBE") {
+			os.Unsetenv(key)
+		}
+	}
+	os.Exit(m.Run())
+}
+
 type step struct {
 	command, args, stdout string
 	err                   error

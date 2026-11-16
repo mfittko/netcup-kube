@@ -59,6 +59,10 @@ chmod +x "${TMP}/bin/helm" "${TMP}/bin/kubectl"
 SENTINEL="fixture-canary"
 export PATH="${TMP}/bin:${PATH}" DRY_RUN=true KUBECONFIG="${TMP}/kubeconfig" GITHUB_PAT="${SENTINEL}" CALLS="${TMP}/calls" HELM_DRIVER=""
 unset STUB_INSTALLED STUB_READ_FAILURE
+# Inherited Helm target overrides would make install.sh refuse before any stub runs.
+for name in $(compgen -e); do
+  if [[ "${name}" == HELM_KUBE* ]]; then unset "${name}"; fi
+done
 
 # is_tty also accepts an openable /dev/tty, so on a terminal the uninstall
 # confirmation would wait for input. Run install.sh in a new session, which has
