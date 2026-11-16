@@ -1,0 +1,19 @@
+version: 1
+
+inputSource: tracker
+
+workflow:
+  baseBranch: main
+  requireDraftFirst: true
+
+tracker:
+  board:
+    number: 8  # https://github.com/users/mfittko/projects/8 (stable; survives project renames)
+
+queue:
+  # Board uses the GitHub kanban template names; Backlog is the dev-loops default.
+  statusColumns:
+    next_up: Ready
+    in_progress: In progress
+    ready_for_review: In review
+    done: Done
