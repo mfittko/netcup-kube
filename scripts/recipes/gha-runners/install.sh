@@ -186,6 +186,8 @@ SECRET="gha-${NAME}-github"
 PREPULL="gha-${NAME}-prepull"
 
 # Go owns the complete live-state guard and credential lifecycle, including dry-run reads.
+# Uninstall confirms first; Go runs the ownership and provenance reads after confirmation
+# and mutates nothing when it refuses.
 operation_args=(--repo "${REPO}" --name "${NAME}" --namespace "${RUNNER_NS}" --controller-namespace "${CONTROLLER_NS}")
 [[ "${DRY_RUN:-false}" != "true" ]] || operation_args+=(--dry-run)
 if [[ "${UNINSTALL}" == "true" ]]; then
