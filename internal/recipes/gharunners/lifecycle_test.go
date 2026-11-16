@@ -112,6 +112,9 @@ func TestReleaseOwnership(t *testing.T) {
 		{"other-set", strings.ReplaceAll(ownedValues, `"app"`, `"other"`), false, true},
 		{"other-secret", strings.ReplaceAll(ownedValues, "gha-app-github", "other"), false, true},
 		{"missing", `{}`, false, true}, {"null", `null`, false, true}, {"type", `{"runnerScaleSetName":5}`, false, true}, {"malformed", `{`, false, true},
+		// Helm reads only the exact keys; a case variant must neither prove nor mask ownership.
+		{"case-variant-shadow", `{"githubConfigUrl":"https://github.com/alice/app","githubConfigURL":"https://github.com/o/app","githubConfigSecret":"gha-app-github","runnerScaleSetName":"app"}`, false, true},
+		{"case-variant-only", `{"GithubConfigUrl":"https://github.com/o/app","GithubConfigSecret":"gha-app-github","RunnerScaleSetName":"app"}`, false, true},
 		{"wrong-list-name", strings.ReplaceAll(listed, `"name":"app"`, `"name":"other"`), true, true},
 		{"wrong-list-namespace", strings.ReplaceAll(listed, "arc-runners", "other"), true, true},
 		{"wrong-list-owner", strings.ReplaceAll(listed, `"owner":"helm"`, `"owner":"other"`), true, true},
@@ -129,6 +132,9 @@ func TestReleaseOwnership(t *testing.T) {
 					steps[0] = list(tc.raw)
 				} else {
 					steps = append(steps, values(tc.raw))
+				}
+				if !tc.fail && !remove {
+					steps = append(steps, secret(""))
 				}
 				var out bytes.Buffer
 				var err error
@@ -322,7 +328,7 @@ func TestCredentials(t *testing.T) {
 		want       string
 	}{
 		{"env", "", false, false, ""}, {"file-wins", tokenFile, true, false, ""}, {"dry-file", tokenFile, true, true, ""},
-		{"owned-explicit", "", false, false, ""},
+		{"owned-explicit", "", false, false, ""}, {"replace-existing", "", false, false, ""},
 		{"missing-path", "", true, false, "requires a path"}, {"unreadable", tokenFile + "missing", true, false, "not readable"}, {"empty", emptyFile, true, false, "empty"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -338,8 +344,17 @@ func TestCredentials(t *testing.T) {
 			if tc.name == "owned-explicit" {
 				steps = []step{list(listed), values(ownedValues)}
 			}
+			// Client-side apply would copy the token into last-applied-configuration; create/replace never do.
+			existing, write := "", "create -f -"
+			if tc.name == "replace-existing" {
+				existing = strings.Replace(object("Secret", "gha-app-github", "o/app"), `"annotations":{`, `"annotations":{"kubectl.kubernetes.io/last-applied-configuration":"{\"stringData\":{\"github_token\":\"old\"}}",`, 1)
+				write = "replace -f -"
+			}
+			if tc.want == "" {
+				steps = append(steps, secret(existing))
+			}
 			if tc.want == "" && !tc.dry {
-				steps = append(steps, namespaceStep(t, "arc-systems"), namespaceStep(t, "arc-runners"), step{command: "kubectl", args: "apply -f -", payload: func(raw []byte) {
+				steps = append(steps, namespaceStep(t, "arc-systems"), namespaceStep(t, "arc-runners"), step{command: "kubectl", args: write, payload: func(raw []byte) {
 					var doc struct {
 						Metadata struct {
 							Name, Namespace string
@@ -347,7 +362,7 @@ func TestCredentials(t *testing.T) {
 						}
 						StringData map[string]string
 					}
-					if json.Unmarshal(raw, &doc) != nil || doc.Metadata.Name != "gha-app-github" || doc.Metadata.Namespace != "arc-runners" || doc.Metadata.Annotations["gha-runners.netcup-kube/repo"] != "o/app" || doc.StringData["github_token"] != sentinel {
+					if json.Unmarshal(raw, &doc) != nil || doc.Metadata.Name != "gha-app-github" || doc.Metadata.Namespace != "arc-runners" || len(doc.Metadata.Annotations) != 1 || doc.Metadata.Annotations["gha-runners.netcup-kube/repo"] != "o/app" || doc.StringData["github_token"] != sentinel {
 						t.Fatal("bad credential payload")
 					}
 				}})
@@ -363,9 +378,9 @@ func TestCredentials(t *testing.T) {
 		t.Run("write-failure-"+string(rune('0'+failure)), func(t *testing.T) {
 			o := opts()
 			o.Token = sentinel
-			writes := []step{namespaceStep(t, "arc-systems"), namespaceStep(t, "arc-runners"), {command: "kubectl", args: "apply -f -", payload: func([]byte) {}}}
+			writes := []step{namespaceStep(t, "arc-systems"), namespaceStep(t, "arc-runners"), {command: "kubectl", args: "create -f -", payload: func([]byte) {}}}
 			writes[failure].err = errors.New(sentinel)
-			checkError(t, PrepareCredentials(context.Background(), o, fake(t, append([]step{list(noReleases)}, writes[:failure+1]...)...), &bytes.Buffer{}), "could not")
+			checkError(t, PrepareCredentials(context.Background(), o, fake(t, append([]step{list(noReleases), secret("")}, writes[:failure+1]...)...), &bytes.Buffer{}), "could not")
 		})
 	}
 }

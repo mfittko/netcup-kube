@@ -44,7 +44,7 @@ if [ "$1 $2" = 'get secrets' ]; then
 STUB_JSON
  else printf '{"items":[]}'; fi
 fi
-if [ "$1" = apply ]; then
+if [ "$1" = apply ] || [ "$1" = create ] || [ "$1" = replace ]; then
  /bin/cat >> "$CALLS.payload"
  if [ "$FAIL_APPLY" = true ]; then echo fixture-canary >&2; exit 1; fi
 fi

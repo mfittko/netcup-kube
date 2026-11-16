@@ -174,7 +174,7 @@ NETCUP_KUBE_BIN="${TMP}/missing" expect 0 "Usage:" -- --help
 NETCUP_KUBE_BIN="${TMP}/missing" expect 1 "Build bin/netcup-kube" -- --repo o/app
 grep -Fq "kubectl fixture-kubeconfig get secrets --namespace arc-runners --selector owner=helm,name=app -o json" "${CALLS}" || fail "missing live Helm storage guard in dry-run"
 grep -Fq "kubectl fixture-kubeconfig get autoscalingrunnerset app --namespace arc-runners --ignore-not-found=true -o json" "${CALLS}" || fail "missing exact live RunnerSet target"
-if grep -Eq ' (apply|delete|uninstall|upgrade) ' "${CALLS}"; then fail "dry-run mutated"; fi
+if grep -Eq ' (apply|create|replace|delete|uninstall|upgrade) ' "${CALLS}"; then fail "dry-run mutated"; fi
 if grep -Fq "${SENTINEL}" "${CALLS}"; then fail "token in argv"; fi
 
 if ((fails > 0)); then

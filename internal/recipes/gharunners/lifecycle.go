@@ -85,8 +85,9 @@ func releaseOwned(ctx context.Context, o Options, run recipes.Command) (bool, er
 		}
 	}
 	raw, _, err = run(ctx, "helm", []string{"get", "values", o.Name, "--namespace", o.Namespace, "-o", "json"}, nil)
-	var values struct{ GithubConfigURL, GithubConfigSecret, RunnerScaleSetName string }
-	if err != nil || json.Unmarshal(raw, &values) != nil || values.GithubConfigURL != "https://github.com/"+o.Repo || values.RunnerScaleSetName != o.Name || values.GithubConfigSecret != "gha-"+o.Name+"-github" {
+	// A map keeps Helm's case-sensitive keys; struct decoding would also match case variants.
+	var values map[string]any
+	if err != nil || json.Unmarshal(raw, &values) != nil || values["githubConfigUrl"] != "https://github.com/"+o.Repo || values["runnerScaleSetName"] != o.Name || values["githubConfigSecret"] != "gha-"+o.Name+"-github" {
 		return false, errors.New("runner release ownership mismatch or unreadable values; refusing mutation; pass a distinct --name")
 	}
 	return true, nil
@@ -156,14 +157,12 @@ func PrepareCredentials(ctx context.Context, o Options, run recipes.Command, out
 		return errors.New("Token file is empty")
 	}
 	secretName := "gha-" + o.Name + "-github"
-	if token == "" {
-		present, annotation, err := readObject(ctx, o, run, "Secret", secretName)
-		if err != nil {
-			return err
-		}
-		if !present || (!owned && annotation != o.Repo) {
-			return errors.New("No GitHub token with proven Secret ownership: pass --token-file or GITHUB_PAT")
-		}
+	present, annotation, err := readObject(ctx, o, run, "Secret", secretName)
+	if err != nil {
+		return err
+	}
+	if token == "" && (!present || (!owned && annotation != o.Repo)) {
+		return errors.New("No GitHub token with proven Secret ownership: pass --token-file or GITHUB_PAT")
 	}
 	for _, ns := range []string{o.ControllerNamespace, o.Namespace} {
 		payload, _ := json.Marshal(map[string]any{"apiVersion": "v1", "kind": "Namespace", "metadata": map[string]string{"name": ns}})
@@ -172,8 +171,14 @@ func PrepareCredentials(ctx context.Context, o Options, run recipes.Command, out
 		}
 	}
 	if token != "" {
+		// create/replace never store last-applied-configuration (which would copy the token);
+		// a full replace also drops one left by an earlier client-side apply.
+		write := "create"
+		if present {
+			write = "replace"
+		}
 		payload, _ := json.Marshal(map[string]any{"apiVersion": "v1", "kind": "Secret", "type": "Opaque", "metadata": map[string]any{"name": secretName, "namespace": o.Namespace, "annotations": map[string]string{repoAnnotation: o.Repo}}, "stringData": map[string]string{"github_token": token}})
-		if err := mutate(ctx, o, run, out, "kubectl", []string{"apply", "-f", "-"}, payload); err != nil {
+		if err := mutate(ctx, o, run, out, "kubectl", []string{write, "-f", "-"}, payload); err != nil {
 			return err
 		}
 	}
