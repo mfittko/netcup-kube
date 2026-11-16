@@ -58,20 +58,29 @@ fi
 					t.Fatal(err)
 				}
 			}
+			kubeCall := "kube fixture-kubeconfig " + map[bool]string{false: "", true: "kubectl "}[useK3s]
+			getSecrets, apply := kubeCall+"get secrets", kubeCall+"apply"
+			helmUninstall := "helm fixture-kubeconfig uninstall app --namespace arc-runners --wait --timeout 5m"
 			for _, tc := range []struct {
 				name         string
 				args         []string
 				fail, cancel bool
+				want         []string // nil: the command must run no external command
 			}{
-				{"credentials", []string{"gha-runners-credentials"}, false, false},
-				{"redacted-failure", []string{"gha-runners-credentials"}, true, false},
-				{"dry", []string{"gha-runners-credentials", "--dry-run"}, false, false},
-				{"confirmed", []string{"gha-runners-uninstall", "--confirmed"}, false, false},
-				{"uninstall-live", []string{"gha-runners-uninstall", "--confirmed"}, false, false},
-				{"unconfirmed", []string{"gha-runners-uninstall"}, true, false},
-				{"cancelled", []string{"gha-runners-credentials"}, true, true},
+				{"credentials", []string{"gha-runners-credentials"}, false, false, []string{getSecrets, apply}},
+				{"redacted-failure", []string{"gha-runners-credentials"}, true, false, []string{getSecrets, apply}},
+				{"dry", []string{"gha-runners-credentials", "--dry-run"}, false, false, []string{getSecrets}},
+				{"confirmed", []string{"gha-runners-uninstall", "--confirmed"}, false, false, []string{getSecrets}},
+				{"uninstall-live", []string{"gha-runners-uninstall", "--confirmed"}, false, false, []string{getSecrets, helmUninstall}},
+				{"unconfirmed", []string{"gha-runners-uninstall"}, true, false, nil},
+				{"cancelled", []string{"gha-runners-credentials"}, true, true, nil},
 			} {
 				t.Run(tc.name, func(t *testing.T) {
+					for _, path := range []string{logPath, logPath + ".payload"} {
+						if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+							t.Fatal(err)
+						}
+					}
 					t.Setenv("INSTALLED", map[bool]string{false: "false", true: "true"}[tc.name == "uninstall-live"])
 					t.Setenv("FAIL_APPLY", map[bool]string{false: "false", true: "true"}[tc.name == "redacted-failure"])
 					cmd := newRecipeInternalCommand()
@@ -92,18 +101,21 @@ fi
 					if strings.Contains(string(calls)+out.String(), "fixture-canary") || err != nil && strings.Contains(err.Error(), "fixture-canary") {
 						t.Fatal("credential leaked")
 					}
-					if !strings.Contains(string(calls), "kube fixture-kubeconfig "+map[bool]string{false: "get secrets", true: "kubectl get secrets"}[useK3s]) || !strings.Contains(string(calls), "kube fixture-kubeconfig "+map[bool]string{false: "apply", true: "kubectl apply"}[useK3s]) {
-						t.Fatalf("routing lost: %s", calls)
+					if tc.want == nil && len(calls) != 0 {
+						t.Fatalf("unexpected external command: %s", calls)
+					}
+					for _, want := range tc.want {
+						if !strings.Contains(string(calls), want) {
+							t.Fatalf("routing lost, missing %q: %s", want, calls)
+						}
+					}
+					if tc.name == "credentials" {
+						payload, err := os.ReadFile(logPath + ".payload")
+						if err != nil || !bytes.Contains(payload, []byte("fixture-canary")) {
+							t.Fatal("missing stdin credential")
+						}
 					}
 				})
-			}
-			payload, err := os.ReadFile(logPath + ".payload")
-			if err != nil || !bytes.Contains(payload, []byte("fixture-canary")) {
-				t.Fatal("missing stdin credential")
-			}
-			calls, _ := os.ReadFile(logPath)
-			if !strings.Contains(string(calls), "helm fixture-kubeconfig uninstall app --namespace arc-runners --wait --timeout 5m") {
-				t.Fatal("Helm uninstall routing lost")
 			}
 		})
 	}
