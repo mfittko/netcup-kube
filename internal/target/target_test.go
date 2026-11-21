@@ -36,6 +36,7 @@ kuberc)
 get)
   if [ -n "$FAKE_HANG" ]; then sleep 30 & echo $! > "$FAKE_HANG"; wait; fi
   if [ -n "$FAKE_FAIL_GET" ]; then echo "$FAKE_FAIL_GET" >&2; exit 1; fi
+  if [ -n "$FAKE_SWAP" ]; then cp "$FAKE_SWAP" "$FAKE_SWAP_TO"; fi
   echo '{}' ;;
 esac
 `
@@ -252,6 +253,13 @@ func TestResolveExplicitPrecedence(t *testing.T) {
 			}
 		})
 	}
+	t.Run("unresolved non-isolated reference names the variable", func(t *testing.T) {
+		write(t, filepath.Join(e.dir, "deploy", "unset.env"), "KUBECONFIG=kube.json\nNETCUP_KUBE_CONTEXT=${STAGE_CTX}\n")
+		got, err := e.r.Resolve(Selection{EnvFile: "deploy/unset.env"}, false)
+		if err == nil || !strings.Contains(err.Error(), "${STAGE_CTX}") {
+			t.Fatalf("got %+v, %v", got, err)
+		}
+	})
 	r := e.r
 	r.Environ = []string{"NETCUP_KUBE_CONTEXT=b"}
 	if _, err := r.Resolve(Selection{}, false); err == nil {
@@ -727,14 +735,35 @@ func TestLiveCheck(t *testing.T) {
 	}
 	t.Run("verified", func(t *testing.T) {
 		e := newEnv(t)
-		kubeconfig := twoContexts(ca).write(t, filepath.Join(e.dir, "kube.json"))
+		k := twoContexts(ca)
+		b := k.clusters["b"]
+		b.ServerName = "api.b.example"
+		k.clusters["b"] = b
+		kubeconfig := k.write(t, filepath.Join(e.dir, "kube.json"))
 		got, err := e.r.Resolve(Selection{Kubeconfig: kubeconfig, Context: "b"}, true)
 		if err != nil || got.LiveCheck != "verified" {
 			t.Fatalf("got %+v, %v", got, err)
 		}
 		log, _ := os.ReadFile(e.log)
-		if !strings.Contains(string(log), "KUBERC=off [get] [--raw] [/version] [--request-timeout=10s] [--kubeconfig] ["+kubeconfig+"] [--context] [b]") {
+		if !strings.Contains(string(log), "KUBERC=off [get] [--raw] [/version] [--request-timeout=10s] [--kubeconfig] ["+kubeconfig+"] [--context] [b]"+
+			" [--server] [https://b.example:6443] [--tls-server-name] [api.b.example]") {
 			t.Fatalf("live check argv:\n%s", log)
+		}
+	})
+	t.Run("kubeconfig changed during the check refuses", func(t *testing.T) {
+		e := newEnv(t)
+		kubeconfig := twoContexts(ca).write(t, filepath.Join(e.dir, "kube.json"))
+		moved := twoContexts(ca)
+		moved.clusters["b"] = cluster{Server: "https://moved.example:6443", CAData: []byte(ca)}
+		swap := moved.write(t, filepath.Join(e.dir, "moved.json"))
+		e.r.Environ = append(e.r.Environ, "FAKE_SWAP="+swap, "FAKE_SWAP_TO="+kubeconfig)
+		got, err := e.r.Resolve(Selection{Kubeconfig: kubeconfig, Context: "b"}, true)
+		if err == nil || got != nil || !strings.Contains(err.Error(), "changed during the live check") {
+			t.Fatalf("got %+v, %v", got, err)
+		}
+		log, _ := os.ReadFile(e.log)
+		if !strings.Contains(string(log), "[--server] [https://b.example:6443]") {
+			t.Fatalf("live check was not pinned to the captured server:\n%s", log)
 		}
 	})
 	t.Run("failure is redacted", func(t *testing.T) {

@@ -4,8 +4,8 @@
 //
 // The fingerprint is "sha256:" followed by the lowercase hex SHA-256 of the canonical bytes. The
 // canonical bytes are one JSON object produced by Go encoding/json Marshal: UTF-8, no
-// insignificant whitespace, no trailing newline, HTML-sensitive characters escaped as <,
-// > and &, explicit null for absent optional fields, and exactly this field order:
+// insignificant whitespace, no trailing newline, HTML-sensitive characters escaped as \u003c,
+// \u003e and \u0026, explicit null for absent optional fields, and exactly this field order:
 //
 //	schema_version  number, always 1
 //	config_source   absolute env-file path with symlinks resolved, or null
@@ -221,7 +221,8 @@ func loadEnvFile(p string, env map[string]string) (map[string]string, string, er
 		if isolated(name) {
 			return "", false
 		}
-		return env[name], true
+		v, ok := env[name]
+		return v, ok
 	})
 	return file, source, err
 }
@@ -313,22 +314,40 @@ func (r Resolver) Resolve(sel Selection, check bool) (*Target, error) {
 	}
 	defer cleanup()
 
-	raw, err := r.output(ctx, toolEnv, "config", "view", "--raw", "-o", "json", "--kubeconfig", kubeconfig)
-	if err != nil {
-		return nil, fmt.Errorf("kubectl could not read kubeconfig %s (%v)", kubeconfig, err)
-	}
-	if err := identity(raw, contextName, t); err != nil {
+	if err := r.capture(ctx, toolEnv, contextName, t); err != nil {
 		return nil, err
 	}
-	t.Fingerprint = Fingerprint(t)
 
 	if check {
 		if err := r.liveCheck(ctx, toolEnv, t); err != nil {
 			return nil, err
 		}
+		// kubectl re-reads the kubeconfig and CA file by path, so the check is bound to the
+		// captured identity only when a fresh capture still yields the same fingerprint.
+		after := *t
+		after.TLS = TLS{}
+		if err := r.capture(ctx, toolEnv, t.Context, &after); err != nil {
+			return nil, fmt.Errorf("kubeconfig %s could not be re-read after the live check: %w", t.Kubeconfig, err)
+		}
+		if after.Fingerprint != t.Fingerprint {
+			return nil, fmt.Errorf("kubeconfig %s changed during the live check of context %q; refusing", t.Kubeconfig, t.Context)
+		}
 		t.LiveCheck = "verified"
 	}
 	return t, nil
+}
+
+// capture reads the kubeconfig through kubectl and fills the identity and fingerprint of t.
+func (r Resolver) capture(ctx context.Context, toolEnv []string, contextName string, t *Target) error {
+	raw, err := r.output(ctx, toolEnv, "config", "view", "--raw", "-o", "json", "--kubeconfig", t.Kubeconfig)
+	if err != nil {
+		return fmt.Errorf("kubectl could not read kubeconfig %s (%v)", t.Kubeconfig, err)
+	}
+	if err := identity(raw, contextName, t); err != nil {
+		return err
+	}
+	t.Fingerprint = Fingerprint(t)
+	return nil
 }
 
 // legacy selects at most one default env file and the kubeconfig fallback chain. It never fetches.

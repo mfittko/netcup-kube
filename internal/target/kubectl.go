@@ -122,8 +122,13 @@ func (r Resolver) liveCheck(ctx context.Context, env []string, t *Target) error 
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, r.Kubectl, "get", "--raw", "/version", "--request-timeout=10s",
-		"--kubeconfig", t.Kubeconfig, "--context", t.Context)
+	// Pin the endpoint and TLS name to the captured identity instead of re-reading them.
+	args := []string{"get", "--raw", "/version", "--request-timeout=10s",
+		"--kubeconfig", t.Kubeconfig, "--context", t.Context, "--server", t.Server}
+	if t.TLS.ServerName != nil {
+		args = append(args, "--tls-server-name", *t.TLS.ServerName)
+	}
+	cmd := exec.CommandContext(ctx, r.Kubectl, args...)
 	cmd.Env = env
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
