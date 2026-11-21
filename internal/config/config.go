@@ -62,39 +62,63 @@ func LoadEnvFileToMap(path string) (map[string]string, error) {
 
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-
-		// Skip empty lines and comments
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
+		key, value, ok := parseEnvLine(scanner.Text())
+		if ok && isValidEnvKey(key) {
+			result[key] = value
 		}
-
-		// Parse KEY=value format
-		parts := strings.SplitN(line, "=", 2)
-		if len(parts) != 2 {
-			continue
-		}
-
-		key := strings.TrimSpace(parts[0])
-		value := strings.TrimSpace(parts[1])
-
-		// Validate key name (must be valid environment variable name)
-		if !isValidEnvKey(key) {
-			continue
-		}
-
-		// Remove quotes if present (for backward compatibility with simpler parser)
-		if len(value) >= 2 {
-			if (value[0] == '"' && value[len(value)-1] == '"') ||
-				(value[0] == '\'' && value[len(value)-1] == '\'') {
-				value = value[1 : len(value)-1]
-			}
-		}
-
-		result[key] = value
 	}
 
 	return result, scanner.Err()
+}
+
+// parseEnvLine splits a KEY=value line, trimming whitespace and one pair of matching outer quotes.
+// It reports false for empty lines, comments and lines without '='.
+func parseEnvLine(line string) (key, value string, ok bool) {
+	line = strings.TrimSpace(line)
+	if line == "" || strings.HasPrefix(line, "#") {
+		return "", "", false
+	}
+	key, value, ok = strings.Cut(line, "=")
+	if !ok {
+		return "", "", false
+	}
+	key, value = strings.TrimSpace(key), strings.TrimSpace(value)
+	if len(value) >= 2 && ((value[0] == '"' && value[len(value)-1] == '"') ||
+		(value[0] == '\'' && value[len(value)-1] == '\'')) {
+		value = value[1 : len(value)-1]
+	}
+	return key, value, true
+}
+
+// ParseEnvFile reads KEY=value lines like LoadEnvFile and expands ${VAR} from earlier assignments
+// in the same file, then from lookup. It never reads the process environment. A reference that
+// resolves through neither returns an error naming the variable.
+func ParseEnvFile(path string, lookup func(string) (string, bool)) (map[string]string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open env file: %w", err)
+	}
+	defer func() { _ = file.Close() }()
+
+	values := make(map[string]string)
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		key, value, ok := parseEnvLine(scanner.Text())
+		if !ok || !isValidEnvKey(key) {
+			continue
+		}
+		expanded, missing := expandWith(value, func(name string) (string, bool) {
+			if v, ok := values[name]; ok {
+				return v, true
+			}
+			return lookup(name)
+		})
+		if missing != "" {
+			return nil, fmt.Errorf("%s: %s references unresolved ${%s}", path, key, missing)
+		}
+		values[key] = expanded
+	}
+	return values, scanner.Err()
 }
 
 // Config holds the configuration for netcup-kube commands
@@ -125,25 +149,9 @@ func (c *Config) LoadEnvFile(path string) error {
 
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-
-		// Skip empty lines and comments
-		if line == "" || strings.HasPrefix(line, "#") {
+		key, value, ok := parseEnvLine(scanner.Text())
+		if !ok {
 			continue
-		}
-
-		// Parse KEY=value format
-		parts := strings.SplitN(line, "=", 2)
-		if len(parts) != 2 {
-			continue
-		}
-
-		key := strings.TrimSpace(parts[0])
-		value := strings.TrimSpace(parts[1])
-
-		if len(value) >= 2 && ((value[0] == '"' && value[len(value)-1] == '"') ||
-			(value[0] == '\'' && value[len(value)-1] == '\'')) {
-			value = value[1 : len(value)-1]
 		}
 
 		// Simple variable expansion: ${VAR} -> value of VAR
@@ -192,6 +200,21 @@ func (c *Config) SetFlag(key, value string) {
 // NOTE: This performs single-pass expansion only. Variables are not recursively expanded.
 // For example, if VAR1="${VAR2}" and VAR2="value", VAR1 will expand to "${VAR2}", not "value".
 func (c *Config) expandVars(value string) string {
+	result, _ := expandWith(value, func(name string) (string, bool) {
+		if val, exists := c.Env[name]; exists {
+			return val, true
+		}
+		if val, ok := os.LookupEnv(name); ok {
+			return val, true
+		}
+		return "", false
+	})
+	return result
+}
+
+// expandWith expands ${VAR} references through lookup in a single pass. Unresolved references
+// expand to the empty string; the first unresolved name is returned as missing.
+func expandWith(value string, lookup func(string) (string, bool)) (expanded, missing string) {
 	var result strings.Builder
 	result.Grow(len(value)) // Pre-allocate capacity
 
@@ -224,12 +247,9 @@ func (c *Config) expandVars(value string) string {
 
 		varName := value[start+2 : end]
 
-		// Look up the variable value
-		varValue := ""
-		if val, exists := c.Env[varName]; exists {
-			varValue = val
-		} else if val, ok := os.LookupEnv(varName); ok {
-			varValue = val
+		varValue, ok := lookup(varName)
+		if !ok && missing == "" {
+			missing = varName
 		}
 
 		result.WriteString(varValue)
@@ -243,7 +263,7 @@ func (c *Config) expandVars(value string) string {
 		result.WriteString(value[pos:])
 	}
 
-	return result.String()
+	return result.String(), missing
 }
 
 // ToEnvSlice converts the config to a slice of "KEY=value" strings
