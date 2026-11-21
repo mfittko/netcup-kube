@@ -772,6 +772,21 @@ func TestLiveCheck(t *testing.T) {
 			t.Fatalf("live check was not pinned to the captured server:\n%s", log)
 		}
 	})
+	t.Run("tls-server-name dropped during the check refuses", func(t *testing.T) {
+		// Only the TLS field differs, so this fails if the re-capture keeps the stale TLS values.
+		e := newEnv(t)
+		k := twoContexts(ca)
+		b := k.clusters["b"]
+		b.ServerName = "api.b.example"
+		k.clusters["b"] = b
+		kubeconfig := k.write(t, filepath.Join(e.dir, "kube.json"))
+		swap := twoContexts(ca).write(t, filepath.Join(e.dir, "no-sni.json"))
+		e.r.Environ = append(e.r.Environ, "FAKE_SWAP="+swap, "FAKE_SWAP_TO="+kubeconfig)
+		got, err := e.r.Resolve(Selection{Kubeconfig: kubeconfig, Context: "b"}, true)
+		if err == nil || got != nil || !strings.Contains(err.Error(), "changed during the live check") {
+			t.Fatalf("got %+v, %v", got, err)
+		}
+	})
 	t.Run("failure is redacted", func(t *testing.T) {
 		e := newEnv(t, "FAKE_FAIL_GET=SECRET-TOKEN")
 		kubeconfig := twoContexts(ca).write(t, filepath.Join(e.dir, "kube.json"))
