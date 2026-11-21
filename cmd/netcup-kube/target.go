@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/mfittko/netcup-kube/internal/target"
 	"github.com/spf13/cobra"
@@ -43,7 +45,8 @@ var targetCmd = &cobra.Command{
 
 Selection: --env-file selects one deployment env file (its KUBECONFIG and NETCUP_KUBE_CONTEXT);
 --kubeconfig and --context override it. Without an env file, --kubeconfig or KUBECONFIG and
---context or NETCUP_KUBE_CONTEXT select the target. With no selector, the legacy defaults apply.
+--context or NETCUP_KUBE_CONTEXT select the target. NETCUP_KUBE_CONTEXT applies only with ambient
+KUBECONFIG, never with --kubeconfig. With no selector, the legacy defaults apply.
 These commands never fetch a kubeconfig, start a tunnel or change files.
 
 Examples:
@@ -133,24 +136,33 @@ func resolveTarget(check bool) (*target.Target, error) {
 	}, check)
 }
 
+// printable quotes s when it holds a non-printable character, so a kubeconfig-derived name
+// cannot inject an output line or a terminal escape.
+func printable(s string) string {
+	if strings.IndexFunc(s, func(r rune) bool { return !unicode.IsPrint(r) }) >= 0 {
+		return strconv.Quote(s)
+	}
+	return s
+}
+
 func printTarget(w io.Writer, t *target.Target) {
 	orNone := func(s *string) string {
 		if s == nil {
 			return "(none)"
 		}
-		return *s
+		return printable(*s)
 	}
 	tunnel := "(none)"
 	if t.Tunnel != nil {
-		tunnel = fmt.Sprintf("%s@%s %s:%s -> %s:%s", t.Tunnel.SSHUser, t.Tunnel.SSHHost,
-			t.Tunnel.LocalHost, t.Tunnel.LocalPort, t.Tunnel.RemoteHost, t.Tunnel.RemotePort)
+		tunnel = printable(fmt.Sprintf("%s@%s %s:%s -> %s:%s", t.Tunnel.SSHUser, t.Tunnel.SSHHost,
+			t.Tunnel.LocalHost, t.Tunnel.LocalPort, t.Tunnel.RemoteHost, t.Tunnel.RemotePort))
 	}
 	_, _ = fmt.Fprintf(w, "schema_version: %d\nselection_mode: %s\nconfig_source: %s\nkubeconfig: %s\n"+
 		"context: %s\ncluster: %s\nuser: %s\nnamespace: %s\nserver: %s\n"+
 		"tls.server_name: %s\ntls.ca_sha256: %s\ntls.system_roots: %t\n"+
 		"transport: %s\ntunnel: %s\nfingerprint: %s\nlive_check: %s\n",
-		t.SchemaVersion, t.SelectionMode, orNone(t.ConfigSource), t.Kubeconfig,
-		t.Context, t.Cluster, t.User, t.Namespace, t.Server,
+		t.SchemaVersion, t.SelectionMode, orNone(t.ConfigSource), printable(t.Kubeconfig),
+		printable(t.Context), printable(t.Cluster), printable(t.User), printable(t.Namespace), printable(t.Server),
 		orNone(t.TLS.ServerName), orNone(t.TLS.CASHA256), t.TLS.SystemRoots,
 		t.Transport, tunnel, t.Fingerprint, t.LiveCheck)
 }

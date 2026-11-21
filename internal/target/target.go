@@ -8,8 +8,8 @@
 // > and &, explicit null for absent optional fields, and exactly this field order:
 //
 //	schema_version  number, always 1
-//	config_source   absolute env-file path, or null
-//	kubeconfig      absolute kubeconfig path
+//	config_source   absolute env-file path with symlinks resolved, or null
+//	kubeconfig      absolute kubeconfig path with symlinks resolved
 //	context         selected context name
 //	cluster         cluster name referenced by the context
 //	user            user name referenced by the context
@@ -26,6 +26,7 @@
 package target
 
 import (
+	"context"
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
@@ -36,10 +37,13 @@ import (
 	"io/fs"
 	"net/url"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/mfittko/netcup-kube/internal/config"
 )
@@ -165,12 +169,21 @@ func path(base, raw, what string) (string, error) {
 		return "", nil
 	}
 	if strings.ContainsRune(raw, os.PathListSeparator) {
-		return "", fmt.Errorf("%s %q is a path list; select exactly one kubeconfig file", what, raw)
+		return "", fmt.Errorf("%s %q is a path list; select exactly one file", what, raw)
 	}
 	if !filepath.IsAbs(raw) {
 		raw = filepath.Join(base, raw)
 	}
 	return filepath.Clean(raw), nil
+}
+
+// realpath returns the symlink-free path of a readable file, so one file has one recorded path.
+func realpath(p string) (string, error) {
+	resolved, err := filepath.EvalSymlinks(p)
+	if err != nil {
+		return "", fmt.Errorf("%s could not be resolved: %w", p, err)
+	}
+	return resolved, nil
 }
 
 // readable requires a regular file before opening it, so a FIFO or device never blocks Open.
@@ -194,17 +207,23 @@ func exists(p string) bool {
 	return !errors.Is(err, fs.ErrNotExist)
 }
 
-// loadEnvFile parses a selected env file. Isolated keys never resolve from the environment.
-func loadEnvFile(p string, env map[string]string) (map[string]string, error) {
+// loadEnvFile parses a selected env file and returns its canonical path. Isolated keys never
+// resolve from the environment.
+func loadEnvFile(p string, env map[string]string) (map[string]string, string, error) {
 	if err := readable(p); err != nil {
-		return nil, fmt.Errorf("env file is not readable: %w", err)
+		return nil, "", fmt.Errorf("env file is not readable: %w", err)
 	}
-	return config.ParseEnvFile(p, func(name string) (string, bool) {
+	source, err := realpath(p)
+	if err != nil {
+		return nil, "", err
+	}
+	file, err := config.ParseEnvFile(source, func(name string) (string, bool) {
 		if isolated(name) {
 			return "", false
 		}
 		return env[name], true
 	})
+	return file, source, err
 }
 
 func firstNonEmpty(values ...string) string {
@@ -230,16 +249,17 @@ func (r Resolver) Resolve(sel Selection, check bool) (*Target, error) {
 
 	switch {
 	case sel.EnvFile != "":
-		source, err := path(r.Cwd, sel.EnvFile, "--env-file")
+		given, err := path(r.Cwd, sel.EnvFile, "--env-file")
 		if err != nil {
 			return nil, err
 		}
-		if file, err = loadEnvFile(source, env); err != nil {
+		var source string
+		if file, source, err = loadEnvFile(given, env); err != nil {
 			return nil, err
 		}
 		t.ConfigSource = &source
 		if kubeconfig == "" {
-			if kubeconfig, err = path(filepath.Dir(source), file["KUBECONFIG"], "KUBECONFIG in "+source); err != nil {
+			if kubeconfig, err = path(filepath.Dir(given), file["KUBECONFIG"], "KUBECONFIG in "+source); err != nil {
 				return nil, err
 			}
 		}
@@ -271,6 +291,9 @@ func (r Resolver) Resolve(sel Selection, check bool) (*Target, error) {
 	if err := readable(kubeconfig); err != nil {
 		return nil, fmt.Errorf("kubeconfig is not readable: %w", err)
 	}
+	if kubeconfig, err = realpath(kubeconfig); err != nil {
+		return nil, err
+	}
 	t.Kubeconfig = kubeconfig
 	if err := transport(file, t); err != nil {
 		return nil, err
@@ -279,13 +302,17 @@ func (r Resolver) Resolve(sel Selection, check bool) (*Target, error) {
 		return nil, errors.New("live check over ssh transport is not supported until exact tunnel verification exists; refusing")
 	}
 
-	toolEnv, cleanup, err := r.kubectlEnv(env)
+	// One signal context covers every kubectl call, so an interrupt kills the running call and
+	// the deferred projection cleanup still runs.
+	ctx, stop := signal.NotifyContext(context.Background(), interruptSignals...)
+	defer stop()
+	toolEnv, cleanup, err := r.kubectlEnv(ctx, env)
 	if err != nil {
 		return nil, err
 	}
 	defer cleanup()
 
-	raw, err := r.output(toolEnv, "config", "view", "--raw", "-o", "json", "--kubeconfig", kubeconfig)
+	raw, err := r.output(ctx, toolEnv, "config", "view", "--raw", "-o", "json", "--kubeconfig", kubeconfig)
 	if err != nil {
 		return nil, fmt.Errorf("kubectl could not read kubeconfig %s (%v)", kubeconfig, err)
 	}
@@ -295,7 +322,7 @@ func (r Resolver) Resolve(sel Selection, check bool) (*Target, error) {
 	t.Fingerprint = Fingerprint(t)
 
 	if check {
-		if err := r.liveCheck(toolEnv, t); err != nil {
+		if err := r.liveCheck(ctx, toolEnv, t); err != nil {
 			return nil, err
 		}
 		t.LiveCheck = "verified"
@@ -315,11 +342,11 @@ func (r Resolver) legacy(env map[string]string, t *Target) (map[string]string, s
 		if _, err := os.Stat(c); errors.Is(err, fs.ErrNotExist) {
 			continue
 		}
+		var source string
 		var err error
-		if file, err = loadEnvFile(c, env); err != nil {
+		if file, source, err = loadEnvFile(c, env); err != nil {
 			return nil, "", err
 		}
-		source := c
 		t.ConfigSource = &source
 		if kubeconfig, err = path(filepath.Dir(c), file["KUBECONFIG"], "KUBECONFIG in "+c); err != nil {
 			return nil, "", err
@@ -356,8 +383,7 @@ func transport(file map[string]string, t *Target) error {
 	if host == "" {
 		return errors.New("KUBE_TRANSPORT=ssh needs TUNNEL_HOST, MGMT_HOST or MGMT_IP in the selected env file")
 	}
-	t.Transport = "ssh"
-	t.Tunnel = &Tunnel{
+	tunnel := &Tunnel{
 		SSHUser:    firstNonEmpty(file["TUNNEL_USER"], file["MGMT_USER"], file["DEFAULT_USER"], "ops"),
 		SSHHost:    host,
 		LocalHost:  "127.0.0.1",
@@ -365,7 +391,35 @@ func transport(file map[string]string, t *Target) error {
 		RemoteHost: firstNonEmpty(file["TUNNEL_REMOTE_HOST"], "127.0.0.1"),
 		RemotePort: firstNonEmpty(file["TUNNEL_REMOTE_PORT"], "6443"),
 	}
+	for _, f := range [][2]string{{"ssh user", tunnel.SSHUser}, {"ssh host", tunnel.SSHHost}, {"remote host", tunnel.RemoteHost}} {
+		if !validSSHName(f[1]) {
+			return fmt.Errorf("tunnel %s %q must be non-empty, contain no whitespace and not start with '-'", f[0], f[1])
+		}
+	}
+	for _, f := range [][2]string{{"local port", tunnel.LocalPort}, {"remote port", tunnel.RemotePort}} {
+		if !validPort(f[1]) {
+			return fmt.Errorf("tunnel %s %q must be a decimal integer from 1 to 65535 without leading zeros", f[0], f[1])
+		}
+	}
+	t.Transport = "ssh"
+	t.Tunnel = tunnel
 	return nil
+}
+
+// validSSHName refuses values that ssh could read as an option or split into two arguments.
+func validSSHName(s string) bool {
+	return s != "" && !strings.HasPrefix(s, "-") && !strings.ContainsFunc(s, unicode.IsSpace)
+}
+
+var portPattern = regexp.MustCompile(`^[1-9][0-9]{0,4}$`)
+
+// validPort accepts only the canonical decimal form of 1 to 65535.
+func validPort(s string) bool {
+	if !portPattern.MatchString(s) {
+		return false
+	}
+	n, err := strconv.Atoi(s)
+	return err == nil && n <= 65535
 }
 
 type kubeconfigView struct {
@@ -456,7 +510,10 @@ func identity(raw []byte, contextName string, t *Target) error {
 		if !filepath.IsAbs(caPath) {
 			caPath = filepath.Join(filepath.Dir(t.Kubeconfig), caPath)
 		}
-		if ca, err = os.ReadFile(caPath); err != nil {
+		if err = readable(caPath); err == nil {
+			ca, err = os.ReadFile(caPath)
+		}
+		if err != nil {
 			return fmt.Errorf("cluster %q: certificate-authority is not readable: %w", ctx.Cluster, err)
 		}
 	}

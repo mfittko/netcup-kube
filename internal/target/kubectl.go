@@ -8,7 +8,6 @@ import (
 	"io/fs"
 	"os"
 	"os/exec"
-	"os/signal"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -17,10 +16,14 @@ import (
 
 const preferenceAPIVersion = "kubectl.config.k8s.io/v1beta1"
 
+// interruptSignals are trapped while kubectl runs. kubectl runs in its own process group, so a
+// terminal hangup or quit never reaches it directly; the trap kills the group instead.
+var interruptSignals = []os.Signal{os.Interrupt, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGQUIT}
+
 // kubectlEnv returns the environment for core kubectl calls. Kubectl preferences are either off
 // or a temporary projection that keeps only the credential-plugin policy of the user's effective
 // preference file. cleanup removes the projection.
-func (r Resolver) kubectlEnv(env map[string]string) (toolEnv []string, cleanup func(), err error) {
+func (r Resolver) kubectlEnv(ctx context.Context, env map[string]string) (toolEnv []string, cleanup func(), err error) {
 	for _, kv := range r.Environ {
 		if !strings.HasPrefix(kv, "KUBECONFIG=") && !strings.HasPrefix(kv, "KUBERC=") {
 			toolEnv = append(toolEnv, kv)
@@ -45,7 +48,7 @@ func (r Resolver) kubectlEnv(env map[string]string) (toolEnv []string, cleanup f
 		pref = filepath.Join(r.Cwd, pref)
 	}
 
-	raw, err := r.output(toolEnv, "kuberc", "view", "--kuberc", pref, "-o", "json")
+	raw, err := r.output(ctx, toolEnv, "kuberc", "view", "--kuberc", pref, "-o", "json")
 	if err != nil {
 		return nil, nil, fmt.Errorf("kubectl could not read the kuberc preference file %s (%v); refusing because its credential-plugin policy cannot be preserved", pref, err)
 	}
@@ -91,10 +94,17 @@ func (r Resolver) kubectlEnv(env map[string]string) (toolEnv []string, cleanup f
 }
 
 // output runs kubectl and returns stdout. Errors carry only the exit status, never tool output.
-func (r Resolver) output(env []string, args ...string) ([]byte, error) {
-	cmd := exec.Command(r.Kubectl, args...)
+// An interrupt kills the process group of the call.
+func (r Resolver) output(ctx context.Context, env []string, args ...string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, r.Kubectl, args...)
 	cmd.Env = env
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
+	cmd.WaitDelay = time.Second
 	out, err := cmd.Output()
+	if ctx.Err() != nil {
+		return nil, errors.New("interrupted")
+	}
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {
 		return nil, errors.New(exitErr.ProcessState.String())
@@ -103,16 +113,14 @@ func (r Resolver) output(env []string, args ...string) ([]byte, error) {
 }
 
 // liveCheck reads /version from the selected API server. The kubectl process runs in its own
-// process group; the group is killed when the deadline passes or the command is interrupted.
-func (r Resolver) liveCheck(env []string, t *Target) error {
+// process group; the group is killed when the deadline passes or ctx is cancelled by a signal.
+func (r Resolver) liveCheck(ctx context.Context, env []string, t *Target) error {
 	timeout := r.CheckTimeout
 	if timeout == 0 {
 		timeout = DefaultCheckTimeout
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
-	defer stop()
 
 	cmd := exec.CommandContext(ctx, r.Kubectl, "get", "--raw", "/version", "--request-timeout=10s",
 		"--kubeconfig", t.Kubeconfig, "--context", t.Context)

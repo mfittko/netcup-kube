@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/mfittko/netcup-kube/internal/target"
 )
 
 // TestMain lets public invocation tests run the CLI entry point in a child process.
@@ -382,6 +384,28 @@ func TestTargetVerifyAndText(t *testing.T) {
 	}
 	if !strings.Contains(readFile(t, f.kubectlLog), "[get] [--raw] [/version] [--request-timeout=10s] [--kubeconfig] ["+f.bKubeconfig+"] [--context] [ctx-b]") {
 		t.Fatalf("live check argv:\n%s", readFile(t, f.kubectlLog))
+	}
+}
+
+func TestPrintTargetQuotesNonPrintableNames(t *testing.T) {
+	var out bytes.Buffer
+	printTarget(&out, &target.Target{
+		Context:   "b\nserver: https://trusted.example",
+		Cluster:   "c\x1b[2J",
+		Server:    "https://b.example:6443",
+		Namespace: "default",
+	})
+	if n := strings.Count(out.String(), "\nserver:"); n != 1 {
+		t.Fatalf("want one server line, got %d:\n%s", n, out.String())
+	}
+	if strings.ContainsRune(out.String(), '\x1b') {
+		t.Fatalf("escape reached the output:\n%q", out.String())
+	}
+	if !strings.Contains(out.String(), `context: "b\nserver: https://trusted.example"`) {
+		t.Fatalf("context not quoted:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "namespace: default\n") {
+		t.Fatalf("printable value must stay unquoted:\n%s", out.String())
 	}
 }
 

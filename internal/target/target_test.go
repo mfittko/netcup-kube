@@ -47,7 +47,10 @@ type env struct {
 
 func newEnv(t *testing.T, extra ...string) *env {
 	t.Helper()
-	dir := t.TempDir()
+	dir, err := filepath.EvalSymlinks(t.TempDir()) // resolved paths are canonical
+	if err != nil {
+		t.Fatal(err)
+	}
 	e := &env{dir: dir, log: filepath.Join(dir, "kubectl.log"), projection: filepath.Join(dir, "projection")}
 	kubectl := filepath.Join(dir, "kubectl")
 	write(t, kubectl, fake)
@@ -190,6 +193,23 @@ func TestResolveExplicitPrecedence(t *testing.T) {
 			t.Fatalf("got %+v, %v", got, err)
 		}
 	})
+	t.Run("ambient context never fills an env file without a context", func(t *testing.T) {
+		only := twoContexts(ca)
+		only.current = "b"
+		only.write(t, filepath.Join(e.dir, "deploy", "current-b.json"))
+		write(t, filepath.Join(e.dir, "deploy", "only.env"), "KUBECONFIG=current-b.json\n")
+		got, err := e.r.Resolve(Selection{EnvFile: "deploy/only.env"}, false) // ambient NETCUP_KUBE_CONTEXT=a
+		if err != nil || got.Context != "b" {
+			t.Fatalf("got %+v, %v", got, err)
+		}
+	})
+	t.Run("flag kubeconfig over env file", func(t *testing.T) {
+		other := twoContexts(ca).write(t, filepath.Join(e.dir, "other", "kube.json"))
+		got, err := e.r.Resolve(Selection{EnvFile: "deploy/b.env", Kubeconfig: other}, false)
+		if err != nil || got.Kubeconfig != other || *got.ConfigSource != filepath.Join(e.dir, "deploy", "b.env") {
+			t.Fatalf("got %+v, %v", got, err)
+		}
+	})
 	t.Run("process kubeconfig and context", func(t *testing.T) {
 		r := e.r
 		r.Environ = append(r.Environ, "KUBECONFIG=deploy/kube.json", "NETCUP_KUBE_CONTEXT=b")
@@ -260,6 +280,71 @@ func TestResolveSSHTransport(t *testing.T) {
 	}
 	if log, _ := os.ReadFile(e.log); strings.Count(string(log), "\n") != 1 {
 		t.Fatalf("ssh check refusal must precede tool calls:\n%s", log)
+	}
+}
+
+func TestTunnelTupleForms(t *testing.T) {
+	ssh := func(kv ...string) map[string]string {
+		file := map[string]string{"KUBE_TRANSPORT": "ssh", "TUNNEL_HOST": "10.0.0.2"}
+		for i := 0; i < len(kv); i += 2 {
+			file[kv[i]] = kv[i+1]
+		}
+		return file
+	}
+	accepted := map[string]map[string]string{
+		"6443":             ssh("TUNNEL_LOCAL_PORT", "6443"),
+		"1":                ssh("TUNNEL_REMOTE_PORT", "1"),
+		"65535":            ssh("TUNNEL_LOCAL_PORT", "65535"),
+		"ops":              ssh("TUNNEL_USER", "ops"),
+		"mgmt.example.com": ssh("TUNNEL_HOST", "mgmt.example.com"),
+	}
+	for form, file := range accepted {
+		t.Run("accepts "+form, func(t *testing.T) {
+			got := &Target{}
+			if err := transport(file, got); err != nil || got.Tunnel == nil {
+				t.Fatalf("got %+v, %v", got.Tunnel, err)
+			}
+		})
+	}
+	rejected := map[string][]map[string]string{
+		"abc":              {ssh("TUNNEL_LOCAL_PORT", "abc"), ssh("TUNNEL_REMOTE_PORT", "abc")},
+		"0":                {ssh("TUNNEL_LOCAL_PORT", "0"), ssh("TUNNEL_REMOTE_PORT", "0")},
+		"70000":            {ssh("TUNNEL_LOCAL_PORT", "70000"), ssh("TUNNEL_REMOTE_PORT", "70000")},
+		"06443":            {ssh("TUNNEL_LOCAL_PORT", "06443"), ssh("TUNNEL_REMOTE_PORT", "06443")},
+		"-oProxyCommand=x": {ssh("TUNNEL_HOST", "-oProxyCommand=x"), ssh("TUNNEL_USER", "-oProxyCommand=x"), ssh("TUNNEL_REMOTE_HOST", "-oProxyCommand=x")},
+		"":                 {ssh("TUNNEL_HOST", "")},
+		"a b":              {ssh("TUNNEL_HOST", "a b"), ssh("TUNNEL_USER", "a b"), ssh("TUNNEL_REMOTE_HOST", "a b")},
+	}
+	for form, files := range rejected {
+		for _, file := range files {
+			t.Run("rejects "+strconv.Quote(form), func(t *testing.T) {
+				got := &Target{}
+				if err := transport(file, got); err == nil || got.Tunnel != nil {
+					t.Fatalf("accepted %+v", file)
+				}
+			})
+		}
+	}
+}
+
+func TestSymlinkedPathsShareOneFingerprint(t *testing.T) {
+	e := newEnv(t)
+	realDir := filepath.Join(e.dir, "real")
+	twoContexts(newCA(t)).write(t, filepath.Join(realDir, "kube.json"))
+	write(t, filepath.Join(realDir, "b.env"), "KUBECONFIG=kube.json\nNETCUP_KUBE_CONTEXT=b\n")
+	if err := os.Symlink(realDir, filepath.Join(e.dir, "link")); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+	direct, err := e.r.Resolve(Selection{EnvFile: "real/b.env"}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, sel := range []Selection{{EnvFile: "link/b.env"}, {EnvFile: "real/b.env", Kubeconfig: "link/kube.json"}} {
+		got, err := e.r.Resolve(sel, false)
+		if err != nil || got.Fingerprint != direct.Fingerprint || *got.ConfigSource != filepath.Join(realDir, "b.env") ||
+			got.Kubeconfig != filepath.Join(realDir, "kube.json") {
+			t.Fatalf("%+v: got %+v, %v", sel, got, err)
+		}
 	}
 }
 
@@ -537,6 +622,9 @@ func TestKubercControl(t *testing.T) {
 			if tc.view != "" && !strings.Contains(string(log), "KUBERC=<unset> [kuberc] [view] [--kuberc]") {
 				t.Fatalf("kuberc view must run without inherited KUBERC:\n%s", log)
 			}
+			if tc.kuberc == "prefs" && !strings.Contains(string(log), "[--kuberc] ["+filepath.Join(e.dir, "prefs")+"]") {
+				t.Fatalf("relative KUBERC must resolve against Cwd:\n%s", log)
+			}
 			if left, _ := os.ReadDir(filepath.Join(e.dir, "tmp")); len(left) != 0 {
 				t.Fatalf("projection not removed: %v", left)
 			}
@@ -571,15 +659,25 @@ func TestReadableRefusesFIFO(t *testing.T) {
 	if err := syscall.Mkfifo(fifo, 0600); err != nil {
 		t.Skipf("mkfifo unsupported: %v", err)
 	}
-	done := make(chan error, 1)
-	go func() { _, err := e.r.Resolve(Selection{Kubeconfig: fifo}, false); done <- err }()
-	select {
-	case err := <-done:
-		if err == nil {
-			t.Fatal("FIFO kubeconfig must refuse")
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("readable blocked on a FIFO")
+	caKubeconfig := twoContexts(newCA(t))
+	caKubeconfig.clusters["b"] = cluster{Server: "https://b.example:6443", CAFile: "kube.fifo"}
+	caKubeconfig.write(t, filepath.Join(e.dir, "ca-fifo.json"))
+	for name, sel := range map[string]Selection{
+		"FIFO kubeconfig": {Kubeconfig: fifo},
+		"FIFO CA":         {Kubeconfig: filepath.Join(e.dir, "ca-fifo.json"), Context: "b"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			done := make(chan error, 1)
+			go func() { _, err := e.r.Resolve(sel, false); done <- err }()
+			select {
+			case err := <-done:
+				if err == nil {
+					t.Fatal("FIFO must refuse")
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("readable blocked on a FIFO")
+			}
+		})
 	}
 }
 
@@ -627,27 +725,59 @@ func TestLiveCheck(t *testing.T) {
 		e := newEnv(t)
 		pidFile := filepath.Join(e.dir, "child.pid")
 		e.r.Environ = append(e.r.Environ, "FAKE_HANG="+pidFile)
-		e.r.CheckTimeout = 300 * time.Millisecond
+		// The deadline leaves a slow runner time to start the fixture and record its child.
+		e.r.CheckTimeout = 2 * time.Second
 		kubeconfig := twoContexts(ca).write(t, filepath.Join(e.dir, "kube.json"))
 		start := time.Now()
 		got, err := e.r.Resolve(Selection{Kubeconfig: kubeconfig, Context: "b"}, true)
-		if err == nil || got != nil || !strings.Contains(err.Error(), "did not finish within 300ms") {
+		if err == nil || got != nil || !strings.Contains(err.Error(), "did not finish within 2s") {
 			t.Fatalf("got %+v, %v", got, err)
 		}
 		if elapsed := time.Since(start); elapsed > 5*time.Second {
 			t.Fatalf("live check returned after %s", elapsed)
 		}
-		data, _ := os.ReadFile(pidFile)
-		pid, convErr := strconv.Atoi(strings.TrimSpace(string(data)))
-		if convErr != nil {
-			t.Fatalf("hanging fixture did not record its child: %q", data)
-		}
-		deadline := time.Now().Add(5 * time.Second)
-		for syscall.Kill(pid, 0) == nil {
-			if time.Now().After(deadline) {
-				t.Fatalf("process group member %d survived the deadline", pid)
-			}
-			time.Sleep(20 * time.Millisecond)
-		}
+		assertReaped(t, pidFile)
 	})
+	t.Run("hangup kills and reaps the client", func(t *testing.T) {
+		e := newEnv(t)
+		pidFile := filepath.Join(e.dir, "child.pid")
+		e.r.Environ = append(e.r.Environ, "FAKE_HANG="+pidFile)
+		e.r.CheckTimeout = 30 * time.Second
+		kubeconfig := twoContexts(ca).write(t, filepath.Join(e.dir, "kube.json"))
+		go func() {
+			// The pid file exists only while liveCheck runs kubectl, so the trap is installed.
+			for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+				if data, _ := os.ReadFile(pidFile); strings.TrimSpace(string(data)) != "" {
+					_ = syscall.Kill(os.Getpid(), syscall.SIGHUP)
+					return
+				}
+			}
+		}()
+		start := time.Now()
+		got, err := e.r.Resolve(Selection{Kubeconfig: kubeconfig, Context: "b"}, true)
+		if err == nil || got != nil || !strings.Contains(err.Error(), "interrupted") {
+			t.Fatalf("got %+v, %v", got, err)
+		}
+		if elapsed := time.Since(start); elapsed > 15*time.Second {
+			t.Fatalf("live check returned after %s", elapsed)
+		}
+		assertReaped(t, pidFile)
+	})
+}
+
+// assertReaped waits until the hanging fixture's recorded child no longer exists.
+func assertReaped(t *testing.T, pidFile string) {
+	t.Helper()
+	data, _ := os.ReadFile(pidFile)
+	pid, convErr := strconv.Atoi(strings.TrimSpace(string(data)))
+	if convErr != nil {
+		t.Fatalf("hanging fixture did not record its child: %q", data)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for syscall.Kill(pid, 0) == nil {
+		if time.Now().After(deadline) {
+			t.Fatalf("process group member %d survived the deadline", pid)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 }

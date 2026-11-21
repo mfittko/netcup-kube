@@ -25,8 +25,8 @@ The `netcup-kube` project provides five primary CLI entrypoints:
 1. **`netcup-kube`** — Main orchestrator for k3s cluster bootstrapping and configuration
 2. **`netcup-kube install`** — Recipe dispatcher for installing optional components
 3. **`netcup-kube remote`** — Remote bootstrap and command execution
-4. **`netcup-kube ssh`** — SSH shell and tunnel manager for local kubectl access
-5. **`netcup-kube target`** — Read-only inspection and verification of the selected cluster target
+4. **`netcup-kube target`** — Read-only inspection and verification of the selected cluster target
+5. **`netcup-kube ssh`** — SSH shell and tunnel manager for local kubectl access
 
 All scripts follow bash `set -euo pipefail` semantics: they exit on any error, undefined variable access, or pipeline failure.
 
@@ -202,12 +202,12 @@ netcup-kube remote install [--no-tty] [--env-file <path>] [--branch <name>] [--r
 
 **Usage:**
 ```bash
-netcup-kube target inspect [selection flags] [--output text|json] [--check]
+netcup-kube target inspect [selection flags] [-o|--output text|json] [--check]
 netcup-kube target verify  [selection flags] --fingerprint sha256:<64 lowercase hex>
 ```
 
-**Selection flags** (accepted only by the `target` commands in this release; `--flag value` and `--flag=value`):
-- `--env-file <file>` — The sole deployment configuration. It must exist and be readable. It must set `KUBECONFIG` (relative to the file's directory), or the caller passes `--kubeconfig`. There is no fallback to `/etc/rancher/k3s/k3s.yaml` or `config/k3s.yaml`.
+**Selection flags** (`--flag value` and `--flag=value`; in this release `--kubeconfig` and `--context` are accepted only by the `target` commands):
+- `--env-file <file>` — The sole deployment configuration. Every command accepts the root `--env-file` flag; on `target` it applies the stricter selection rules below (one value only, no flag-like value). It must exist and be readable. It must set `KUBECONFIG` (relative to the file's directory), or the caller passes `--kubeconfig`. There is no fallback to `/etc/rancher/k3s/k3s.yaml` or `config/k3s.yaml`.
 - `--kubeconfig <file>` — One kubeconfig file. Relative paths resolve from the invocation directory.
 - `--context <name>` — Context in that file.
 - Empty values, flag-like values, conflicting repeated values and `--kuberc` refuse before any tool runs.
@@ -216,22 +216,23 @@ netcup-kube target verify  [selection flags] --fingerprint sha256:<64 lowercase 
 - Explicit mode applies when `--env-file`, `--kubeconfig`, `--context`, `KUBECONFIG` or `NETCUP_KUBE_CONTEXT` is present.
   - With `--env-file`: kubeconfig is `--kubeconfig`, else the file's `KUBECONFIG`. Context is `--context`, else the file's `NETCUP_KUBE_CONTEXT`, else the kubeconfig's `current-context`.
   - Without `--env-file`: no default env file is loaded. Kubeconfig is `--kubeconfig`, else `KUBECONFIG`. Context is `--context`, else `NETCUP_KUBE_CONTEXT`, else `current-context`. Ambient `NETCUP_KUBE_CONTEXT` applies only when the kubeconfig also comes from ambient `KUBECONFIG`; it never selects a context in a `--kubeconfig` file. `--context` with ambient `KUBECONFIG` is allowed. A context without a kubeconfig refuses.
+- Until slice target-launch ships, `install` and direct scripts ignore `KUBECONFIG` and `NETCUP_KUBE_CONTEXT` from an env file; only the `target` commands read them. `install` uses the process `KUBECONFIG`, else its existing defaults, and the kubeconfig's `current-context`.
 - A `KUBECONFIG` path list refuses; select one file. The selected context must exist exactly once, with its cluster and user entries.
 - Ambient isolation: for an env file, `KUBECONFIG`, `NETCUP_KUBE_CONTEXT`, `KUBE_TRANSPORT`, `DEFAULT_USER`, `MGMT_*`, `TUNNEL_*`, `EDGE_*`, `CADDY_*`, `HELM_KUBE*` and `HELM_NAMESPACE` are removed from the process environment before `${VAR}` interpolation. A reference to one of them must be assigned earlier in the same file, otherwise the command refuses. For example, `TUNNEL_HOST=${MGMT_HOST}` never picks up an ambient `MGMT_HOST`.
 - Legacy mode (no selector): at most one of `./config/netcup-kube.env`, then the checkout's `config/netcup-kube.env` (no merge). Kubeconfig is its `KUBECONFIG`, else an existing `/etc/rancher/k3s/k3s.yaml`, else the checkout's `config/k3s.yaml`. An unreadable selected candidate refuses and never falls through to the next one. A missing kubeconfig prints a copy instruction. The `target` commands never fetch a kubeconfig over SSH; `install` keeps its existing fetch in this release.
-- Transport is `direct` unless the selected env file sets `KUBE_TRANSPORT=ssh`. The tunnel tuple comes from that file only: host `TUNNEL_HOST`, `MGMT_HOST`, `MGMT_IP`; user `TUNNEL_USER`, `MGMT_USER`, `DEFAULT_USER`, `ops`; local `127.0.0.1:${TUNNEL_LOCAL_PORT:-6443}`; remote `${TUNNEL_REMOTE_HOST:-127.0.0.1}:${TUNNEL_REMOTE_PORT:-6443}`. The `target` commands never start a tunnel.
+- Transport is `direct` unless the selected env file sets `KUBE_TRANSPORT=ssh`. The tunnel tuple comes from that file only: host `TUNNEL_HOST`, `MGMT_HOST`, `MGMT_IP`; user `TUNNEL_USER`, `MGMT_USER`, `DEFAULT_USER`, `ops`; local `127.0.0.1:${TUNNEL_LOCAL_PORT:-6443}`; remote `${TUNNEL_REMOTE_HOST:-127.0.0.1}:${TUNNEL_REMOTE_PORT:-6443}`. Ports must be decimal integers from 1 to 65535 without leading zeros; the ssh user, ssh host and remote host must be non-empty, contain no whitespace and not start with `-`. Otherwise the command refuses. The `target` commands never start a tunnel.
 
 **Identity:**
 - The API server must be `https://` without userinfo, query or fragment. `insecure-skip-tls-verify: true` refuses. A set CA (inline or file) must hold a valid PEM certificate; its bytes are hashed. Namespace is the context namespace, else `default`.
-- The fingerprint is `sha256:` plus the lowercase hex SHA-256 of the schema-v1 canonical serialization (documented in `internal/target/target.go`). It covers the config source, kubeconfig path, context, cluster, user, namespace, server, TLS server name, CA digest or system roots, transport and tunnel tuple. It excludes all authentication material, so credential rotation alone does not change it. It is not an approval token and does not prove which real-world deployment was meant.
+- The fingerprint is `sha256:` plus the lowercase hex SHA-256 of the schema-v1 canonical serialization (documented in `internal/target/target.go`). It covers the config source and kubeconfig paths (absolute, with symlinks resolved, so one file has one fingerprint), context, cluster, user, namespace, server, TLS server name, CA digest or system roots, transport and tunnel tuple. It excludes all authentication material, so credential rotation alone does not change it. It is not an approval token and does not prove which real-world deployment was meant.
 
 **Kubectl calls:**
 - `inspect` reads the kubeconfig with `kubectl config view --raw -o json` and keeps the output in memory. Without `--check` it runs no credential plugin and contacts no endpoint.
 - Kubectl preferences: with no preference file or `KUBERC=off`, core kubectl calls run with `KUBERC=off`. If `KUBERC` or `$HOME/.kube/kuberc` names a file, it is read with `kubectl kuberc view`; only `credentialPluginPolicy` and `credentialPluginAllowlist` are kept in a temporary projection, so defaults and aliases cannot redirect the call. A client that cannot read the file, or an unknown preference format, refuses. The user's file is never modified.
-- `--check` runs `kubectl get --raw /version --request-timeout=10s` for the selected context. The whole subprocess has a 10-second deadline; on timeout or interrupt its process group is killed and the command fails. `--check` with `ssh` transport refuses until exact tunnel verification exists.
+- `--check` runs `kubectl get --raw /version --request-timeout=10s` for the selected context. The whole subprocess has a 10-second deadline; on timeout or on `SIGINT`, `SIGTERM`, `SIGHUP` or `SIGQUIT` its process group is killed and the command fails. The same signals during any core kubectl call kill that call and remove the temporary preference projection. `--check` with `ssh` transport refuses until exact tunnel verification exists.
 
 **Output and exit codes:**
-- `--output json` prints one object: `schema_version`, `config_source`, `selection_mode`, `kubeconfig`, `context`, `cluster`, `user`, `namespace`, `server`, `tls` (`server_name`, `ca_sha256`, `system_roots`), `transport`, `tunnel`, `fingerprint`, `live_check` (`not_requested` or `verified`). Text output shows the same fields.
+- `--output json` prints one object: `schema_version`, `config_source`, `selection_mode`, `kubeconfig`, `context`, `cluster`, `user`, `namespace`, `server`, `tls` (`server_name`, `ca_sha256`, `system_roots`), `transport`, `tunnel`, `fingerprint`, `live_check` (`not_requested` or `verified`). `config_source` is null when no env file was read. `tls.server_name` is null when the cluster sets no `tls-server-name`, and `tls.ca_sha256` is null when no CA is set (then `system_roots` is true). `tunnel` is null for `direct` transport; for `ssh` it is an object with the string fields `ssh_user`, `ssh_host`, `local_host`, `local_port`, `remote_host` and `remote_port`. Text output shows the same fields; a value that holds a non-printable character is printed as a quoted Go string literal.
 - `verify` prints a match line and exits 0, or prints a mismatch on stderr and exits 1. It never runs `--check`.
 - Errors go to stderr, exit 1, and never include captured kubeconfig data or credentials.
 
