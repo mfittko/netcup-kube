@@ -492,6 +492,7 @@ func TestKubercControl(t *testing.T) {
 			wantProjection: `{"apiVersion":"kubectl.config.k8s.io/v1beta1","kind":"Preference"}`},
 		{name: "unknown apiVersion", kuberc: "prefs", view: `{"kind":"Preference","apiVersion":"example.com/v9"}`, wantErr: true},
 		{name: "unknown kind", kuberc: "prefs", view: `{"kind":"Other","apiVersion":"kubectl.config.k8s.io/v1beta1"}`, wantErr: true},
+		{name: "unknown top-level key", kuberc: "prefs", view: view(`,"overrides":{"server":"SECRET"}`), wantErr: true},
 		{name: "not JSON", kuberc: "prefs", view: `SECRET`, wantErr: true},
 		{name: "client cannot view", kuberc: "prefs", fail: true, wantErr: true},
 	}
@@ -540,6 +541,45 @@ func TestKubercControl(t *testing.T) {
 				t.Fatalf("projection not removed: %v", left)
 			}
 		})
+	}
+}
+
+func TestHomeKubercStatErrorRefuses(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores directory permissions")
+	}
+	e := newEnv(t)
+	kubeconfig := twoContexts(newCA(t)).write(t, filepath.Join(e.dir, "kube.json"))
+	kubeDir := filepath.Join(e.dir, "home", ".kube")
+	write(t, filepath.Join(kubeDir, "kuberc"), "user file")
+	if err := os.Chmod(kubeDir, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(kubeDir, 0755) })
+	_, err := e.r.Resolve(Selection{Kubeconfig: kubeconfig}, false)
+	if err == nil || strings.Contains(err.Error(), e.dir) {
+		t.Fatalf("want redacted refusal, got %v", err)
+	}
+	if log, _ := os.ReadFile(e.log); len(log) != 0 {
+		t.Fatalf("kubectl ran despite refusal:\n%s", log)
+	}
+}
+
+func TestReadableRefusesFIFO(t *testing.T) {
+	e := newEnv(t)
+	fifo := filepath.Join(e.dir, "kube.fifo")
+	if err := syscall.Mkfifo(fifo, 0600); err != nil {
+		t.Skipf("mkfifo unsupported: %v", err)
+	}
+	done := make(chan error, 1)
+	go func() { _, err := e.r.Resolve(Selection{Kubeconfig: fifo}, false); done <- err }()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("FIFO kubeconfig must refuse")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("readable blocked on a FIFO")
 	}
 }
 

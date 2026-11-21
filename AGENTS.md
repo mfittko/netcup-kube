@@ -66,7 +66,8 @@ Kubectl access (SSH tunnel)
 
 Cluster target selection
 - Before a cluster operation, confirm the target: `netcup-kube target inspect --env-file <deployment.env> --output json` (add `--check` for a bounded `/version` read). Keep the `fingerprint` and confirm it later with `netcup-kube target verify --env-file <deployment.env> --fingerprint <value>`.
-- An explicit `--env-file` (or `--kubeconfig`/`--context`) is the only selection; ambient `KUBECONFIG`, `NETCUP_KUBE_CONTEXT`, `MGMT_*`, `TUNNEL_*` and similar target settings do not fill it in.
+- An explicit `--env-file` is the only selection; ambient `KUBECONFIG`, `NETCUP_KUBE_CONTEXT`, `MGMT_*`, `TUNNEL_*` and similar target settings do not fill it in.
+- Without `--env-file`, ambient `NETCUP_KUBE_CONTEXT` applies only when the kubeconfig also comes from ambient `KUBECONFIG`; it never selects a context in a `--kubeconfig` file. `--context` with ambient `KUBECONFIG` is allowed.
 - The `target` commands are read-only. They never fetch a kubeconfig, start a tunnel or change files. In this release only they accept `--kubeconfig`/`--context`; `install` keeps its current behavior. Contract: `docs/cli-contract.md` ("`netcup-kube target`").
 
 Recipe authoring ("add a recipe for installing X")

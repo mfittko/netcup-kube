@@ -25,7 +25,8 @@ The `netcup-kube` project provides five primary CLI entrypoints:
 1. **`netcup-kube`** — Main orchestrator for k3s cluster bootstrapping and configuration
 2. **`netcup-kube install`** — Recipe dispatcher for installing optional components
 3. **`netcup-kube remote`** — Remote bootstrap and command execution
-. **`netcup-kube target`** — Read-only inspection and verification of the selected cluster target
+4. **`netcup-kube ssh`** — SSH shell and tunnel manager for local kubectl access
+5. **`netcup-kube target`** — Read-only inspection and verification of the selected cluster target
 
 All scripts follow bash `set -euo pipefail` semantics: they exit on any error, undefined variable access, or pipeline failure.
 
@@ -214,7 +215,7 @@ netcup-kube target verify  [selection flags] --fingerprint sha256:<64 lowercase 
 **Resolution:**
 - Explicit mode applies when `--env-file`, `--kubeconfig`, `--context`, `KUBECONFIG` or `NETCUP_KUBE_CONTEXT` is present.
   - With `--env-file`: kubeconfig is `--kubeconfig`, else the file's `KUBECONFIG`. Context is `--context`, else the file's `NETCUP_KUBE_CONTEXT`, else the kubeconfig's `current-context`.
-  - Without `--env-file`: no default env file is loaded. Kubeconfig is `--kubeconfig`, else `KUBECONFIG`. Context is `--context`, else `NETCUP_KUBE_CONTEXT`, else `current-context`. A context without a kubeconfig refuses.
+  - Without `--env-file`: no default env file is loaded. Kubeconfig is `--kubeconfig`, else `KUBECONFIG`. Context is `--context`, else `NETCUP_KUBE_CONTEXT`, else `current-context`. Ambient `NETCUP_KUBE_CONTEXT` applies only when the kubeconfig also comes from ambient `KUBECONFIG`; it never selects a context in a `--kubeconfig` file. `--context` with ambient `KUBECONFIG` is allowed. A context without a kubeconfig refuses.
 - A `KUBECONFIG` path list refuses; select one file. The selected context must exist exactly once, with its cluster and user entries.
 - Ambient isolation: for an env file, `KUBECONFIG`, `NETCUP_KUBE_CONTEXT`, `KUBE_TRANSPORT`, `DEFAULT_USER`, `MGMT_*`, `TUNNEL_*`, `EDGE_*`, `CADDY_*`, `HELM_KUBE*` and `HELM_NAMESPACE` are removed from the process environment before `${VAR}` interpolation. A reference to one of them must be assigned earlier in the same file, otherwise the command refuses. For example, `TUNNEL_HOST=${MGMT_HOST}` never picks up an ambient `MGMT_HOST`.
 - Legacy mode (no selector): at most one of `./config/netcup-kube.env`, then the checkout's `config/netcup-kube.env` (no merge). Kubeconfig is its `KUBECONFIG`, else an existing `/etc/rancher/k3s/k3s.yaml`, else the checkout's `config/k3s.yaml`. An unreadable selected candidate refuses and never falls through to the next one. A missing kubeconfig prints a copy instruction. The `target` commands never fetch a kubeconfig over SSH; `install` keeps its existing fetch in this release.

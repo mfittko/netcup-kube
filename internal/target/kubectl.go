@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -29,8 +30,12 @@ func (r Resolver) kubectlEnv(env map[string]string) (toolEnv []string, cleanup f
 	pref := env["KUBERC"]
 	if pref == "" && env["HOME"] != "" {
 		home := filepath.Join(env["HOME"], ".kube", "kuberc")
-		if _, statErr := os.Stat(home); statErr == nil {
+		// Only a missing file means no preferences; any other stat error could hide a policy.
+		switch _, statErr := os.Stat(home); {
+		case statErr == nil:
 			pref = home
+		case !errors.Is(statErr, fs.ErrNotExist):
+			return nil, nil, errors.New("$HOME/.kube/kuberc could not be checked; refusing because its credential-plugin policy cannot be preserved")
 		}
 	}
 	if pref == "" || pref == "off" {
@@ -50,7 +55,18 @@ func (r Resolver) kubectlEnv(env map[string]string) (toolEnv []string, cleanup f
 		Policy     json.RawMessage `json:"credentialPluginPolicy,omitempty"`
 		Allowlist  json.RawMessage `json:"credentialPluginAllowlist,omitempty"`
 	}
-	if err := json.Unmarshal(raw, &p); err != nil || p.APIVersion != preferenceAPIVersion || p.Kind != "Preference" {
+	var keys map[string]json.RawMessage
+	known := true
+	if json.Unmarshal(raw, &keys) == nil {
+		for k := range keys {
+			switch k {
+			case "apiVersion", "kind", "defaults", "aliases", "credentialPluginPolicy", "credentialPluginAllowlist":
+			default:
+				known = false
+			}
+		}
+	}
+	if err := json.Unmarshal(raw, &p); err != nil || !known || p.APIVersion != preferenceAPIVersion || p.Kind != "Preference" {
 		return nil, nil, fmt.Errorf("kuberc preference file %s has an unsupported format; refusing", pref)
 	}
 	projection, err := json.Marshal(p)

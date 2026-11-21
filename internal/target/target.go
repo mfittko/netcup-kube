@@ -173,20 +173,20 @@ func path(base, raw, what string) (string, error) {
 	return filepath.Clean(raw), nil
 }
 
+// readable requires a regular file before opening it, so a FIFO or device never blocks Open.
 func readable(p string) error {
-	f, err := os.Open(p)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = f.Close() }()
-	info, err := f.Stat()
+	info, err := os.Stat(p)
 	if err != nil {
 		return err
 	}
 	if !info.Mode().IsRegular() {
 		return fmt.Errorf("%s is not a regular file", p)
 	}
-	return nil
+	f, err := os.Open(p)
+	if err != nil {
+		return err
+	}
+	return f.Close()
 }
 
 func exists(p string) bool {
@@ -256,7 +256,10 @@ func (r Resolver) Resolve(sel Selection, check bool) (*Target, error) {
 		if kubeconfig == "" {
 			return nil, errors.New("a context was selected without a kubeconfig; pass --kubeconfig or set KUBECONFIG")
 		}
-		contextName = firstNonEmpty(contextName, env["NETCUP_KUBE_CONTEXT"])
+		// Ambient NETCUP_KUBE_CONTEXT selects only within the ambient KUBECONFIG.
+		if sel.Kubeconfig == "" {
+			contextName = firstNonEmpty(contextName, env["NETCUP_KUBE_CONTEXT"])
+		}
 	default:
 		t.SelectionMode = "legacy"
 		if file, kubeconfig, err = r.legacy(env, t); err != nil {

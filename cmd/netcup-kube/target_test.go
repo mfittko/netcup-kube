@@ -324,6 +324,21 @@ func withoutEnv(env []string, keys ...string) []string {
 	return out
 }
 
+func TestTargetKubeconfigFlagIgnoresAmbientContext(t *testing.T) {
+	f := newABFixture(t)
+	writeFile(t, f.bKubeconfig, kubeconfigJSON(t, "ctx-b", testCAPEM(t), map[string][2]string{
+		"ctx-a": {"https://a.example:6443", "team-a"},
+		"ctx-b": {"https://b.example:6443", "team-b"},
+	}), 0600)
+	res := runCLI(t, f.cwd, f.env, "target", "inspect", "-o", "json", "--kubeconfig", f.bKubeconfig)
+	if res.code != 0 {
+		t.Fatalf("exit %d, stderr: %s", res.code, res.stderr)
+	}
+	if obj := decodeOne(t, res.stdout); obj["context"] != "ctx-b" || obj["server"] != "https://b.example:6443" {
+		t.Fatalf("ambient NETCUP_KUBE_CONTEXT selected a context in --kubeconfig: %v", obj)
+	}
+}
+
 func TestTargetEnvFileRefusesAmbientManagementHost(t *testing.T) {
 	f := newABFixture(t)
 	env := f.writeBEnv(t, "KUBECONFIG=b kubeconfig.json\nNETCUP_KUBE_CONTEXT=ctx-b\nKUBE_TRANSPORT=ssh\nTUNNEL_HOST=${MGMT_HOST}\n")
