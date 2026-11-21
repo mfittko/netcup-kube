@@ -335,6 +335,21 @@ func TestResolveLegacy(t *testing.T) {
 			t.Fatal("want refusal")
 		}
 	})
+	t.Run("unreadable node kubeconfig refuses without falling through", func(t *testing.T) {
+		if os.Geteuid() == 0 {
+			t.Skip("root reads unreadable files")
+		}
+		e, core := setup(t)
+		k.write(t, e.r.NodeKubeconfig)
+		k.write(t, filepath.Join(core, "config", "k3s.yaml"))
+		if err := os.Chmod(e.r.NodeKubeconfig, 0); err != nil {
+			t.Fatal(err)
+		}
+		_, err := e.r.Resolve(Selection{}, false)
+		if err == nil || !strings.Contains(err.Error(), "not readable") {
+			t.Fatalf("got %v", err)
+		}
+	})
 	t.Run("path list in legacy env file", func(t *testing.T) {
 		e, _ := setup(t)
 		write(t, filepath.Join(e.r.Cwd, "config", "netcup-kube.env"), "KUBECONFIG=a"+string(os.PathListSeparator)+"b\n")

@@ -189,6 +189,11 @@ func readable(p string) error {
 	return nil
 }
 
+func exists(p string) bool {
+	_, err := os.Lstat(p)
+	return !errors.Is(err, fs.ErrNotExist)
+}
+
 // loadEnvFile parses a selected env file. Isolated keys never resolve from the environment.
 func loadEnvFile(p string, env map[string]string) (map[string]string, error) {
 	if err := readable(p); err != nil {
@@ -320,7 +325,8 @@ func (r Resolver) legacy(env map[string]string, t *Target) (map[string]string, s
 	}
 	switch {
 	case kubeconfig != "":
-	case r.NodeKubeconfig != "" && readable(r.NodeKubeconfig) == nil:
+	case r.NodeKubeconfig != "" && exists(r.NodeKubeconfig):
+		// An existing node kubeconfig is the selected candidate; Resolve refuses it when unreadable.
 		kubeconfig = r.NodeKubeconfig
 	case r.CoreDir != "":
 		kubeconfig = filepath.Join(r.CoreDir, "config", "k3s.yaml")
