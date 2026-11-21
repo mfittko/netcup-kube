@@ -259,7 +259,8 @@ func (r Resolver) Resolve(sel Selection, check bool) (*Target, error) {
 		}
 		t.ConfigSource = &source
 		if kubeconfig == "" {
-			if kubeconfig, err = path(filepath.Dir(given), file["KUBECONFIG"], "KUBECONFIG in "+source); err != nil {
+			// Resolve against the symlink-free source so one config_source selects one kubeconfig.
+			if kubeconfig, err = path(filepath.Dir(source), file["KUBECONFIG"], "KUBECONFIG in "+source); err != nil {
 				return nil, err
 			}
 		}
@@ -339,7 +340,8 @@ func (r Resolver) legacy(env map[string]string, t *Target) (map[string]string, s
 	var file map[string]string
 	kubeconfig := ""
 	for _, c := range candidates {
-		if _, err := os.Stat(c); errors.Is(err, fs.ErrNotExist) {
+		// Lstat: a present but dangling symlink is the selected candidate and refuses; it never falls through.
+		if !exists(c) {
 			continue
 		}
 		var source string
@@ -348,7 +350,7 @@ func (r Resolver) legacy(env map[string]string, t *Target) (map[string]string, s
 			return nil, "", err
 		}
 		t.ConfigSource = &source
-		if kubeconfig, err = path(filepath.Dir(c), file["KUBECONFIG"], "KUBECONFIG in "+c); err != nil {
+		if kubeconfig, err = path(filepath.Dir(source), file["KUBECONFIG"], "KUBECONFIG in "+source); err != nil {
 			return nil, "", err
 		}
 		break

@@ -339,7 +339,14 @@ func TestSymlinkedPathsShareOneFingerprint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, sel := range []Selection{{EnvFile: "link/b.env"}, {EnvFile: "real/b.env", Kubeconfig: "link/kube.json"}} {
+	// A linked env file resolves its relative KUBECONFIG next to the target file, not the link;
+	// a decoy kubeconfig beside the link would otherwise be selected.
+	decoy := twoContexts(newCA(t))
+	decoy.write(t, filepath.Join(e.dir, "deploy", "kube.json"))
+	if err := os.Symlink(filepath.Join(realDir, "b.env"), filepath.Join(e.dir, "deploy", "b.env")); err != nil {
+		t.Fatal(err)
+	}
+	for _, sel := range []Selection{{EnvFile: "link/b.env"}, {EnvFile: "real/b.env", Kubeconfig: "link/kube.json"}, {EnvFile: "deploy/b.env"}} {
 		got, err := e.r.Resolve(sel, false)
 		if err != nil || got.Fingerprint != direct.Fingerprint || *got.ConfigSource != filepath.Join(realDir, "b.env") ||
 			got.Kubeconfig != filepath.Join(realDir, "kube.json") {
@@ -433,6 +440,38 @@ func TestResolveLegacy(t *testing.T) {
 		_, err := e.r.Resolve(Selection{}, false)
 		if err == nil || !strings.Contains(err.Error(), "not readable") {
 			t.Fatalf("got %v", err)
+		}
+	})
+	t.Run("linked env file resolves KUBECONFIG next to its target", func(t *testing.T) {
+		e, _ := setup(t)
+		shared := filepath.Join(e.dir, "shared")
+		write(t, filepath.Join(shared, "netcup-kube.env"), "KUBECONFIG=kube.json\n")
+		kubeconfig := k.write(t, filepath.Join(shared, "kube.json"))
+		k.write(t, filepath.Join(e.r.Cwd, "config", "kube.json")) // decoy beside the link
+		if err := os.Symlink(filepath.Join(shared, "netcup-kube.env"), filepath.Join(e.r.Cwd, "config", "netcup-kube.env")); err != nil {
+			t.Fatal(err)
+		}
+		got, err := e.r.Resolve(Selection{}, false)
+		if err != nil || got.Kubeconfig != kubeconfig || *got.ConfigSource != filepath.Join(shared, "netcup-kube.env") {
+			t.Fatalf("got %+v, %v", got, err)
+		}
+	})
+	t.Run("dangling env file symlink refuses without falling through", func(t *testing.T) {
+		e, core := setup(t)
+		write(t, filepath.Join(core, "config", "netcup-kube.env"), "NETCUP_KUBE_CONTEXT=b\n")
+		k.write(t, filepath.Join(core, "config", "k3s.yaml"))
+		link := filepath.Join(e.r.Cwd, "config", "netcup-kube.env")
+		if err := os.MkdirAll(filepath.Dir(link), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(filepath.Join(e.dir, "unmounted", "b.env"), link); err != nil {
+			t.Fatal(err)
+		}
+		if got, err := e.r.Resolve(Selection{}, false); err == nil {
+			t.Fatalf("want refusal, got %+v", got)
+		}
+		if _, statErr := os.Stat(e.log); !errors.Is(statErr, os.ErrNotExist) {
+			t.Fatal("kubectl ran: the core env file was used")
 		}
 	})
 	t.Run("path list in legacy env file", func(t *testing.T) {
