@@ -814,3 +814,42 @@ func TestValidate(t *testing.T) {
 		})
 	}
 }
+
+func TestParseEnvFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "b.env")
+	content := "# comment\nMGMT_HOST=b.example\nTUNNEL_HOST=${MGMT_HOST}\nNOTE=\"${PLAIN}-${MGMT_HOST}\"\n1BAD=x\nnoequals\n"
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MGMT_HOST", "a.example")
+	t.Setenv("PLAIN", "ambient")
+	lookup := func(name string) (string, bool) {
+		if name == "PLAIN" {
+			return "view", true
+		}
+		return "", false
+	}
+	got, err := ParseEnvFile(path, lookup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"MGMT_HOST": "b.example", "TUNNEL_HOST": "b.example", "NOTE": "view-b.example"}
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("%s = %q, want %q", k, got[k], v)
+		}
+	}
+
+	if err := os.WriteFile(path, []byte("TUNNEL_HOST=${MGMT_HOST}\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ParseEnvFile(path, lookup); err == nil || !strings.Contains(err.Error(), "${MGMT_HOST}") || strings.Contains(err.Error(), "a.example") {
+		t.Fatalf("unresolved reference must refuse without the ambient value, got %v", err)
+	}
+	if _, err := ParseEnvFile(filepath.Join(t.TempDir(), "missing.env"), lookup); err == nil {
+		t.Fatal("missing file must fail")
+	}
+}
