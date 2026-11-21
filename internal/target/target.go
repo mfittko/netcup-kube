@@ -208,7 +208,8 @@ func exists(p string) bool {
 }
 
 // loadEnvFile parses a selected env file and returns its canonical path. Isolated keys never
-// resolve from the environment.
+// resolve from the environment, so an unset reference to one refuses. A reference to any other
+// unset variable expands to the empty string.
 func loadEnvFile(p string, env map[string]string) (map[string]string, string, error) {
 	if err := readable(p); err != nil {
 		return nil, "", fmt.Errorf("env file is not readable: %w", err)
@@ -221,8 +222,7 @@ func loadEnvFile(p string, env map[string]string) (map[string]string, string, er
 		if isolated(name) {
 			return "", false
 		}
-		v, ok := env[name]
-		return v, ok
+		return env[name], true
 	})
 	return file, source, err
 }

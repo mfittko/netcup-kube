@@ -253,10 +253,16 @@ func TestResolveExplicitPrecedence(t *testing.T) {
 			}
 		})
 	}
-	t.Run("unresolved non-isolated reference names the variable", func(t *testing.T) {
+	t.Run("unresolved isolated reference names the variable", func(t *testing.T) {
+		got, err := e.r.Resolve(Selection{EnvFile: "deploy/indirect.env"}, false) // ambient MGMT_HOST=a-mgmt
+		if err == nil || !strings.Contains(err.Error(), "${MGMT_HOST}") {
+			t.Fatalf("got %+v, %v", got, err)
+		}
+	})
+	t.Run("unresolved non-isolated reference expands to empty", func(t *testing.T) {
 		write(t, filepath.Join(e.dir, "deploy", "unset.env"), "KUBECONFIG=kube.json\nNETCUP_KUBE_CONTEXT=${STAGE_CTX}\n")
 		got, err := e.r.Resolve(Selection{EnvFile: "deploy/unset.env"}, false)
-		if err == nil || !strings.Contains(err.Error(), "${STAGE_CTX}") {
+		if err != nil || got.Context != "a" { // empty context selects current-context
 			t.Fatalf("got %+v, %v", got, err)
 		}
 	})
