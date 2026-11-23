@@ -31,4 +31,4 @@ Rejected: a standing authorization that also covers escalated merges, because th
 
 Drain PRs merge without a manual click once every gate condition holds. Escalated PRs still stop for an operator answer in the ask dialog.
 
-Rollback: a superseding record that sets `autonomy.humanMergeOnly: true` again in `.devloops`. The merge wrapper then refuses every agent merge.
+Rollback: a superseding record plus a `.devloops` change back to `autonomy.humanMergeOnly: true`. The merge wrapper then refuses every agent merge.
