@@ -64,6 +64,13 @@ Commands
   - Optional dashboard host in HTTP-01 mode: `sudo ./bin/netcup-kube dns --type edge-http --domains "abc.com,abc.org" --dash-host "kube.abc.com"`
   - Safety: this overwrites `/etc/caddy/Caddyfile` and restarts Caddy (requires TTY confirmation or `CONFIRM=true`)
 
+Cluster target inspection
+- `netcup-kube target inspect [--env-file <file>] [--kubeconfig <file>] [--context <name>] [-o|--output text|json] [--check]` prints the cluster target that netcup-kube resolves and its `sha256:` fingerprint.
+- `netcup-kube target verify [selection flags] --fingerprint sha256:<hex>` exits 0 only when the resolved target matches.
+- An explicit `--env-file` is the only deployment configuration. Ambient `KUBECONFIG`, `NETCUP_KUBE_CONTEXT`, `KUBE_TRANSPORT`, `DEFAULT_USER`, `MGMT_*`, `TUNNEL_*`, `EDGE_*`, `CADDY_*`, `HELM_KUBE*` and `HELM_NAMESPACE` do not fill it in.
+- Without a selector the legacy defaults apply (`./config/netcup-kube.env`, else the checkout's file; then its `KUBECONFIG`, `/etc/rancher/k3s/k3s.yaml` or `config/k3s.yaml`). The `target` commands never copy a kubeconfig from the server; copy it yourself, for example `scp ops@<host>:/etc/rancher/k3s/k3s.yaml config/k3s.yaml`.
+- In this release only the `target` commands accept `--kubeconfig` and `--context`. `install` keeps its current behavior. See `docs/cli-contract.md`.
+
 Contributing: install recipes
 - Install recipes live under `scripts/recipes/<name>/` and are dispatched via `netcup-kube install <name>`.
 - When adding a new recipe, follow the checklist in `AGENTS.md` and update both:
