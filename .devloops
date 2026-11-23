@@ -15,3 +15,6 @@ queue:
     in_progress: In progress
     ready_for_review: In review
     done: Done
+
+refinement:
+  maxCopilotRounds: 0  # Copilot monthly review quota is exhausted; 0 disables Copilot review.
