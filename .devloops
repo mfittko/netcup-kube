@@ -18,3 +18,6 @@ queue:
 
 refinement:
   maxCopilotRounds: 0  # Copilot monthly review quota is exhausted; 0 disables Copilot review.
+
+autonomy:
+  humanMergeOnly: false  # agent may merge after a per-merge operator approval; stopAt keeps merge
