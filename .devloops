@@ -18,3 +18,6 @@ queue:
 
 refinement:
   maxCopilotRounds: 0  # Copilot monthly review quota is exhausted; 0 disables Copilot review.
+
+autonomy:
+  humanMergeOnly: false  # agent merges drain PRs under docs/decisions/0001; escalated merges need a per-merge approval; stopAt keeps merge

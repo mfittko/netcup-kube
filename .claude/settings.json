@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(~/.config/dev-loops/merge-approvals/**)",
+      "Edit(~/.config/dev-loops/merge-approvals/**)",
+      "Write(~/.config/dev-loops/merge-approvals/**)",
+      "NotebookEdit(~/.config/dev-loops/merge-approvals/**)"
+    ]
+  },
+  "sandbox": {
+    "filesystem": {
+      "denyRead": ["~/.config/dev-loops/merge-approvals"]
+    }
+  }
+}
