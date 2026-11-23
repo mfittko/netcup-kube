@@ -23,7 +23,7 @@ A gate-incomplete PR stays unauthorized. A drain merge is gate-clean, within the
 
 The authorization does not cover escalated merges: a size outcome of `escalate` or `block`, a T1-touching change, or a stable release. Each escalated merge needs a fresh per-merge approval. Under Claude Code the orchestrator asks the exact `MERGE-ASK-APPROVAL` question, and on a `Yes` answer the dev-loops hook records the approval and posts the approval line. The agent never posts that line itself.
 
-`.devloops` sets `autonomy.humanMergeOnly: false`, which this authorization requires, and keeps the default `stopAt: [merge]`. The project `.claude/settings.json` denies agent Read, Edit, Write and NotebookEdit access to the dev-loops approval-record directory, plus a sandbox `denyRead` entry, as a second layer behind the hook.
+`.devloops` sets `autonomy.humanMergeOnly: false`, which this authorization requires, and keeps the default `stopAt: [merge]`. The project `.claude/settings.json` denies agent Read, Edit, Write and NotebookEdit access to the dev-loops approval-record directory. These four permission denies are the second layer behind the hook. The file also carries a sandbox `denyRead` entry for that directory, which applies only when the sandbox is enabled.
 
 Rejected: a standing authorization that also covers escalated merges, because the contract forbids it. Rejected: the agent posting approval lines, because the comment writers refuse that line and only the hook-posted line is agent-unforgeable.
 
